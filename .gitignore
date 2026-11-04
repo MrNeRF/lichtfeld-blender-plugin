@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+dist/
+artifacts/
+/.venv/
+/.pytest_cache/
+/jobs/
+/logs/
+/reports/
+/internal-notes/
