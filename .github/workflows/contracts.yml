@@ -1,0 +1,53 @@
+name: Extension contracts and package
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  contracts:
+    name: Python ${{ matrix.python }} on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    env:
+      CUDA_VISIBLE_DEVICES: '-1'
+      NVIDIA_VISIBLE_DEVICES: void
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python: ['3.11', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install numerical dependency
+        run: python -m pip install "numpy>=2,<3"
+      - name: Run CPU contracts
+        run: python -m unittest discover -s tests/blender -p "test_*.py"
+      - name: Run packaging contracts
+        run: python -m unittest discover -s tests/packaging -p "test_*.py"
+
+  package:
+    name: Build installable extension
+    needs: contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Build source extension ZIP
+        run: python tools/package_blender_training.py --output dist
+      - name: Upload installable package
+        uses: actions/upload-artifact@v4
+        with:
+          name: lichtfeld-training-extension
+          path: dist/lichtfeld_training-*.zip
+          if-no-files-found: error
