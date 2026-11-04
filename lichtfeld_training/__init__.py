@@ -423,7 +423,7 @@ for _name in training_options.FIELDS:
 class LF_OT_verify(bpy.types.Operator):
     bl_idname = "lichtfeld.verify_installation"
     bl_label = "Verify installation"
-    bl_description = "Check the selected LichtFeld executable without opening its window"
+    bl_description = "Check that the executable starts; training API compatibility is checked when a job starts"
 
     def execute(self, context):
         prefs = preferences(context)

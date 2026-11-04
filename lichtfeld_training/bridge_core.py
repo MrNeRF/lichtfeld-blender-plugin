@@ -63,6 +63,27 @@ def read_dataset_json(path, default=None):
     return read_json(path, default, max_chars=MAX_DATASET_CHARS)
 
 
+def require_backend_api(module):
+    """Check capabilities inside the configured backend's own interpreter."""
+    missing = [name for name in ('get_scene', 'ScopedHandler') if not callable(getattr(module, name, None))]
+    if not callable(getattr(getattr(getattr(module, 'scene', None), 'SplatData', None), 'shN_rows', None)):
+        missing.append('SplatData.shN_rows')
+    hooks = getattr(module, 'ScopedHandler', None)
+    for name in ('on_training_start', 'on_post_step', 'on_training_end'):
+        if not callable(getattr(hooks, name, None)):
+            missing.append('ScopedHandler.' + name)
+    if missing:
+        raise RuntimeError('Update LichtFeld: this executable lacks required training-adapter APIs: '
+                           + ', '.join(missing))
+
+
+def verified_training_outcome(runtime):
+    outcome = runtime.get('terminal_state')
+    if outcome not in {'completed', 'stopped'}:
+        raise RuntimeError('The trainer did not report a verified terminal training outcome. Update LichtFeld.')
+    return outcome
+
+
 def process_alive(pid):
     if not isinstance(pid, int) or pid <= 0:
         return False

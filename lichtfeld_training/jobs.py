@@ -22,7 +22,8 @@ def verify_backend(path):
     text = (result.stdout + result.stderr).decode("utf-8", errors="replace").strip()
     if result.returncode or "LichtFeld" not in text:
         raise ValueError("The selected LichtFeld executable cannot start")
-    return next((line for line in text.splitlines() if line.startswith("LichtFeld")), text.splitlines()[-1])
+    version = next((line for line in text.splitlines() if line.startswith("LichtFeld")), text.splitlines()[-1])
+    return version + '. Executable starts; training APIs are checked when a job starts.'
 
 
 def prepare_optimizer(job):
