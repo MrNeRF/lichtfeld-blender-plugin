@@ -116,7 +116,7 @@ class FailurePaths(unittest.TestCase):
                 self.assertEqual(core.training_command(job, "hook.py")[0], "TRUSTED_PREFERENCES")
                 self.assertEqual(job["connection_directory"], "")
                 self.assertEqual(parent, "previous")
-                self.assertEqual(job["resume"], str(old / "output/project.licht"))
+                self.assertEqual(job["resume"], str((old / "output/project.licht").resolve()))
                 best = core.read_json(Path(job["root"]) / "best.json")
                 self.assertEqual(best["sha256"], core.read_json(old / "best.json")["sha256"])
                 core.verify_artifact(job["root"], best)

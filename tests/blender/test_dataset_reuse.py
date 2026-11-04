@@ -90,7 +90,7 @@ class DatasetReuse(unittest.TestCase):
             self.assertFalse((Path(job["root"])/"best.json").exists())
             self.assertTrue((old/"best.json").exists())
             args=training_command(job,"hook.py")
-            self.assertEqual(args[args.index("-d")+1],str(old/"dataset"))
+            self.assertEqual(args[args.index("-d")+1],str((old/"dataset").resolve()))
             self.assertNotIn("--resume",args)
             # Repeated experiments resolve the same immutable captured dataset.
             atomic_json(Path(job["root"])/"job.json",job)

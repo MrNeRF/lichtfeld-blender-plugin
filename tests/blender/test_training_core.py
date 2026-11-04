@@ -43,7 +43,7 @@ class TrainingCoreTest(unittest.TestCase):
             path = root / "model.ply"
             path.write_bytes(b"complete")
             record = {"path": "model.ply", "bytes": 8, "sha256": core.digest(path)}
-            self.assertEqual(core.verify_artifact(root, record), path)
+            self.assertEqual(core.verify_artifact(root, record), path.resolve())
             path.write_bytes(b"corrupt!")
             with self.assertRaises(ValueError):
                 core.verify_artifact(root, record)
