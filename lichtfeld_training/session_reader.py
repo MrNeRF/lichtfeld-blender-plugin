@@ -6,9 +6,9 @@ from pathlib import Path
 import queue
 import threading
 import time
-from .session_transport import SessionClient, read_json, read_snapshot, process_alive, validate_session, session_liveness
+from lichtfeld_sessions.transport import SessionClient, read_json, read_snapshot, process_alive, validate_session, session_liveness
 from .job_control import Controller
-from .session_geometry import load as load_geometry
+from lichtfeld_sessions.geometry import load as load_geometry
 from .bridge_core import read_job_json
 
 
@@ -273,7 +273,7 @@ class Observer:
                                 self.command_pending = None
                                 self.command_backlog.clear()
                         if self.control_available and self.command_pending is None and self.command_backlog and job.get("id"):
-                            from .session_transport import atomic_json
+                            from lichtfeld_sessions.transport import atomic_json
                             command = controller.command(job["id"], self.command_backlog[0])
                             atomic_json(self.root / "command.json", command)
                             self.command_backlog.pop(0)

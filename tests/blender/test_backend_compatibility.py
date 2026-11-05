@@ -17,7 +17,7 @@ package = types.ModuleType('backend_compat_test_package')
 package.__path__ = [str(SOURCE)]
 sys.modules[package.__name__] = package
 core = importlib.import_module(package.__name__ + '.bridge_core')
-geometry = importlib.import_module(package.__name__ + '.session_geometry')
+geometry = importlib.import_module('lichtfeld_sessions.geometry')
 
 
 class Tensor:
@@ -31,8 +31,13 @@ class NativeCompatibility(unittest.TestCase):
         hooks = type('Hooks', (), {name: lambda self, callback: None for name in
                                  ('on_training_start', 'on_post_step', 'on_training_end')})
         module = types.SimpleNamespace(get_scene=lambda: None, ScopedHandler=hooks,
-            scene=types.SimpleNamespace(SplatData=types.SimpleNamespace(shN_rows=lambda *args: None)))
+            scene=types.SimpleNamespace(SplatData=types.SimpleNamespace(shN_rows=lambda *args: None),
+                SceneNode=types.SimpleNamespace(camera_center_x=0, camera_center_y=0)))
         core.require_backend_api(module)
+        del module.scene.SceneNode.camera_center_x
+        with self.assertRaisesRegex(RuntimeError, 'SceneNode.camera_center_x'):
+            core.require_backend_api(module)
+        module.scene.SceneNode.camera_center_x = 0
         module.scene.SplatData = object()
         with self.assertRaisesRegex(RuntimeError, 'SplatData.shN_rows'):
             core.require_backend_api(module)
@@ -46,13 +51,11 @@ class NativeCompatibility(unittest.TestCase):
         translation = np.array([3, 4, 5])
         camera = types.SimpleNamespace(has_camera=True, name='Camera', world_transform=camera_world,
             camera_R=Tensor(rotation), camera_T=Tensor(translation), camera_focal_x=50.,
-            camera_focal_y=60., image_path='C:\\dataset\\images\\capture.png', camera_width=64, camera_height=48)
-        calibration = {'schema': 1, 'cameras': [{'name': 'capture.png', 'camera_to_data': geometry.IDENTITY,
-            'width': 128, 'height': 96, 'fx': 100., 'fy': 120., 'cx': 62., 'cy': 46.}]}
+            camera_focal_y=60., camera_center_x=31., camera_center_y=23., image_path='C:\\dataset\\images\\capture.png', camera_width=64, camera_height=48)
         scene = types.SimpleNamespace(training_model_node_name='model',
             get_node=lambda name: types.SimpleNamespace(world_transform=model),
             get_active_cameras=lambda: [types.SimpleNamespace(has_camera=False), camera])
-        result = geometry.from_native_scene(scene, calibration)
+        result = geometry.from_native_scene(scene)
         np.testing.assert_array_equal(result['model_to_data'], model)
         expected = np.eye(4); expected[:3, :3] = rotation.T; expected[:3, 3] = -rotation.T @ translation
         np.testing.assert_array_equal(result['cameras'][0]['camera_to_data'], camera_world @ expected)
@@ -62,13 +65,7 @@ class NativeCompatibility(unittest.TestCase):
         self.assertEqual(result['cameras'][0]['cy'], 23.)
         camera.camera_focal_x = float('nan')
         with self.assertRaisesRegex(ValueError, 'intrinsics'):
-            geometry.from_native_scene(scene, calibration)
-        camera.image_path = '/dataset/images/missing.png'
-        with self.assertRaisesRegex(ValueError, 'No captured calibration'):
-            geometry.from_native_scene(scene, calibration)
-        calibration['cameras'].append(dict(calibration['cameras'][0]))
-        with self.assertRaisesRegex(ValueError, 'Ambiguous captured camera'):
-            geometry.from_native_scene(scene, calibration)
+            geometry.from_native_scene(scene)
 
     def test_supervisor_uses_native_outcome_instead_of_last_command(self):
         for outcome, action in [('stopped', 'pause'), ('completed', 'stop')]:
@@ -106,7 +103,7 @@ class NativeCompatibility(unittest.TestCase):
 
     def test_geometry_retry_recovers_and_clears_error(self):
         bridge, namespace = self.bridge()
-        value = {'schema': 1, 'source_frame': 'lichtfeld-visualizer', 'model_to_data': geometry.IDENTITY,
+        value = {'schema': 1, 'source_frame': 'blender-world', 'model_to_data': geometry.IDENTITY,
                  'data_to_source': geometry.FLIP, 'cameras': []}
         hook = {'iteration': 1, 'loss': .1, 'num_gaussians': 2, 'iterations': 4, 'is_paused': False}
         with patch.object(geometry, 'from_native_scene', side_effect=[ValueError('temporary'), value]), patch.object(geometry, 'publish') as publish:

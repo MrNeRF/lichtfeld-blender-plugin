@@ -19,8 +19,8 @@ package = types.ModuleType('session_update_test_package')
 package.__path__ = [str(SOURCE)]
 sys.modules[package.__name__] = package
 reader = importlib.import_module(package.__name__+'.session_reader')
-transport = importlib.import_module(package.__name__+'.session_transport')
-geometry = importlib.import_module(package.__name__+'.session_geometry')
+transport = importlib.import_module('lichtfeld_sessions.transport')
+geometry = importlib.import_module('lichtfeld_sessions.geometry')
 core = importlib.import_module(package.__name__+'.bridge_core')
 
 

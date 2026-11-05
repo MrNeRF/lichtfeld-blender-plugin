@@ -28,7 +28,7 @@ the Studio observer interface is a separate feature.
 | --- | --- |
 | Blender | 5.3.x, with native Gaussian point-cloud support |
 | Capture renderer | Cycles or EEVEE; a working device configuration for that engine |
-| Training backend | Headless LichtFeld with `SplatData.shN_rows`, scoped training hooks, and explicit hook progress/outcomes |
+| Training backend | Headless LichtFeld with the public `lichtfeld_sessions` package, camera principal-point properties, `SplatData.shN_rows`, and scoped training hooks with explicit progress/outcomes |
 | Training hardware | The CUDA/GPU requirements of the selected LichtFeld build |
 | Storage | A writable jobs directory with room for the captured project, images, maps, checkpoints, and splats |
 
@@ -38,18 +38,19 @@ the required APIs. **Verify installation** checks that the selected executable
 starts and the jobs directory is writable. The adapter checks native API support
 when a job starts and validates its hook payload before optimization proceeds.
 First use may need network access to prepare the backend's isolated NumPy runtime.
-No third-party Python packages, native libraries, or backend executables are
-bundled in the extension ZIP.
+The ZIP bundles LichtFeld's pure Python training-protocol wheel. NumPy, native
+libraries and backend executables are supplied separately.
 
 The backend must expose `ScopedHandler.on_training_start`, `on_post_step`, and
-`on_training_end`, plus `SplatData.shN_rows`. Hook payloads must report `iterations`
+`on_training_end`, plus `SplatData.shN_rows` and the read-only
+`SceneNode.camera_center_x` / `camera_center_y` properties. Hook payloads must report `iterations`
 and `is_paused`; TrainingEnd must report `completed`, `stopped`, or `failed` in
 `terminal_state`. Incompatible backends produce an explicit update error.
 SH0–SH3 preview budgets remain available with a compatible backend.
 
 The extension publishes its own training sessions. Other compatible extension
 instances can observe them without a Studio observer UI. Ordinary trainers started
-directly in Studio require a separately enabled session publisher to be discoverable;
+directly in Studio can enable publication with `LFS_TRAINING_PUBLISHER=automatic`;
 viewing extension-owned training inside Studio additionally requires its observer
 integration. Those features are not implied by the minimal training-adapter APIs.
 

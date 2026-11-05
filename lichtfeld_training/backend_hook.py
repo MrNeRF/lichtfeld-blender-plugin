@@ -17,27 +17,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from bridge_core import (atomic_json, read_json, read_job_json, read_dataset_json, training_config, metric_at,
                          better, write_splat, artifact_path, require_backend_api)
 import lichtfeld as lf
-from session_transport import SessionPublisher, spatial_indices, MAX_BYTES
 from job_control import validate_command
-import session_geometry
+
 
 def numerical_runtime(job):
-    try:
-        import numpy as np
-    except ImportError:
-        import importlib
-        atomic_json(Path(job["root"]) / "runtime.json", {
-            "job_id": job["id"], "state": "preparing numerical runtime", "updated": time.time()})
-        lf.packages.init()
-        lf.packages.install("numpy")
-        sys.path.insert(0, lf.packages.site_packages_dir())
-        importlib.invalidate_caches()
-        import numpy as np
-    return np
-
-
-class PreviewCapacityError(ValueError):
-    """Requested preview cannot fit the shared-memory transport budget."""
+    atomic_json(Path(job["root"]) / "runtime.json", {
+        "job_id": job["id"], "state": "preparing numerical runtime", "updated": time.time()})
+    return ensure_numpy(lf)
 
 
 class TrainingBridge:
@@ -222,55 +208,7 @@ class TrainingBridge:
             self.preview_history = retained + self.preview_history[acknowledged:]
 
     def capture(self, limit=None, degree=None, for_preview=False):
-        model = lf.get_scene().training_model()
-        if model is None:
-            raise RuntimeError("No model is available at the training safe boundary")
-        count = model.num_points
-        indices = None
-        deleted = model.has_deleted_mask()
-        if deleted:
-            mask = model.deleted.cpu()
-            mask.sync()
-            indices = np.flatnonzero(~mask.numpy().reshape(-1).astype(bool)).astype(np.int64)
-            if len(indices) == count:
-                indices = None
-        active_count = len(indices) if indices is not None else count
-        if limit and active_count > limit:
-            samples = np.linspace(0, active_count - 1, min(active_count, limit * 4), dtype=np.int64)
-            candidates = indices[samples] if indices is not None else samples
-            positions = model.means_raw.index_select(0, lf.Tensor.from_numpy(candidates).cuda()).cpu()
-            positions.sync()
-            indices = candidates[spatial_indices(positions.numpy(), limit)]
-        active_count = len(indices) if indices is not None else count
-        active = min(model.active_sh_degree, degree) if degree is not None else model.active_sh_degree
-        if for_preview and active_count * (11 + 3 * (active + 1) ** 2) * 4 > MAX_BYTES:
-            raise PreviewCapacityError("Full preview exceeds the shared-memory limit.")
-        cpu_selection = lf.Tensor.from_numpy(indices) if indices is not None else None
-        selection = cpu_selection.cuda() if cpu_selection is not None else None
-        def owned(tensor):
-            # Full previews need no identity index array or redundant GPU gather.
-            result = (tensor.index_select(0, selection) if selection is not None else tensor).cpu()
-            result.sync()
-            return result.numpy()
-
-        active = model.active_sh_degree
-        if degree is not None:
-            active = min(active, degree)
-        dc = owned(model.sh0_raw).reshape(active_count, 1, 3)
-        if active:
-            gather = getattr(model, "shN_rows", None)
-            if callable(gather):
-                rows = cpu_selection if cpu_selection is not None else lf.Tensor.from_numpy(np.arange(count, dtype=np.int64))
-                rest = gather(rows, active).numpy()
-            else:
-                raise RuntimeError("Update LichtFeld: this backend cannot extract bounded SH previews. "
-                                   "Select a compatible backend in Settings.")
-            sh = np.concatenate((dc, rest), axis=1)
-        else:
-            sh = dc
-        return {"means": owned(model.means_raw), "scale": owned(model.scaling_raw),
-                "rotation": owned(model.rotation_raw), "opacity": owned(model.opacity_raw),
-                "sh": sh}
+        return capture(lf, limit=limit, degree=degree, max_bytes=MAX_BYTES if for_preview else None)
 
     def commands(self):
         while True:
@@ -326,11 +264,6 @@ class TrainingBridge:
             if not self.geometry_checked and time.monotonic() >= self.geometry_retry_at:
                 try:
                     current_geometry = session_geometry.from_native_scene(lf.get_scene(), self.view_geometry)
-                    if self.view_geometry:
-                        current_geometry["source_frame"] = self.view_geometry.get("source_frame", "blender-world")
-                        current_geometry["data_to_source"] = self.view_geometry["data_to_source"]
-                        if not current_geometry["cameras"]:
-                            current_geometry["cameras"] = self.view_geometry["cameras"]
                     session_geometry.publish(self.session, current_geometry)
                     self.session.update(geometry_error="")
                     self.geometry_checked = True
@@ -428,6 +361,10 @@ class TrainingBridge:
 
 _job = read_job_json(os.environ["LFS_BLENDER_JOB"])
 try:
+    from lichtfeld_sessions.transport import SessionPublisher, spatial_indices, MAX_BYTES
+    from lichtfeld_sessions.capture import capture, PreviewCapacityError
+    from lichtfeld_sessions.publisher import ensure_numpy
+    from lichtfeld_sessions import geometry as session_geometry
     require_backend_api(lf)
     np = numerical_runtime(_job)
     _bridge = TrainingBridge(_job)

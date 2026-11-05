@@ -61,6 +61,12 @@ class PackageContracts(unittest.TestCase):
             debug.write_text("SECRET = 'local'")
             with self.assertRaisesRegex(ValueError, 'inventory'): packager.package(destination.parent, repository=repository)
             debug.unlink()
+            manifest = repository/'lichtfeld_training/blender_manifest.toml'
+            original_manifest = manifest.read_text(encoding='utf-8')
+            manifest.write_text(original_manifest.replace('wheels/lichtfeld_training_protocol-', 'wheels/missing-'), encoding='utf-8')
+            with self.assertRaisesRegex(ValueError, 'Manifest wheel dependencies'):
+                packager.package(destination.parent, repository=repository)
+            manifest.write_text(original_manifest, encoding='utf-8')
             module = repository/'lichtfeld_training/workflow.py'
             original = module.read_bytes()
             module.write_text('def broken(:')

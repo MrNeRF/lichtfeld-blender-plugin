@@ -9,6 +9,8 @@ tags = ["Render", "Import-Export"]
 blender_version_min = "5.3.0"
 blender_version_max = "5.4.0"
 license = ["SPDX:GPL-3.0-or-later"]
+wheels = ["./wheels/lichtfeld_training_protocol-0.1.0-py3-none-any.whl"]
+
 [permissions]
 files = "Capture scenes and save local training jobs and splats"
 network = "Prepare the isolated numerical runtime on first use"

@@ -17,10 +17,11 @@ Gaussian training backend and native renderer. Its authors and contributors also
 provide the shared external-session protocol implementation and native training
 defaults used by this integration.
 
-The session transport, observation, and coordinate code in `session_transport.py`,
-`session_reader.py`, and `session_geometry.py` is developed alongside the
-GPL-3.0-or-later Studio integration. These copies are maintained in this extension
-so an installed package does not depend on Studio's internal Python module paths.
+The shared session transport, coordinate geometry and bounded capture helpers
+are owned by Studio's public `lichtfeld_sessions` package. Its generated
+GPL-3.0-or-later pure Python wheel is bundled in `lichtfeld_training/wheels`,
+including its license and package metadata. The extension owns its job-aware
+reader in `session_reader.py` and imports the public shared package.
 `mrnf_defaults.json` and `training_profiles.json` reflect LichtFeld's native
 optimization settings. Preserve this attribution when redistributing those files.
 

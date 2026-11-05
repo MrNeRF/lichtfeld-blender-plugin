@@ -12,7 +12,7 @@ from mathutils import Matrix
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 import lichtfeld_training as extension
 from lichtfeld_training.bridge_core import atomic_json, write_splat
-from lichtfeld_training.session_transport import SnapshotPool
+from lichtfeld_sessions.transport import SnapshotPool
 
 bpy.ops.preferences.addon_enable(module="lichtfeld_training")
 with tempfile.TemporaryDirectory() as directory:

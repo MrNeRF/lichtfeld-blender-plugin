@@ -66,8 +66,8 @@ class FailurePaths(unittest.TestCase):
                 observer.thread.join(4)
 
     def test_bad_camera_metadata_does_not_block_external_model_and_recovers(self):
-        transport = importlib.import_module(package.__name__ + '.session_transport')
-        geometry = importlib.import_module(package.__name__ + '.session_geometry')
+        transport = importlib.import_module('lichtfeld_sessions.transport')
+        geometry = importlib.import_module('lichtfeld_sessions.geometry')
         with tempfile.TemporaryDirectory() as root, patch.dict(os.environ, LFS_TRAINING_SESSIONS_DIR=root):
             publisher = transport.SessionPublisher({})
             publisher.update(geometry={'path':'view_geometry.json', 'bytes':1, 'sha256':'bad'})
@@ -427,7 +427,7 @@ class PreviewRegressions(unittest.TestCase):
         tree = ast.parse((SOURCE / "backend_hook.py").read_text(encoding="utf-8"))
         node = next(item for item in tree.body if isinstance(item, ast.ClassDef) and item.name == "TrainingBridge")
         write = Mock(return_value={"kind": "best"})
-        spatial = importlib.import_module(package.__name__ + ".session_transport").spatial_indices
+        spatial = importlib.import_module('lichtfeld_sessions.transport').spatial_indices
         namespace = {"write_splat": write, "spatial_indices": spatial, "MAX_BYTES": 2 * 1024**3,
                     "PreviewCapacityError": type("PreviewCapacityError", (ValueError,), {})}
         exec(compile(ast.Module(body=[node], type_ignores=[]), "backend_hook.py", "exec"), namespace)
@@ -452,7 +452,7 @@ class PreviewFailureIsolation(unittest.TestCase):
         from concurrent.futures import Future
         tree=ast.parse((SOURCE/"backend_hook.py").read_text(encoding="utf-8"))
         node=next(n for n in tree.body if isinstance(n,ast.ClassDef) and n.name=="TrainingBridge")
-        namespace={"time":time,"np":np,"MAX_BYTES":2*1024**3,"lf":Mock(),
+        namespace={"time":time,"np":np,"MAX_BYTES":2*1024**3,"lf":Mock(), "capture":__import__("lichtfeld_sessions.capture",fromlist=["capture"]).capture,
                    "write_splat":Mock(return_value={"kind":"best","path":"best.ply"}),
                    "spatial_indices":lambda positions,limit:np.arange(min(len(positions),limit)),
                    "PreviewCapacityError":type("PreviewCapacityError",(ValueError,),{})}
@@ -508,7 +508,7 @@ class PreviewFailureIsolation(unittest.TestCase):
         self.assertEqual(len(model.shN_rows.call_args.args[0].value),5)
         self.assertEqual(model.shN_rows.call_args.args[1],1)
         del model.shN_rows
-        with self.assertRaisesRegex(RuntimeError,'Update LichtFeld'):
+        with self.assertRaises(AttributeError):
             bridge.capture(limit=5,degree=1,for_preview=True)
         self.assertEqual(bridge.capture(limit=5,degree=0,for_preview=True)['sh'].shape,(5,1,3))
 

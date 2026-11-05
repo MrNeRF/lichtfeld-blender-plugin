@@ -121,7 +121,8 @@ class TrainingCoreTest(unittest.TestCase):
         fake = types.ModuleType("lichtfeld")
         fake.ScopedHandler = type('Hooks', (), {name: lambda self, cb: None for name in
                                              ('on_training_start', 'on_post_step', 'on_training_end')})
-        fake.scene = types.SimpleNamespace(SplatData=types.SimpleNamespace(shN_rows=lambda *args: None))
+        fake.scene = types.SimpleNamespace(SplatData=types.SimpleNamespace(shN_rows=lambda *args: None),
+            SceneNode=types.SimpleNamespace(camera_center_x=0, camera_center_y=0))
         fake.get_scene = lambda: types.SimpleNamespace(training_model=lambda: model)
         fake.Tensor = types.SimpleNamespace(from_numpy=Tensor)
         fake.session = lambda: types.SimpleNamespace(request_stop=lambda: None)

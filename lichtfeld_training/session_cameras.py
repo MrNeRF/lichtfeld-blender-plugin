@@ -3,7 +3,7 @@
 """Bounded installation of session-owned camera previews, separate from capture rigs."""
 import bpy
 from mathutils import Matrix
-from .session_geometry import matrix, FLIP
+from lichtfeld_sessions.geometry import matrix, FLIP
 
 
 def remove_steps(scene):

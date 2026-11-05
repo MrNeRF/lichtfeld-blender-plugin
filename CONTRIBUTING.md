@@ -20,8 +20,29 @@ and this extension's job-control protocol have distinct owners and release cycle
   source in [CREDITS.md](CREDITS.md), including its actual license/permissions.
 
 The current development version remains `0.1.0`; change it only for an intentional
-release. Do not add source assets, downloaded scenes, wheels or native binaries
-to the installable archive.
+release. Do not add source assets, downloaded scenes or native binaries to the
+installable archive. The reviewed pure Python protocol wheel is its shared
+LichtFeld dependency.
+
+Keep additions focused on concrete behavior. Reuse existing workflow owners and
+test suites; avoid duplicate protocol logic, redundant layers and test scaffolding
+that merely repeats implementation details.
+
+## Shared training protocol
+
+`lichtfeld_sessions` is owned by LichtFeld Studio in
+`src/python/lichtfeld_sessions`. Update it there and generate its wheel with
+`python -m build --wheel --outdir /path/outside/source/wheels`. Replace the wheel
+in `lichtfeld_training/wheels`, reviewing the source changes in Studio and the
+wheel contents. Do not edit the wheel or copy its modules into this repository.
+Blender installs it through the manifest's `wheels` entry; detached plain Python
+workers import the same pure Python wheel directly when it is not installed.
+
+For source-mode tests, install that local dependency first:
+
+```sh
+python -m pip install "numpy>=2,<3" lichtfeld_training/wheels/*.whl
+```
 
 ## Build the extension
 

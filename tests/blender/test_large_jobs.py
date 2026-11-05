@@ -18,7 +18,7 @@ SOURCE=Path(__file__).resolve().parents[2]/'lichtfeld_training'
 sys.path.insert(0,str(SOURCE))
 import bridge_core as core
 import jobs
-import session_transport as transport
+from lichtfeld_sessions import transport
 import supervisor
 
 package=types.ModuleType('large_job_test_package')
