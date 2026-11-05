@@ -119,7 +119,9 @@ class TrainingCoreTest(unittest.TestCase):
             rotation_raw=Tensor([[1., 0, 0, 0], [1., 0, 0, 0]]),
             opacity_raw=Tensor(np.zeros((2, 1))), sh0_raw=Tensor(np.zeros((2, 1, 3))))
         fake = types.ModuleType("lichtfeld")
-        fake.ScopedHandler = lambda: types.SimpleNamespace(on_post_step=lambda cb: None, on_training_end=lambda cb: None)
+        fake.ScopedHandler = type('Hooks', (), {name: lambda self, cb: None for name in
+                                             ('on_training_start', 'on_post_step', 'on_training_end')})
+        fake.scene = types.SimpleNamespace(SplatData=types.SimpleNamespace(shN_rows=lambda *args: None))
         fake.get_scene = lambda: types.SimpleNamespace(training_model=lambda: model)
         fake.Tensor = types.SimpleNamespace(from_numpy=Tensor)
         fake.session = lambda: types.SimpleNamespace(request_stop=lambda: None)
@@ -144,10 +146,10 @@ class TrainingCoreTest(unittest.TestCase):
                 bridge = module._bridge
                 metrics = root / "output/metrics.csv"
                 metrics.write_text("iteration,psnr,ssim\n4,30,0.9\n")
-                bridge.on_step({"iteration": 4, "loss": 1, "num_gaussians": 2})
+                bridge.on_step({"iteration": 4, "loss": 1, "num_gaussians": 2, "iterations": 8, "is_paused": False})
                 model.means_raw.array[:] = 8
                 metrics.write_text("iteration,psnr,ssim\n4,30,0.9\n8,29,0.8\n")
-                bridge.on_step({"iteration": 8, "loss": 1, "num_gaussians": 2})
+                bridge.on_step({"iteration": 8, "loss": 1, "num_gaussians": 2, "iterations": 8, "is_paused": False})
                 bridge.finish_writer(wait=True)
                 record = core.read_json(root / "best.json")
                 self.assertEqual(record["iteration"], 4)

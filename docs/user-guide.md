@@ -5,9 +5,10 @@
 Install the extension ZIP from Blender Preferences, enable it, and open the
 **LichtFeld** tab in the 3D Viewport sidebar (`N`). In extension preferences, select
 the actual LichtFeld executable and a writable, permanent jobs folder. **Verify
-installation** checks that the executable can start. Training requires a build
-with Python callbacks and external-session protocol 1; Studio PR #3982 provides
-the corresponding integration. Dataset-only capture can be used without a backend.
+installation** checks that the executable can start. Training additionally needs
+the native adapter APIs listed in the [requirements](../README.md#requirements).
+These are checked inside the trainer when a job starts; unsupported backends
+report an update error. Dataset-only capture can be used without a backend.
 
 Save the source `.blend` before capture. Blender creates an isolated saved copy
 for the render process; the source directory must allow temporary staging files.

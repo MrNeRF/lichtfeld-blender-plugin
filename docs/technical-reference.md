@@ -116,10 +116,9 @@ used when full transport exceeds its byte budget or when limited mode is selecte
 SH0 is supported. Best/final saved artifacts retain the captured model fidelity.
 Current progress, snapshot progress and best-evaluated progress are separate.
 
-The compatible backend's `SplatData.shN_rows` API extracts the selected rows and
-bands before host transfer. Earlier backends without this API can continue
-training and saving results, but SH previews report the required update instead
-of silently decoding the entire SH model. SH0 previews remain available.
+The required backend's `SplatData.shN_rows` API extracts the selected rows and
+bands before host transfer. The adapter rejects backends without that API.
+SH0 remains a preview budget, not a compatibility workaround for older backends.
 
 The trainer color scene shares preview point-cloud data and uses encoded RGB
 compositing with SH0–SH3. Ordinary native Blender shading follows Blender's own
@@ -133,8 +132,20 @@ Supported capture engines are Cycles and EEVEE. Runtime dependencies come from
 Blender or the separate LichtFeld environment. First use can install NumPy into
 the backend's isolated environment; subsequent jobs reuse that environment.
 
-Session/job helpers are vendored into the extension; installed packages do not
-import Studio's internal reader modules. They must preserve protocol compatibility
+The extension owns its session publisher and reader. Camera poses, focal lengths,
+dimensions and model transforms are collected through public scene APIs at a
+training boundary. Principal points come from the captured calibration, matched
+by image filename and scaled to the native camera dimensions. Missing or
+ambiguous matches are reported; they never assume a centred principal point.
+The adapter never imports Studio's internal producer or reader modules.
+The module/API check runs before numerical-runtime setup, and hook payloads are
+validated at TrainingStart. Missing or unknown terminal outcomes fail the job
+while retaining any valid result; the supervisor uses the native outcome rather
+than inferring stop/completion from the last command file.
+
+Minimal backend API support does not enable session publication for ordinary
+Studio trainers or install the Studio observer UI. Those integrations are separate.
+The session/job helpers must preserve protocol compatibility
 and the attribution in [CREDITS.md](../CREDITS.md). The ZIP contains reviewed
 runtime files, configuration, license, credits and user documentation. It excludes
 jobs, demos, generated reports, build caches and test output.

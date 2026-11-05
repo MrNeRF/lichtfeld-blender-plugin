@@ -13,7 +13,7 @@ import traceback
 
 from jobs import release_source, captured_dataset
 from job_control import validate_command
-from bridge_core import atomic_json, read_json, read_job_json, training_config, training_command, verify_artifact, digest
+from bridge_core import atomic_json, read_json, read_job_json, training_config, training_command, verify_artifact, digest, verified_training_outcome
 from render_devices import arguments as render_arguments
 
 
@@ -234,9 +234,8 @@ def supervise(job_path):
         if runtime.get("state") != "finalizing" or not best:
             raise RuntimeError("Training ended without a verified bridge result. Check training.log.")
         verify_artifact(root, best)
-        command = read_json(root / "command.json", {})
-        stopped = command.get("job_id") == job["id"] and command.get("action") == "stop"
-        state("stopped" if stopped else "completed", result=best,
+        outcome = verified_training_outcome(runtime)
+        state(outcome, result=best,
               message="Best evaluated model" if best.get("score") else "Last valid model (not evaluated)")
     except InterruptedError as error:
         state("stopped", message=str(error))

@@ -72,4 +72,4 @@ content retain their own terms.
 - [Blender extension licenses](https://docs.blender.org/manual/en/latest/advanced/extensions/licenses.html).
 - [GNU GPL version 3](https://www.gnu.org/licenses/gpl-3.0.html), including section 7
   on additional permissions.
-- [LichtFeld Studio integration](https://github.com/MrNeRF/LichtFeld-Studio/pull/3982).
+- [LichtFeld Studio training hooks](https://github.com/MrNeRF/LichtFeld-Studio/blob/master/docs/plugins/api-reference.md#training-hooks).

@@ -15,24 +15,25 @@ from concurrent.futures import ThreadPoolExecutor
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from bridge_core import (atomic_json, read_json, read_job_json, read_dataset_json, training_config, metric_at,
-                         better, write_splat, artifact_path)
+                         better, write_splat, artifact_path, require_backend_api)
 import lichtfeld as lf
 from session_transport import SessionPublisher, spatial_indices, MAX_BYTES
 from job_control import validate_command
 import session_geometry
 
-try:
-    import numpy as np
-except ImportError:
-    import importlib
-    _job = read_job_json(os.environ["LFS_BLENDER_JOB"])
-    atomic_json(Path(_job["root"]) / "runtime.json", {
-        "job_id": _job["id"], "state": "preparing numerical runtime", "updated": time.time()})
-    lf.packages.init()
-    lf.packages.install("numpy")
-    sys.path.insert(0, lf.packages.site_packages_dir())
-    importlib.invalidate_caches()
-    import numpy as np
+def numerical_runtime(job):
+    try:
+        import numpy as np
+    except ImportError:
+        import importlib
+        atomic_json(Path(job["root"]) / "runtime.json", {
+            "job_id": job["id"], "state": "preparing numerical runtime", "updated": time.time()})
+        lf.packages.init()
+        lf.packages.install("numpy")
+        sys.path.insert(0, lf.packages.site_packages_dir())
+        importlib.invalidate_caches()
+        import numpy as np
+    return np
 
 
 class PreviewCapacityError(ValueError):
@@ -82,9 +83,12 @@ class TrainingBridge:
         self.supervision = ""
         self.loss = 0.0
         self.count = 0
+        self.api_checked = False
+        self.terminal_state = None
         self.capture_ms = 0.0
         self.eval_steps = set(training_config(job)["optimization"]["eval_steps"])
         self.hooks = lf.ScopedHandler()
+        self.hooks.on_training_start(self.on_start)
         self.hooks.on_post_step(self.on_step)
         self.hooks.on_training_end(self.on_end)
         self.publish("training")
@@ -103,6 +107,7 @@ class TrainingBridge:
             "preview_seconds": self.interval, "capture_ms": self.capture_ms, "updated": time.time(),
             "session_directory": str(self.session.root), "session_id": self.session.id,
             "geometry": self.session.record.get("geometry"),
+            "terminal_state": self.terminal_state, "hook_api_checked": self.api_checked,
         })
         self.last_status = time.monotonic()
 
@@ -257,12 +262,9 @@ class TrainingBridge:
             if callable(gather):
                 rows = cpu_selection if cpu_selection is not None else lf.Tensor.from_numpy(np.arange(count, dtype=np.int64))
                 rest = gather(rows, active).numpy()
-            elif for_preview:
-                raise RuntimeError("Update LichtFeld: this backend cannot extract bounded SH previews. "
-                                   "Training and saved results continue; SH0 previews remain available.")
             else:
-                # Preserve best/final export compatibility with earlier backends.
-                rest = owned(model.shN_raw)[:, :(active + 1) ** 2 - 1, :]
+                raise RuntimeError("Update LichtFeld: this backend cannot extract bounded SH previews. "
+                                   "Select a compatible backend in Settings.")
             sh = np.concatenate((dc, rest), axis=1)
         else:
             sh = dc
@@ -302,19 +304,35 @@ class TrainingBridge:
                 break
             time.sleep(0.1)
 
+    def check_hook_api(self, hook):
+        if self.api_checked:
+            return
+        if type(hook.get('iterations')) is not int or hook['iterations'] <= 0 or type(hook.get('is_paused')) is not bool:
+            raise RuntimeError('Update LichtFeld: training hooks must provide iterations and is_paused.')
+        self.api_checked = True
+
+    def on_start(self, hook):
+        try:
+            self.check_hook_api(hook)
+        except Exception as error:
+            self.error = str(error)
+            self.publish('failed')
+            lf.session().request_stop()
+
     def on_step(self, hook):
         try:
+            self.check_hook_api(hook)
             self.iteration = hook["iteration"]
             if not self.geometry_checked and time.monotonic() >= self.geometry_retry_at:
                 try:
-                    from lfs_plugins.training_runtime.producer import capture_view_geometry
-                    current_geometry = capture_view_geometry()
+                    current_geometry = session_geometry.from_native_scene(lf.get_scene(), self.view_geometry)
                     if self.view_geometry:
                         current_geometry["source_frame"] = self.view_geometry.get("source_frame", "blender-world")
                         current_geometry["data_to_source"] = self.view_geometry["data_to_source"]
                         if not current_geometry["cameras"]:
                             current_geometry["cameras"] = self.view_geometry["cameras"]
                     session_geometry.publish(self.session, current_geometry)
+                    self.session.update(geometry_error="")
                     self.geometry_checked = True
                 except Exception as error:
                     self.geometry_retry_at = time.monotonic() + 5
@@ -378,7 +396,11 @@ class TrainingBridge:
 
     def on_end(self, hook):
         try:
-            terminal = hook.get("terminal_state", "completed")
+            terminal = hook.get("terminal_state")
+            if terminal not in {'completed', 'stopped', 'failed'}:
+                self.error = self.error or 'Update LichtFeld: the trainer did not report a supported terminal_state.'
+                terminal = 'failed'
+            self.terminal_state = terminal
             if terminal == "failed" and not self.error:
                 self.error = "Trainer failed; the last valid result is retained"
             self.finish_writer(wait=True)
@@ -404,4 +426,12 @@ class TrainingBridge:
                 self.session.finish("failed", error=self.error)
 
 
-_bridge = TrainingBridge(read_job_json(os.environ["LFS_BLENDER_JOB"]))
+_job = read_job_json(os.environ["LFS_BLENDER_JOB"])
+try:
+    require_backend_api(lf)
+    np = numerical_runtime(_job)
+    _bridge = TrainingBridge(_job)
+except Exception as error:
+    atomic_json(Path(_job['root']) / 'runtime.json', {
+        'job_id': _job['id'], 'state': 'failed', 'error': str(error), 'updated': time.time()})
+    raise

@@ -18,8 +18,9 @@ separate processes, so LichtFeld Studio can remain closed while you work in Blen
 - Observe compatible external trainers and their capture cameras in read-only mode.
 
 This repository contains the Blender extension. The LichtFeld backend is installed
-separately; its Studio-side integration is described in
-[LichtFeld Studio PR #3982](https://github.com/MrNeRF/LichtFeld-Studio/pull/3982).
+separately. Training uses its public
+[training-hook API](https://github.com/MrNeRF/LichtFeld-Studio/blob/master/docs/plugins/api-reference.md#training-hooks);
+the Studio observer interface is a separate feature.
 
 ## Requirements
 
@@ -27,20 +28,30 @@ separately; its Studio-side integration is described in
 | --- | --- |
 | Blender | 5.3.x, with native Gaussian point-cloud support |
 | Capture renderer | Cycles or EEVEE; a working device configuration for that engine |
-| Training backend | A compatible LichtFeld build with Python training callbacks and external-session protocol 1 |
+| Training backend | Headless LichtFeld with `SplatData.shN_rows`, scoped training hooks, and explicit hook progress/outcomes |
 | Training hardware | The CUDA/GPU requirements of the selected LichtFeld build |
 | Storage | A writable jobs directory with room for the captured project, images, maps, checkpoints, and splats |
 
 Dataset-only capture does not require LichtFeld or a training GPU. Training and
 external viewing need a compatible backend; an older executable may not provide
-the required APIs. **Verify installation** checks the selected executable.
+the required APIs. **Verify installation** checks that the selected executable
+starts and the jobs directory is writable. The adapter checks native API support
+when a job starts and validates its hook payload before optimization proceeds.
 First use may need network access to prepare the backend's isolated NumPy runtime.
 No third-party Python packages, native libraries, or backend executables are
 bundled in the extension ZIP.
 
-SH1–SH3 previews require the backend's selected-SH extraction API. Earlier builds
-show an update message while training and saving results continue; SH0 previews
-remain available. Use a matching backend for the complete preview workflow.
+The backend must expose `ScopedHandler.on_training_start`, `on_post_step`, and
+`on_training_end`, plus `SplatData.shN_rows`. Hook payloads must report `iterations`
+and `is_paused`; TrainingEnd must report `completed`, `stopped`, or `failed` in
+`terminal_state`. Incompatible backends produce an explicit update error.
+SH0–SH3 preview budgets remain available with a compatible backend.
+
+The extension publishes its own training sessions. Other compatible extension
+instances can observe them without a Studio observer UI. Ordinary trainers started
+directly in Studio require a separately enabled session publisher to be discoverable;
+viewing extension-owned training inside Studio additionally requires its observer
+integration. Those features are not implied by the minimal training-adapter APIs.
 
 Windows is the current native integration test platform. CPU contracts also run
 on Linux; full Blender/GPU workflows on other platforms still need qualification.

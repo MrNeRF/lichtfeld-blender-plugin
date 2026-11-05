@@ -61,6 +61,44 @@ def from_capture(frames):
     return validate(value)
 
 
+def from_native_scene(scene, calibration):
+    """Combine native poses with the captured dataset's exact principal points."""
+    import numpy as np
+    calibrated = {}
+    for camera in validate(calibration)['cameras']:
+        name = Path(camera['name'].replace('\\', '/')).name
+        if name in calibrated:
+            raise ValueError('Ambiguous captured camera name: ' + name)
+        calibrated[name] = camera
+    model = scene.get_node(scene.training_model_node_name)
+    value = {'schema': SCHEMA, 'source_frame': 'lichtfeld-visualizer',
+             'data_to_source': FLIP,
+             'model_to_data': np.asarray(model.world_transform).reshape(4, 4).tolist() if model else IDENTITY,
+             'cameras': []}
+    for node in scene.get_active_cameras():
+        if not node.has_camera:
+            continue
+        # SceneNode exposes poses, focal lengths and dimensions, but no principal
+        # points. Match the immutable calibration by image name, never by order
+        # or an assumed image centre. Dataset loading may resize the images.
+        image_name = Path(node.image_path.replace('\\', '/')).name
+        captured = calibrated.get(image_name)
+        if captured is None:
+            raise ValueError('No captured calibration for camera image: ' + image_name)
+        rotation = node.camera_R.cpu().numpy().reshape(3, 3)
+        translation = node.camera_T.cpu().numpy().reshape(3)
+        pose = np.eye(4)
+        pose[:3, :3] = rotation.T
+        pose[:3, 3] = -rotation.T @ translation
+        pose = np.asarray(node.world_transform).reshape(4, 4) @ pose
+        value['cameras'].append({'name': node.name, 'camera_to_data': pose.tolist(),
+                                'fx': node.camera_focal_x, 'fy': node.camera_focal_y,
+                                'cx': captured['cx'] * node.camera_width / captured['width'],
+                                'cy': captured['cy'] * node.camera_height / captured['height'],
+                                'width': node.camera_width, 'height': node.camera_height})
+    return validate(value)
+
+
 def source_model_transform(value=None):
     import numpy as np
     value=value or {}
