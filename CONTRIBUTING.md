@@ -41,7 +41,7 @@ workers import the same pure Python wheel directly when it is not installed.
 For source-mode tests, install that local dependency first:
 
 ```sh
-python -m pip install "numpy>=2,<3" lichtfeld_training/wheels/*.whl
+python -m pip install "numpy>=2,<3" lichtfeld_training/wheels/lichtfeld_training_protocol-0.1.0-py3-none-any.whl
 ```
 
 ## Build the extension
