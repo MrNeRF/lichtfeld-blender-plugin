@@ -133,20 +133,21 @@ Blender or the separate LichtFeld environment. First use can install NumPy into
 the backend's isolated environment; subsequent jobs reuse that environment.
 
 The extension owns job control, the supervised callback adapter and the Blender
-reader. Transport, geometry and bounded model capture come from Studio's public
+reader. Transport, camera schema and bounded model capture come from LichtFeld Studio's public
 `lichtfeld_sessions` package, bundled as a generated pure Python wheel. Camera
 poses, focal lengths, principal points, dimensions and model transforms are
 collected directly through public native scene APIs at a training boundary.
-The adapter never imports Studio's internal producer or reader modules.
+Blender capture/display conversions stay in the extension. The adapter never
+imports LichtFeld Studio's internal producer or reader modules.
 The module/API check runs before numerical-runtime setup, and hook payloads are
 validated at TrainingStart. Missing or unknown terminal outcomes fail the job
 while retaining any valid result; the supervisor uses the native outcome rather
 than inferring stop/completion from the last command file.
 
-Ordinary Studio/headless trainers publish only after an explicit
-`LFS_TRAINING_PUBLISHER=automatic` opt-in or public `publisher.install()` call.
-The supervised extension child clears inherited automatic publication to keep
-one publisher per job. This protocol does not install a Studio observer UI.
+Ordinary LichtFeld Studio/headless trainers publish through an explicit
+`--python-script` calling `lichtfeld_sessions.publisher.install()`.
+The supervised extension child uses its own job adapter as the single publisher.
+This protocol does not install a LichtFeld Studio observer UI.
 The session/job helpers must preserve protocol compatibility
 and the attribution in [CREDITS.md](../CREDITS.md). The ZIP contains reviewed
 runtime files, configuration, license, credits and user documentation. It excludes

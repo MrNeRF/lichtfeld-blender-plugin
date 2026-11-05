@@ -45,9 +45,9 @@ def arrays():
 
 class GeometryUpdates(unittest.TestCase):
     def test_paused_external_repair_update_and_removal_do_not_reread_the_splat(self):
-        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ,LFS_TRAINING_SESSIONS_DIR=directory):
+        with tempfile.TemporaryDirectory() as directory, patch.object(transport, "registry_root", return_value=Path(directory)):
             publisher = transport.SessionPublisher({})
-            publisher.update(geometry={'path':'view_geometry.json','bytes':1,'sha256':'bad'})
+            publisher.update(geometry={'path':'view_geometry.json','bytes':1,'revision':'bad'})
             publisher.publish(arrays(), 17)
             publisher.update(state='paused')
             observer = reader.Observer(publisher.root,external=True)
@@ -89,7 +89,7 @@ class GeometryUpdates(unittest.TestCase):
                 publisher.finish();publisher.thread.join(3);publisher.pool.close()
 
     def test_failed_geometry_only_install_restores_full_data_automatically(self):
-        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ,LFS_TRAINING_SESSIONS_DIR=directory):
+        with tempfile.TemporaryDirectory() as directory, patch.object(transport, "registry_root", return_value=Path(directory)):
             publisher=transport.SessionPublisher({})
             publisher.publish(arrays(),17)
             publisher.update(state='paused')
@@ -114,7 +114,7 @@ class GeometryUpdates(unittest.TestCase):
                 publisher.finish();publisher.thread.join(3);publisher.pool.close()
 
     def test_owned_paused_job_updates_geometry_with_the_same_saved_artifact(self):
-        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ,LFS_TRAINING_SESSIONS_DIR=str(Path(directory)/'sessions')):
+        with tempfile.TemporaryDirectory() as directory, patch.object(transport, "registry_root", return_value=Path(directory) / "sessions"):
             root=Path(directory)/'job';root.mkdir()
             publisher=transport.SessionPublisher({})
             core.atomic_json(root/'job.json',{'schema':1,'id':'job','root':str(root)})
@@ -143,7 +143,7 @@ class GeometryUpdates(unittest.TestCase):
         def prepare(value):
             source_refs.append(weakref.ref(value['means']))
             return Payload()
-        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ,LFS_TRAINING_SESSIONS_DIR=directory):
+        with tempfile.TemporaryDirectory() as directory, patch.object(transport, "registry_root", return_value=Path(directory)):
             publisher=transport.SessionPublisher({})
             publisher.publish(arrays(),17)
             publisher.update(state='paused')
@@ -166,7 +166,7 @@ class GeometryUpdates(unittest.TestCase):
         def prepare(value):
             source_refs.append(weakref.ref(value['means']))
             raise ValueError('Preparation unavailable')
-        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ,LFS_TRAINING_SESSIONS_DIR=directory):
+        with tempfile.TemporaryDirectory() as directory, patch.object(transport, "registry_root", return_value=Path(directory)):
             publisher=transport.SessionPublisher({})
             publisher.publish(arrays(),17)
             observer=reader.Observer(publisher.root,external=True,prepare=prepare)

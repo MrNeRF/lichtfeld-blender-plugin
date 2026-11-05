@@ -362,7 +362,7 @@ def render_dataset(job_path, reuse_images=False):
     else:
         write_seed(output / "pointcloud.ply", sources, job["seed_points"])
         initialization = {'method': 'surface_geometry', 'budget': job['seed_points']}
-    from lichtfeld_sessions.geometry import from_capture
+    from session_geometry import from_capture
     atomic_json(output / "view_geometry.json", from_capture(frames))
     if isolated and not any(frame.get("mask_foreground_fraction", 0) > 0 for frame in frames):
         raise ValueError("None of the capture cameras sees the source. Review rig coverage.")

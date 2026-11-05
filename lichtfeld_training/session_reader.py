@@ -6,7 +6,7 @@ from pathlib import Path
 import queue
 import threading
 import time
-from lichtfeld_sessions.transport import SessionClient, read_json, read_snapshot, process_alive, validate_session, session_liveness
+from lichtfeld_sessions.transport import TERMINAL, SessionClient, read_json, read_snapshot, process_alive, validate_session, session_liveness
 from .job_control import Controller
 from lichtfeld_sessions.geometry import load as load_geometry
 from .bridge_core import read_job_json
@@ -210,11 +210,11 @@ class Observer:
                         liveness = session_liveness(status)
                         alive = liveness == "responsive"
                         state = status.get("state", "connecting")
-                        if not alive and state not in {"completed", "stopped", "failed", "superseded"}:
+                        if not alive and state not in TERMINAL:
                             state = "disconnected"
                         job = {"id": "session:" + status.get("id", self.root.name), "sources": []}
                         root = Path(status.get("job_root", self.root))
-                        result = status.get("result") if state in {"completed", "stopped", "failed", "superseded"} else None
+                        result = status.get("result") if state in TERMINAL else None
                         snapshot = status.get("snapshot")
                         record = result or ({**snapshot, "shared": snapshot} if snapshot else None)
                         self.status = {**status, "state": state, "liveness": liveness, "job": job, "root": str(root)}
@@ -337,7 +337,7 @@ class Observer:
                         self.retry_at = 0
                     reading_status = False
                     ready = (time.monotonic() >= self.next_frame_at or self.force_best or
-                             self.status.get("state") in {"completed", "stopped", "failed", "superseded"})
+                             self.status.get("state") in TERMINAL)
                     geometry_changed = self.geometry_ref != self.last_geometry_ref
                     if ready and record and not self.pending and (self.force_best or record["id"] != self.last or geometry_changed) and time.monotonic() >= self.retry_at:
                         geometry_only = not self.force_best and record["id"] == self.last
@@ -352,7 +352,7 @@ class Observer:
                         frame = {"record": record, "job": job, "transport": transport,
                                  "count": count, "geometry": self.geometry,
                                  "geometry_ref": self.geometry_ref, "geometry_only": geometry_only,
-                                 "geometry_revision": (self.geometry_ref or {}).get("sha256", ""),
+                                 "geometry_revision": (self.geometry_ref or {}).get("revision", ""),
                                  "data": data}
                         data = None
                         if self.stop.is_set():

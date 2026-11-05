@@ -7,6 +7,9 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
+import subprocess
+import sys
 import tempfile
 import tomllib
 import zipfile
@@ -17,12 +20,54 @@ capture_observations.py capture_passes.py capture_preview.py capture_seed.py
 capture_settings.py geometry_maps.py job_control.py job_panel.py jobs.py
 mrnf_defaults.json preflight.py preview_scene.py render_devices.py render_worker.py
 rig_edit.py rig_geometry.py rig_mesh.py rig_path.py scene_render.py
-scene_render_worker.py session_cameras.py session_reader.py
+scene_render_worker.py session_cameras.py session_geometry.py session_reader.py
 wheels/lichtfeld_training_protocol-0.1.0-py3-none-any.whl supervisor.py training_options.py training_profiles.json
 ui_help.py ui_runtime.py ui_text.py visibility.py workflow.py
 """.split())
 DOCUMENT_FILES = ("LICENSE", "CREDITS.md", "README.md", "CONTRIBUTING.md",
                   "docs/user-guide.md", "docs/technical-reference.md")
+
+
+def build_protocol(lichtfeld_source):
+    """Build the bundled dependency from its canonical LichtFeld Studio checkout."""
+    source = Path(lichtfeld_source).resolve()
+    destination = Path(__file__).resolve().parents[1] / "lichtfeld_training/wheels"
+    with tempfile.TemporaryDirectory() as directory:
+        staging = Path(directory)
+        shutil.copytree(source / "src/python/lichtfeld_sessions", staging / "lichtfeld_sessions",
+                        ignore=shutil.ignore_patterns("__pycache__"))
+        for name in ("src/python/_lfs_path_io.py", "LICENSE"):
+            shutil.copyfile(source / name, staging / Path(name).name)
+        (staging / "pyproject.toml").write_text('''[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lichtfeld-training-protocol"
+version = "0.1.0"
+description = "Local training sessions shared with LichtFeld Studio"
+requires-python = ">=3.11"
+license = "GPL-3.0-or-later"
+license-files = ["LICENSE"]
+authors = [{name = "LichtFeld Studio Authors"}]
+
+[tool.setuptools]
+packages = ["lichtfeld_sessions"]
+py-modules = ["_lfs_path_io"]
+''', encoding="utf-8")
+        subprocess.run([sys.executable, "-m", "build", "--wheel", "--no-isolation",
+                        "--outdir", str(staging / "dist")], cwd=staging, check=True,
+                       env={**os.environ, "SOURCE_DATE_EPOCH": "315532800"})
+        wheel = staging / "dist/lichtfeld_training_protocol-0.1.0-py3-none-any.whl"
+        destination.mkdir(parents=True, exist_ok=True)
+        descriptor, filename = tempfile.mkstemp(prefix=wheel.name + "-", suffix=".tmp", dir=destination)
+        temporary = Path(filename)
+        try:
+            with os.fdopen(descriptor, "wb") as stream:
+                stream.write(wheel.read_bytes())
+            temporary.replace(destination / wheel.name)
+        finally:
+            temporary.unlink(missing_ok=True)
 
 
 def package(output, *, repository=None):
@@ -78,4 +123,9 @@ def package(output, *, repository=None):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, default=Path("dist"))
-    print(package(parser.parse_args().output).resolve())
+    parser.add_argument("--lichtfeld-source", type=Path,
+                        help="Rebuild the protocol wheel from this LichtFeld Studio checkout before packaging")
+    arguments = parser.parse_args()
+    if arguments.lichtfeld_source:
+        build_protocol(arguments.lichtfeld_source)
+    print(package(arguments.output).resolve())

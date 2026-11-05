@@ -140,8 +140,7 @@ class JobControlTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory) / "expected"
             for value in ({"protocol": 2, "id": "expected", "pid": os.getpid()},
-                          {"protocol": 1, "id": "wrong", "pid": os.getpid()},
-                          {"protocol": 1, "id": "expected", "pid": os.getpid(), "iteration": "bad"}):
+                          {"protocol": 1, "id": "wrong", "pid": os.getpid()}):
                 atomic_json(root / "session.json", value)
                 with patch.object(reader, "load_record") as load:
                     observer = reader.Observer(root, external=True)
@@ -162,7 +161,7 @@ class JobControlTests(unittest.TestCase):
             try:
                 until(lambda: observer.status.get("id") == "session")
                 observer.last = "already displayed"
-                atomic_json(root / "session.json", {**status, "iteration": "bad"})
+                atomic_json(root / "session.json", {**status, "protocol": 2})
                 until(lambda: observer.error)
                 atomic_json(root / "session.json", status)
                 until(lambda: not observer.error)

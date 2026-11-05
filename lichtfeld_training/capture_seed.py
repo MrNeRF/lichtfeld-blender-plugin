@@ -153,7 +153,7 @@ def merge(views, limit):
     if len(points) < 4:
         raise ValueError("Fewer than four distinct visible points. Check capture coverage.")
     if len(points) > limit:
-        from lichtfeld_sessions.transport import spatial_indices
+        from lichtfeld_sessions.capture import spatial_indices
         chosen = spatial_indices(points, limit)
         points, colors = points[chosen], colors[chosen]
     return points, colors

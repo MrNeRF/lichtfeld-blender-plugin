@@ -31,10 +31,20 @@ that merely repeats implementation details.
 ## Shared training protocol
 
 `lichtfeld_sessions` is owned by LichtFeld Studio in
-`src/python/lichtfeld_sessions`. Update it there and generate its wheel with
-`python -m build --wheel --outdir /path/outside/source/wheels`. Replace the wheel
-in `lichtfeld_training/wheels`, reviewing the source changes in Studio and the
-wheel contents. Do not edit the wheel or copy its modules into this repository.
+`src/python/lichtfeld_sessions`. Update it there and rebuild the dependency with
+the existing extension packager, using a checkout at the intended LichtFeld Studio
+revision:
+
+```sh
+python -m pip install build "setuptools>=77"
+python tools/package_blender_training.py --lichtfeld-source /path/to/LichtFeld-Studio --output /path/outside/source/packages
+```
+
+The packager uses the standard setuptools wheel generator in a temporary staging
+directory and replaces the wheel in `lichtfeld_training/wheels`. Review the
+canonical source changes and generated wheel contents. Do not edit the wheel or
+maintain another copy of its modules in this repository. Blender-specific capture
+and display conversions belong in the extension's `session_geometry.py`.
 The distribution also includes LichtFeld Studio's existing `_lfs_path_io` module
 for the shared Windows filesystem boundary; its source remains in LichtFeld Studio.
 Blender installs it through the manifest's `wheels` entry; detached plain Python
@@ -57,6 +67,10 @@ The packager checks the reviewed runtime inventory and Python syntax before
 replacing an output ZIP. It includes license/credits and the user documentation.
 Install it in an isolated Blender profile for package checks; do not overwrite
 a user's installed extension or preferences during tests.
+Set `BLENDER_USER_CONFIG`, `BLENDER_USER_SCRIPTS` and `BLENDER_USER_EXTENSIONS` to
+scratch directories and verify the loaded extension/dependency paths. Rebuilds
+with an unchanged development version need a fresh profile: Blender can reuse
+an already installed wheel with the same distribution name and version.
 
 ## Tests
 
@@ -76,7 +90,7 @@ For a real capture/training smoke test, supply a compatible backend and a separa
 scratch directory:
 
 ```sh
-blender --background --factory-startup --python tests/blender/training_smoke.py -- /path/to/scratch /path/to/LichtFeld-Studio --steps 32
+blender --background --factory-startup --python-exit-code 1 --python tests/blender/training_smoke.py -- /path/to/scratch /path/to/LichtFeld-Studio --steps 32
 ```
 
 The fixture creates its own small scene and records the actual job path in the

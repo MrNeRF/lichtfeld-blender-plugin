@@ -212,7 +212,6 @@ def supervise(job_path):
         environment.pop("PYTHONHOME", None)
         environment.pop("OCIO", None)
         environment["LFS_BLENDER_JOB"] = str(job_path)
-        environment.pop("LFS_TRAINING_PUBLISHER", None)
         environment["PYTHONUTF8"] = "1"
         installation = hashlib.sha256(job["backend"].encode("utf-8")).hexdigest()[:16]
         environment["LFS_HOME"] = str(root.parent / "backend-runtime" / installation)

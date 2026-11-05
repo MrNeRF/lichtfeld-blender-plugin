@@ -8,6 +8,7 @@ from pathlib import Path
 import struct
 import tempfile
 import unittest
+from unittest.mock import patch
 import os
 import sys
 import types
@@ -128,13 +129,12 @@ class TrainingCoreTest(unittest.TestCase):
         fake.session = lambda: types.SimpleNamespace(request_stop=lambda: None)
         prior = sys.modules.get("lichtfeld")
         old_job = os.environ.get("LFS_BLENDER_JOB")
-        old_registry = os.environ.get("LFS_TRAINING_SESSIONS_DIR")
         bridge = None
         try:
             sys.modules["lichtfeld"] = fake
-            with tempfile.TemporaryDirectory() as directory:
+            with tempfile.TemporaryDirectory() as directory, patch("lichtfeld_sessions.transport.registry_root") as registry:
                 root = Path(directory)
-                os.environ["LFS_TRAINING_SESSIONS_DIR"] = str(root / "sessions")
+                registry.return_value = root / "sessions"
                 (root / "output").mkdir()
                 core.atomic_json(root / "job.json", {
                     "id": "test", "root": str(root), "iterations": 8, "eval_interval": 4,
@@ -183,10 +183,6 @@ class TrainingCoreTest(unittest.TestCase):
                 os.environ.pop("LFS_BLENDER_JOB", None)
             else:
                 os.environ["LFS_BLENDER_JOB"] = old_job
-            if old_registry is None:
-                os.environ.pop("LFS_TRAINING_SESSIONS_DIR", None)
-            else:
-                os.environ["LFS_TRAINING_SESSIONS_DIR"] = old_registry
 
 
 if __name__ == "__main__":

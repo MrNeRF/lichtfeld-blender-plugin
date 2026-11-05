@@ -49,8 +49,9 @@ and `is_paused`; TrainingEnd must report `completed`, `stopped`, or `failed` in
 SH0–SH3 preview budgets remain available with a compatible backend.
 
 The extension publishes its own training sessions. Other compatible extension
-instances can observe them without a Studio observer UI. Ordinary trainers started
-directly in Studio can enable publication with `LFS_TRAINING_PUBLISHER=automatic`;
+instances can observe them without a LichtFeld Studio observer UI. Ordinary trainers
+enable publication with an explicit `--python-script` calling
+`from lichtfeld_sessions.publisher import install; install(dataset="/path/to/dataset")`;
 viewing extension-owned training inside Studio additionally requires its observer
 integration. Those features are not implied by the minimal training-adapter APIs.
 

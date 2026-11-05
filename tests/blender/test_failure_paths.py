@@ -68,9 +68,9 @@ class FailurePaths(unittest.TestCase):
     def test_bad_camera_metadata_does_not_block_external_model_and_recovers(self):
         transport = importlib.import_module('lichtfeld_sessions.transport')
         geometry = importlib.import_module('lichtfeld_sessions.geometry')
-        with tempfile.TemporaryDirectory() as root, patch.dict(os.environ, LFS_TRAINING_SESSIONS_DIR=root):
+        with tempfile.TemporaryDirectory() as root, patch.object(transport, "registry_root", return_value=Path(root)):
             publisher = transport.SessionPublisher({})
-            publisher.update(geometry={'path':'view_geometry.json', 'bytes':1, 'sha256':'bad'})
+            publisher.update(geometry={'path':'view_geometry.json', 'bytes':1, 'revision':'bad'})
             payload = {'means':np.zeros((1,3),np.float32), 'scale':np.zeros((1,3),np.float32),
                        'rotation':np.array([[1,0,0,0]],np.float32), 'opacity':np.zeros((1,1),np.float32),
                        'sh':np.zeros((1,1,3),np.float32)}
@@ -427,7 +427,7 @@ class PreviewRegressions(unittest.TestCase):
         tree = ast.parse((SOURCE / "backend_hook.py").read_text(encoding="utf-8"))
         node = next(item for item in tree.body if isinstance(item, ast.ClassDef) and item.name == "TrainingBridge")
         write = Mock(return_value={"kind": "best"})
-        spatial = importlib.import_module('lichtfeld_sessions.transport').spatial_indices
+        spatial = importlib.import_module('lichtfeld_sessions.capture').spatial_indices
         namespace = {"write_splat": write, "spatial_indices": spatial, "MAX_BYTES": 2 * 1024**3,
                     "PreviewCapacityError": type("PreviewCapacityError", (ValueError,), {})}
         exec(compile(ast.Module(body=[node], type_ignores=[]), "backend_hook.py", "exec"), namespace)
