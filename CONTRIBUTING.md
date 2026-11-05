@@ -35,6 +35,8 @@ that merely repeats implementation details.
 `python -m build --wheel --outdir /path/outside/source/wheels`. Replace the wheel
 in `lichtfeld_training/wheels`, reviewing the source changes in Studio and the
 wheel contents. Do not edit the wheel or copy its modules into this repository.
+The distribution also includes LichtFeld Studio's existing `_lfs_path_io` module
+for the shared Windows filesystem boundary; its source remains in LichtFeld Studio.
 Blender installs it through the manifest's `wheels` entry; detached plain Python
 workers import the same pure Python wheel directly when it is not installed.
 
