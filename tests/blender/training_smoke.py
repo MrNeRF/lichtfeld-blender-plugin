@@ -125,10 +125,10 @@ while time.monotonic() < deadline:
         session_root = Path(runtime['session_directory'])
         session = extension.read_json(session_root / 'session.json')
         assert not session.get('geometry_error'), session
-        geometry = extension.session_geometry.load(session_root, runtime['geometry'])
+        geometry = importlib.import_module("lichtfeld_sessions.geometry").load(session_root, runtime['geometry'])
         assert geometry['source_frame'] == 'blender-world', geometry
         assert geometry['cameras'], geometry
-        original_geometry = extension.session_geometry.from_capture(captured['frames'])
+        original_geometry = importlib.import_module("lichtfeld_sessions.geometry").from_capture(captured['frames'])
         for camera in geometry['cameras']:
             expected = min(original_geometry['cameras'], key=lambda item:
                 np.max(np.abs(np.asarray(item['camera_to_data']) - camera['camera_to_data'])))

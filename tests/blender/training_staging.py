@@ -12,7 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 import lichtfeld_training as extension
 from lichtfeld_training import ui_runtime as ui
 from lichtfeld_training.session_reader import blender_fields
-from lichtfeld_training.session_geometry import source_model_transform
+from lichtfeld_sessions.geometry import source_model_transform
 bpy.ops.preferences.addon_enable(module="lichtfeld_training")
 
 

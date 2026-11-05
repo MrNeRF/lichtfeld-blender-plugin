@@ -12,7 +12,7 @@ if '--installed' in sys.argv:
 else:
  bpy.ops.preferences.addon_enable(module='lichtfeld_training')
  ext=importlib.import_module('lichtfeld_training')
-g=importlib.import_module(ext.__package__+'.session_geometry')
+g=importlib.import_module('lichtfeld_sessions.geometry')
 session_cameras=importlib.import_module(ext.__package__+'.session_cameras')
 scene=bpy.context.scene;s=scene.lichtfeld_training
 pose=np.eye(4);pose[:3,3]=[3,5,7]

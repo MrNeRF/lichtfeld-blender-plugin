@@ -12,7 +12,7 @@ s=bpy.context.scene.lichtfeld_training;s.job_directory='';s.attached_session='';
 state={'step':0,'start':time.monotonic()}
 def publish():
  from importlib import import_module
- transport=import_module(ext.__package__+'.session_transport')
+ transport=import_module('lichtfeld_sessions.transport')
  publisher=transport.SessionPublisher({'label':'Read-only transport fixture','state':'training','source':'test','project':'Fixture project'})
  arrays={'means':np.zeros((100,3),dtype=np.float32),'scale':np.full((100,3),-4,dtype=np.float32),'rotation':np.tile(np.array([1,0,0,0],dtype=np.float32),(100,1)),'opacity':np.zeros((100,1),dtype=np.float32),'sh':np.zeros((100,1,3),dtype=np.float32)}
  publisher.publish(arrays,120)

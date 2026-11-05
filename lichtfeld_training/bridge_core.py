@@ -8,6 +8,7 @@ import json
 import math
 import os
 from pathlib import Path
+import sys
 import time
 import uuid
 
@@ -17,37 +18,19 @@ MAX_JOB_CHARS = 32 * 1024 * 1024
 MAX_DATASET_CHARS = 32 * 1024 * 1024
 
 
-def atomic_json(path, value):
-    if __package__:
-        from .session_transport import replace_metadata
-    else:
-        from session_transport import replace_metadata
-    path = Path(path)
-    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    temporary = path.with_name(path.name + "." + uuid.uuid4().hex + ".tmp")
-    try:
-        fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-        with os.fdopen(fd, "w", encoding="utf-8") as stream:
-            json.dump(value, stream, ensure_ascii=False, allow_nan=False, indent=2)
-            stream.flush()
-            os.fsync(stream.fileno())
-        for attempt in range(8):
-            try:
-                replace_metadata(temporary, path)
-                break
-            except PermissionError:
-                if attempt == 7:
-                    raise
-                time.sleep(0.005 * (attempt + 1))
-    finally:
-        temporary.unlink(missing_ok=True)
+try:
+    from lichtfeld_sessions.transport import atomic_json, read_text_shared
+except ModuleNotFoundError as error:
+    if error.name != "lichtfeld_sessions":
+        raise
+    # Detached Python/render workers do not inherit Blender's extension site.
+    # The bundled wheel is pure Python and can be imported directly as a ZIP.
+    sys.path.insert(0, str(Path(__file__).with_name("wheels") /
+                           "lichtfeld_training_protocol-0.1.0-py3-none-any.whl"))
+    from lichtfeld_sessions.transport import atomic_json, read_text_shared
 
 
 def read_json(path, default=None, *, max_chars=262144):
-    if __package__:
-        from .session_transport import read_text_shared
-    else:
-        from session_transport import read_text_shared
     try:
         return json.loads(read_text_shared(path, max_chars=max_chars))
     except (FileNotFoundError, PermissionError):
@@ -68,6 +51,10 @@ def require_backend_api(module):
     missing = [name for name in ('get_scene', 'ScopedHandler') if not callable(getattr(module, name, None))]
     if not callable(getattr(getattr(getattr(module, 'scene', None), 'SplatData', None), 'shN_rows', None)):
         missing.append('SplatData.shN_rows')
+    node = getattr(getattr(module, 'scene', None), 'SceneNode', None)
+    for name in ('camera_center_x', 'camera_center_y'):
+        if not hasattr(node, name):
+            missing.append('SceneNode.' + name)
     hooks = getattr(module, 'ScopedHandler', None)
     for name in ('on_training_start', 'on_post_step', 'on_training_end'):
         if not callable(getattr(hooks, name, None)):

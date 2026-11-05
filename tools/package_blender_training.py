@@ -17,8 +17,8 @@ capture_observations.py capture_passes.py capture_preview.py capture_seed.py
 capture_settings.py geometry_maps.py job_control.py job_panel.py jobs.py
 mrnf_defaults.json preflight.py preview_scene.py render_devices.py render_worker.py
 rig_edit.py rig_geometry.py rig_mesh.py rig_path.py scene_render.py
-scene_render_worker.py session_cameras.py session_geometry.py session_reader.py
-session_transport.py supervisor.py training_options.py training_profiles.json
+scene_render_worker.py session_cameras.py session_reader.py
+wheels/lichtfeld_training_protocol-0.1.0-py3-none-any.whl supervisor.py training_options.py training_profiles.json
 ui_help.py ui_runtime.py ui_text.py visibility.py workflow.py
 """.split())
 DOCUMENT_FILES = ("LICENSE", "CREDITS.md", "README.md", "CONTRIBUTING.md",
@@ -28,7 +28,10 @@ DOCUMENT_FILES = ("LICENSE", "CREDITS.md", "README.md", "CONTRIBUTING.md",
 def package(output, *, repository=None):
     repository = Path(repository or Path(__file__).resolve().parents[1]).resolve()
     source = repository / "lichtfeld_training"
-    actual = {path.name for path in source.iterdir() if path.name != "__pycache__"}
+    paths = [path for path in source.rglob("*") if "__pycache__" not in path.parts]
+    if any(path.is_symlink() for path in paths):
+        raise ValueError("Package sources must not contain symlinks")
+    actual = {path.relative_to(source).as_posix() for path in paths if path.is_file()}
     if actual != RUNTIME_FILES:
         raise ValueError(f"Runtime inventory changed: missing={sorted(RUNTIME_FILES-actual)}, "
                          f"unexpected={sorted(actual-RUNTIME_FILES)}. Review the package inventory.")
@@ -47,6 +50,9 @@ def package(output, *, repository=None):
             json.loads(data)
         payloads[name] = data
     manifest = tomllib.loads((source / "blender_manifest.toml").read_text(encoding="utf-8"))
+    declared_wheels = {name.removeprefix("./") for name in manifest.get("wheels", [])}
+    if declared_wheels != {name for name in RUNTIME_FILES if name.endswith(".whl")}:
+        raise ValueError("Manifest wheel dependencies differ from the reviewed package inventory")
     if not re.fullmatch(r"[a-z][a-z0-9_]*", manifest["id"]) or not re.fullmatch(
             r"[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?", manifest["version"]):
         raise ValueError("Invalid extension ID or version")

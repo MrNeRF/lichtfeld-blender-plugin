@@ -178,7 +178,7 @@ settings.job_directory = ""
 settings.result_object = None
 
 def publish_session():
-    transport = importlib.import_module(ext.__package__ + ".session_transport")
+    transport = importlib.import_module('lichtfeld_sessions.transport')
     publisher = transport.SessionPublisher({
         "label": "Workflow contract trainer", "state": "training",
         "source": "contract", "project": "Return workflow",

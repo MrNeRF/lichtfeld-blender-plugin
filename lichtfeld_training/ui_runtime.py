@@ -10,7 +10,7 @@ import bpy
 from mathutils import Matrix
 from .session_reader import Observer, blender_fields
 from .visibility import set_hidden, source_steps
-from .session_geometry import source_model_transform
+from lichtfeld_sessions.geometry import source_model_transform
 
 _executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="lichtfeld-io")
 _tasks = []
