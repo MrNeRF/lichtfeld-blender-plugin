@@ -48,12 +48,9 @@ and `is_paused`; TrainingEnd must report `completed`, `stopped`, or `failed` in
 `terminal_state`. Incompatible backends produce an explicit update error.
 SH0–SH3 preview budgets remain available with a compatible backend.
 
-The extension publishes its own training sessions. Other compatible extension
-instances can observe them without a LichtFeld Studio observer UI. Ordinary trainers
-enable publication with an explicit `--python-script` calling
-`from lichtfeld_sessions.publisher import install; install(dataset="/path/to/dataset")`;
-viewing extension-owned training inside Studio additionally requires its observer
-integration. Those features are not implied by the minimal training-adapter APIs.
+The extension publishes its own training sessions. Other compatible extension instances can observe them without a LichtFeld Studio observer UI. Ordinary trainers enable publication with an explicit `--python-script` calling `from lichtfeld_sessions.publisher import install; install(dataset="/path/to/dataset")`.
+
+Viewing extension-owned training inside LichtFeld Studio additionally requires a build with its **External training** integration. In such a build, open an empty or model scene, refresh the trainer list and select **View training**. The preview and capture cameras are read-only; disconnecting or closing the observer leaves the headless trainer running. These features are not implied by the minimal training-adapter APIs.
 
 Windows is the current native integration test platform. CPU contracts also run
 on Linux; full Blender/GPU workflows on other platforms still need qualification.
@@ -77,6 +74,8 @@ The interface is currently in English.
 Installing from source means building the ZIP above; this is a regular Blender
 extension, not a startup script. Updating the ZIP does not require changing its
 version number during development.
+After updating an enabled extension, restart Blender so Python loads the updated
+bundled dependency.
 
 ## First capture and training
 

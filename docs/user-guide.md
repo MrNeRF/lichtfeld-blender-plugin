@@ -169,7 +169,9 @@ Closing Blender leaves an extension-owned headless trainer running. One controll
 owns its commands; another process can observe it read-only. **Connect trainer**
 observes compatible independently launched trainers and their capture cameras.
 Disconnecting that view leaves the trainer running. A trainer owned by the
-LichtFeld Studio GUI still stops when its owning Studio window closes.
+LichtFeld Studio GUI still stops when its owning LichtFeld Studio window closes.
+
+With an observer-enabled LichtFeld Studio build, open **External training** in an empty scene or a model scene, refresh the list and choose **View training**. A loaded training dataset must first be switched to Edit Mode or replaced with a new scene. The observer shows the step and quality actually installed, and groups the preview model and capture cameras under one scene entity. **Frame preview** uses normal navigation; **Disconnect** keeps the last read-only preview and **Remove preview** removes its group. The headless trainer continues independently.
 
 If a run fails, retain its job folder and read the reported error and process log
 before retrying. A valid captured dataset can be reused without rerendering.

@@ -128,6 +128,9 @@ this implementation.
 ## Compatibility and packaging
 
 The manifest targets Blender 5.3.x and keeps the development version at 0.1.0.
+The shared protocol wheel has its own version. Its identity changes when the
+distributed contract changes, so Blender replaces an older installed dependency
+when updating the extension.
 Supported capture engines are Cycles and EEVEE. Runtime dependencies come from
 Blender or the separate LichtFeld environment. First use can install NumPy into
 the backend's isolated environment; subsequent jobs reuse that environment.
