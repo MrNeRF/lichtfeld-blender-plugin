@@ -52,6 +52,8 @@ The extension publishes its own training sessions. Other compatible extension in
 
 Viewing extension-owned training inside LichtFeld Studio additionally requires a build with its **External training** integration. In such a build, open an empty or model scene, refresh the trainer list and select **View training**. The preview and capture cameras are read-only; disconnecting or closing the observer leaves the headless trainer running. These features are not implied by the minimal training-adapter APIs.
 
+With saved-result import support, **Import saved model** becomes available after training finishes. It imports the full best evaluated model, or the last valid saved model, as an editable local model independently of preview limits. Keep the job folder available until import completes.
+
 Windows is the current native integration test platform. CPU contracts also run
 on Linux; full Blender/GPU workflows on other platforms still need qualification.
 The interface is currently in English.

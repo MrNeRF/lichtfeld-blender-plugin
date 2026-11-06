@@ -124,6 +124,11 @@ while time.monotonic() < deadline:
         assert runtime['terminal_state'] == 'completed', runtime
         session_root = Path(runtime['session_directory'])
         session = extension.read_json(session_root / 'session.json')
+        saved_path, saved_presentation = importlib.import_module("lichtfeld_sessions.transport").resolve_result(session)
+        assert saved_path == (job / state['result']['path']).resolve(), (saved_path, state['result'])
+        assert session['result']['count'] == state['result']['count']
+        assert session['result']['sh_degree'] == state['result']['sh_degree']
+        assert saved_presentation['source_frame'] == 'blender-world'
         assert not session.get('geometry_error'), session
         geometry = importlib.import_module("lichtfeld_sessions.geometry").load(session_root, runtime['geometry'])
         assert geometry['source_frame'] == 'blender-world', geometry
