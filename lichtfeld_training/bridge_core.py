@@ -19,7 +19,7 @@ MAX_DATASET_CHARS = 32 * 1024 * 1024
 
 
 try:
-    from lichtfeld_sessions.transport import atomic_json, read_text_shared
+    from lichtfeld_sessions.transport import atomic_json, read_text_shared, process_alive
 except ModuleNotFoundError as error:
     if error.name != "lichtfeld_sessions":
         raise
@@ -27,7 +27,7 @@ except ModuleNotFoundError as error:
     # The bundled wheel is pure Python and can be imported directly as a ZIP.
     sys.path.insert(0, str(Path(__file__).with_name("wheels") /
                            "lichtfeld_training_protocol-0.1.0-py3-none-any.whl"))
-    from lichtfeld_sessions.transport import atomic_json, read_text_shared
+    from lichtfeld_sessions.transport import atomic_json, read_text_shared, process_alive
 
 
 def read_json(path, default=None, *, max_chars=262144):
@@ -69,32 +69,6 @@ def verified_training_outcome(runtime):
     if outcome not in {'completed', 'stopped'}:
         raise RuntimeError('The trainer did not report a verified terminal training outcome. Update LichtFeld.')
     return outcome
-
-
-def process_alive(pid):
-    if not isinstance(pid, int) or pid <= 0:
-        return False
-    if os.name == "nt":
-        import ctypes
-        kernel = ctypes.WinDLL("kernel32", use_last_error=True)
-        kernel.OpenProcess.restype = ctypes.c_void_p
-        kernel.GetExitCodeProcess.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_ulong)]
-        kernel.CloseHandle.argtypes = [ctypes.c_void_p]
-        handle = kernel.OpenProcess(0x1000, False, pid)
-        if not handle:
-            return False
-        try:
-            code = ctypes.c_ulong()
-            return bool(kernel.GetExitCodeProcess(handle, ctypes.byref(code))) and code.value == 259
-        finally:
-            kernel.CloseHandle(handle)
-    try:
-        os.kill(pid, 0)
-        return True
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
 
 
 def artifact_path(root, relative):

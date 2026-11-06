@@ -24,7 +24,7 @@ from .bridge_core import (SCHEMA, TERMINAL, atomic_json, read_json, verify_artif
 from lichtfeld_sessions.transport import read_snapshot, discover, SessionClient
 from .visibility import set_hidden, source_steps
 from .ui_text import draw_paragraph
-from lichtfeld_sessions.geometry import source_model_transform
+from .session_geometry import source_model_transform
 from . import ui_runtime
 from . import jobs, preflight, workflow, rig_geometry, rig_path, rig_edit, training_options, preview_scene, capture_settings, capture_preview, scene_render, ui_help
 

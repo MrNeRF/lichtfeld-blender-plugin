@@ -128,7 +128,7 @@ while time.monotonic() < deadline:
         geometry = importlib.import_module("lichtfeld_sessions.geometry").load(session_root, runtime['geometry'])
         assert geometry['source_frame'] == 'blender-world', geometry
         assert geometry['cameras'], geometry
-        original_geometry = importlib.import_module("lichtfeld_sessions.geometry").from_capture(captured['frames'])
+        original_geometry = importlib.import_module(extension.__package__ + ".session_geometry").from_capture(captured['frames'])
         for camera in geometry['cameras']:
             expected = min(original_geometry['cameras'], key=lambda item:
                 np.max(np.abs(np.asarray(item['camera_to_data']) - camera['camera_to_data'])))

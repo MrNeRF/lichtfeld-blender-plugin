@@ -39,7 +39,7 @@ class TrainingBridge:
         if geometry is None:
             transforms = read_dataset_json(dataset / "transforms.json", None) or read_dataset_json(dataset / "capture_transforms.json", None)
             if transforms:
-                geometry = session_geometry.from_capture(transforms["frames"])
+                geometry = from_capture(transforms["frames"])
         if geometry:
             session_geometry.publish(self.session, geometry)
         self.view_geometry = geometry
@@ -361,8 +361,9 @@ class TrainingBridge:
 
 _job = read_job_json(os.environ["LFS_BLENDER_JOB"])
 try:
-    from lichtfeld_sessions.transport import SessionPublisher, spatial_indices, MAX_BYTES
-    from lichtfeld_sessions.capture import capture, PreviewCapacityError
+    from lichtfeld_sessions.transport import SessionPublisher, MAX_BYTES
+    from lichtfeld_sessions.capture import capture, spatial_indices, PreviewCapacityError
+    from session_geometry import from_capture
     from lichtfeld_sessions.publisher import ensure_numpy
     from lichtfeld_sessions import geometry as session_geometry
     require_backend_api(lf)
