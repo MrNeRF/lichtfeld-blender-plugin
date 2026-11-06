@@ -74,6 +74,8 @@ The interface is currently in English.
 Installing from source means building the ZIP above; this is a regular Blender
 extension, not a startup script. Updating the ZIP does not require changing its
 version number during development.
+After updating an enabled extension, restart Blender so Python loads the updated
+bundled dependency.
 
 ## First capture and training
 

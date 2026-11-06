@@ -14,6 +14,9 @@ import tempfile
 import tomllib
 import zipfile
 
+PROTOCOL_WHEEL = tomllib.loads((Path(__file__).resolve().parents[1] /
+                               "lichtfeld_training/blender_manifest.toml").read_text(encoding="utf-8"))["wheels"][0].removeprefix("./")
+
 RUNTIME_FILES = frozenset("""
 __init__.py backend_hook.py blender_manifest.toml bridge_core.py
 capture_observations.py capture_passes.py capture_preview.py capture_seed.py
@@ -21,9 +24,9 @@ capture_settings.py geometry_maps.py job_control.py job_panel.py jobs.py
 mrnf_defaults.json preflight.py preview_scene.py render_devices.py render_worker.py
 rig_edit.py rig_geometry.py rig_mesh.py rig_path.py scene_render.py
 scene_render_worker.py session_cameras.py session_geometry.py session_reader.py
-wheels/lichtfeld_training_protocol-0.1.0-py3-none-any.whl supervisor.py training_options.py training_profiles.json
+supervisor.py training_options.py training_profiles.json
 ui_help.py ui_runtime.py ui_text.py visibility.py workflow.py
-""".split())
+""".split()) | {PROTOCOL_WHEEL}
 DOCUMENT_FILES = ("LICENSE", "CREDITS.md", "README.md", "CONTRIBUTING.md",
                   "docs/user-guide.md", "docs/technical-reference.md")
 
@@ -44,7 +47,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "lichtfeld-training-protocol"
-version = "0.1.0"
+version = "PROTOCOL_VERSION"
 description = "Local training sessions shared with LichtFeld Studio"
 requires-python = ">=3.11"
 license = "GPL-3.0-or-later"
@@ -54,11 +57,11 @@ authors = [{name = "LichtFeld Studio Authors"}]
 [tool.setuptools]
 packages = ["lichtfeld_sessions"]
 py-modules = ["_lfs_path_io"]
-''', encoding="utf-8")
+'''.replace("PROTOCOL_VERSION", Path(PROTOCOL_WHEEL).name.split("-")[1]), encoding="utf-8")
         subprocess.run([sys.executable, "-m", "build", "--wheel", "--no-isolation",
                         "--outdir", str(staging / "dist")], cwd=staging, check=True,
                        env={**os.environ, "SOURCE_DATE_EPOCH": "315532800"})
-        wheel = staging / "dist/lichtfeld_training_protocol-0.1.0-py3-none-any.whl"
+        wheel = staging / "dist" / Path(PROTOCOL_WHEEL).name
         destination.mkdir(parents=True, exist_ok=True)
         descriptor, filename = tempfile.mkstemp(prefix=wheel.name + "-", suffix=".tmp", dir=destination)
         temporary = Path(filename)

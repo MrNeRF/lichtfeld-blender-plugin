@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 import sys
 import time
+import tomllib
 import uuid
 
 SCHEMA = 1
@@ -25,8 +26,8 @@ except ModuleNotFoundError as error:
         raise
     # Detached Python/render workers do not inherit Blender's extension site.
     # The bundled wheel is pure Python and can be imported directly as a ZIP.
-    sys.path.insert(0, str(Path(__file__).with_name("wheels") /
-                           "lichtfeld_training_protocol-0.1.0-py3-none-any.whl"))
+    manifest = tomllib.loads(Path(__file__).with_name("blender_manifest.toml").read_text(encoding="utf-8"))
+    sys.path.insert(0, str(Path(__file__).parent / manifest["wheels"][0]))
     from lichtfeld_sessions.transport import atomic_json, read_text_shared, process_alive
 
 
