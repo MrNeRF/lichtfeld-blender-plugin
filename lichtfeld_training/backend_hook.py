@@ -267,6 +267,7 @@ class TrainingBridge:
             if not self.geometry_checked and time.monotonic() >= self.geometry_retry_at:
                 try:
                     current_geometry = session_geometry.from_native_scene(lf.get_scene(), self.view_geometry)
+                    self.view_geometry = current_geometry
                     session_geometry.publish(self.session, current_geometry)
                     self.session.update(geometry_error="")
                     self.geometry_checked = True
