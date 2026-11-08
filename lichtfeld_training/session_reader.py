@@ -1,18 +1,17 @@
 # SPDX-FileCopyrightText: 2026 LichtFeld Studio Authors
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Bounded background readers. Never import or access bpy, widgets or scene APIs."""
-import hashlib
 from pathlib import Path
 import queue
 import threading
 import time
-from lichtfeld_sessions.transport import TERMINAL, SessionClient, read_json, read_snapshot, process_alive, validate_session, session_liveness
+from lichtfeld_sessions.transport import TERMINAL, SessionClient, read_json, read_snapshot, process_alive, validate_session, session_liveness, artifact_path, verified_artifact
 from .job_control import Controller
 from lichtfeld_sessions.geometry import load as load_geometry
 from .bridge_core import read_job_json
 
 
-def load_record(root, record):
+def load_record(root, record, should_cancel=lambda: False):
     if record.get("shared"):
         try:
             return read_snapshot(record["shared"]), record["shared"]["transport"]
@@ -20,17 +19,8 @@ def load_record(root, record):
             if "path" not in record:
                 raise
     import numpy as np
-    root = Path(root).resolve()
-    path = (root / record["path"]).resolve()
-    if not path.is_relative_to(root) or path.stat().st_size != record["bytes"]:
-        raise ValueError("Invalid artifact path or size")
-    digest = hashlib.sha256()
-    with path.open("rb") as stream:
-        for block in iter(lambda: stream.read(4 * 1024 * 1024), b""):
-            digest.update(block)
-        if digest.hexdigest() != record["sha256"]:
-            raise ValueError("Artifact integrity check failed")
-        stream.seek(0)
+    path = artifact_path(root, record["path"])
+    with verified_artifact(path, record, should_cancel) as stream:
         if stream.readline() != b"ply\n" or stream.readline() != b"format binary_little_endian 1.0\n":
             raise ValueError("Expected a binary Gaussian PLY")
         fields, count = [], None
@@ -344,7 +334,7 @@ class Observer:
                         if geometry_only:
                             data, count, transport = None, self.last_count, None
                         else:
-                            arrays, transport = load_record(root, record)
+                            arrays, transport = load_record(root, record, self.stop.is_set)
                             try:
                                 data, count = self.prepare(arrays), len(arrays["means"])
                             finally:

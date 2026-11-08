@@ -3,7 +3,6 @@
 """Job protocol and codecs. No Blender or LichtFeld imports in this module."""
 
 import csv
-import hashlib
 import json
 import math
 import os
@@ -19,16 +18,11 @@ MAX_JOB_CHARS = 32 * 1024 * 1024
 MAX_DATASET_CHARS = 32 * 1024 * 1024
 
 
-try:
-    from lichtfeld_sessions.transport import atomic_json, read_text_shared, process_alive
-except ModuleNotFoundError as error:
-    if error.name != "lichtfeld_sessions":
-        raise
-    # Detached Python/render workers do not inherit Blender's extension site.
-    # The bundled wheel is pure Python and can be imported directly as a ZIP.
-    manifest = tomllib.loads(Path(__file__).with_name("blender_manifest.toml").read_text(encoding="utf-8"))
-    sys.path.insert(0, str(Path(__file__).parent / manifest["wheels"][0]))
-    from lichtfeld_sessions.transport import atomic_json, read_text_shared, process_alive
+# Detached workers use the same reviewed dependency as Blender, including when
+# the backend ships an older protocol package. The wheel is directly importable.
+manifest = tomllib.loads(Path(__file__).with_name("blender_manifest.toml").read_text(encoding="utf-8"))
+sys.path.insert(0, str(Path(__file__).parent / manifest["wheels"][0]))
+from lichtfeld_sessions.transport import atomic_json, read_text_shared, process_alive, artifact_path, digest_stream, verified_artifact
 
 
 def read_json(path, default=None, *, max_chars=262144):
@@ -72,27 +66,15 @@ def verified_training_outcome(runtime):
     return outcome
 
 
-def artifact_path(root, relative):
-    root = Path(root).resolve()
-    path = (root / relative).resolve()
-    if not path.is_relative_to(root) or path == root:
-        raise ValueError("Artifact path escapes the training job")
-    return path
-
-
 def digest(path):
-    hasher = hashlib.sha256()
     with Path(path).open("rb") as stream:
-        for block in iter(lambda: stream.read(4 * 1024 * 1024), b""):
-            hasher.update(block)
-    return hasher.hexdigest()
+        return digest_stream(stream)
 
 
 def verify_artifact(root, record):
     path = artifact_path(root, record["path"])
-    if path.stat().st_size != record["bytes"] or digest(path) != record["sha256"]:
-        raise ValueError("Splat is incomplete or failed its integrity check")
-    return path
+    with verified_artifact(path, record):
+        return path
 
 
 def evaluation_steps(iterations, interval):

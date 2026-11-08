@@ -48,6 +48,10 @@ class TrainingCoreTest(unittest.TestCase):
             path.write_bytes(b"corrupt!")
             with self.assertRaises(ValueError):
                 core.verify_artifact(root, record)
+            path.unlink()
+            path.mkdir()
+            with self.assertRaisesRegex(ValueError, "regular file"):
+                core.verify_artifact(root, record)
 
     def test_atomic_state_never_accepts_nan(self):
         with tempfile.TemporaryDirectory() as directory:

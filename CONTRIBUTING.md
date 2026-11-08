@@ -47,8 +47,9 @@ maintain another copy of its modules in this repository. Blender-specific captur
 and display conversions belong in the extension's `session_geometry.py`.
 The distribution also includes LichtFeld Studio's existing `_lfs_path_io` module
 for the shared Windows filesystem boundary; its source remains in LichtFeld Studio.
-Blender installs it through the manifest's `wheels` entry; detached plain Python
-workers import the same pure Python wheel directly when it is not installed.
+Blender installs it through the manifest's `wheels` entry. Detached workers load
+the bundled pure Python wheel directly, keeping protocol behavior aligned even
+when the backend ships an older package.
 
 For source-mode tests, install that local dependency first:
 
