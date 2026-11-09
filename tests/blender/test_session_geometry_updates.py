@@ -44,6 +44,23 @@ def arrays():
 
 
 class GeometryUpdates(unittest.TestCase):
+    def test_saved_model_decodes_from_verified_stream_and_can_cancel(self):
+        with tempfile.TemporaryDirectory() as directory:
+            expected = arrays()
+            record = core.write_splat(directory, expected, 4, "best")
+            loaded, kind = reader.load_record(directory, record)
+            self.assertEqual(kind, "ply")
+            for key in expected:
+                np.testing.assert_array_equal(loaded[key], expected[key])
+            with self.assertRaises(InterruptedError):
+                reader.load_record(directory, record, lambda: True)
+            path = Path(directory) / record["path"]
+            content = path.read_bytes()
+            path.write_bytes(content[:-1] + bytes([content[-1] ^ 1]))
+            with self.assertRaisesRegex(ValueError, "integrity"):
+                reader.load_record(directory, record)
+            path.unlink()
+
     def test_paused_external_repair_update_and_removal_do_not_reread_the_splat(self):
         with tempfile.TemporaryDirectory() as directory, patch.object(transport, "registry_root", return_value=Path(directory)):
             publisher = transport.SessionPublisher({})

@@ -116,6 +116,17 @@ used when full transport exceeds its byte budget or when limited mode is selecte
 SH0 is supported. Best/final saved artifacts retain the captured model fidelity.
 Current progress, snapshot progress and best-evaluated progress are separate.
 
+At training end, the session's `result` descriptor identifies the completed full
+PLY by its absolute output root, relative artifact path, byte size, SHA-256,
+iteration, Gaussian count and SH degree. Its compact `presentation` retains the
+coordinate metadata independently of the last preview. It selects the best
+evaluated model, or the last valid model when no evaluated candidate exists.
+The file is published after best-candidate rotation has finished. Compatible
+LichtFeld Studio observers can verify it and use the normal asynchronous loader
+to create an editable local model. Retain the job folder until import finishes.
+Terminal session state and the result descriptor are published together. A
+failed final write retains an earlier valid best result for recovery.
+
 The required backend's `SplatData.shN_rows` API extracts the selected rows and
 bands before host transfer. The adapter rejects backends without that API.
 SH0 remains a preview budget, not a compatibility workaround for older backends.

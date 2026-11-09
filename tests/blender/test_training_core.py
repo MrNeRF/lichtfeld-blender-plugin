@@ -48,6 +48,10 @@ class TrainingCoreTest(unittest.TestCase):
             path.write_bytes(b"corrupt!")
             with self.assertRaises(ValueError):
                 core.verify_artifact(root, record)
+            path.unlink()
+            path.mkdir()
+            with self.assertRaisesRegex(ValueError, "regular file"):
+                core.verify_artifact(root, record)
 
     def test_atomic_state_never_accepts_nan(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -166,6 +170,21 @@ class TrainingCoreTest(unittest.TestCase):
                 bridge.cleanup_previews()
                 self.assertEqual(bridge.preview_history, [records[2]])
                 self.assertFalse((root / records[0]["path"]).exists())
+                bridge.view_geometry = {"schema": 1, "source_frame": "blender-world",
+                                        "data_to_source": np.eye(4).tolist(),
+                                        "model_to_data": np.diag([2., 3., 4., 1.]).tolist(), "cameras": []}
+                bridge.publish("failed")
+                self.assertEqual(core.read_json(bridge.session.root / "session.json")["state"], "stopping")
+                bridge.on_end({"iteration": 8, "terminal_state": "completed"})
+                from lichtfeld_sessions.transport import resolve_result, validate_session
+                status = validate_session(core.read_json(bridge.session.root / "session.json"))
+                self.assertEqual(status["state"], "completed")
+                self.assertEqual(status["result"]["iteration"], 4)
+                with resolve_result(status) as (saved, presentation):
+                    self.assertEqual(saved.read_bytes(), core.verify_artifact(root, record).read_bytes())
+                    self.assertEqual(presentation["model_to_data"], bridge.view_geometry["model_to_data"])
+                    self.assertNotIn("cameras", presentation)
+                self.assertFalse(saved.exists())
                 bridge.writer.shutdown(wait=True)
                 bridge.session.finish()
                 bridge.session.pool.close()

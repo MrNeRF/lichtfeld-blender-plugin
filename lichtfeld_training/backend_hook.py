@@ -80,7 +80,10 @@ class TrainingBridge:
         self.publish("training")
 
     def publish(self, state="training"):
-        self.session.update(state=state, iteration=self.iteration, iterations=self.job["iterations"],
+        # Only finish() publishes a terminal session, together with its saved
+        # result. An observer must not retire before finalization can retain it.
+        self.session.update(state="stopping" if state == "failed" else state,
+                            iteration=self.iteration, iterations=self.job["iterations"],
                             count=self.count, error=self.error, preview_error=self.preview_error,
                             preview_fallback=self.preview_fallback, preview_note=self.preview_note)
         atomic_json(self.root / "runtime.json", {
@@ -264,6 +267,7 @@ class TrainingBridge:
             if not self.geometry_checked and time.monotonic() >= self.geometry_retry_at:
                 try:
                     current_geometry = session_geometry.from_native_scene(lf.get_scene(), self.view_geometry)
+                    self.view_geometry = current_geometry
                     session_geometry.publish(self.session, current_geometry)
                     self.session.update(geometry_error="")
                     self.geometry_checked = True
@@ -349,14 +353,17 @@ class TrainingBridge:
                 self.best = write_splat(self.root, self.capture(), self.iteration, "last")
                 atomic_json(self.root / "best.json", self.best)
             self.publish("failed" if self.error else "finalizing")
-            self.session.finish("failed" if self.error else terminal, result=self.best)
         except Exception as error:
             self.error = str(error)
             self.publish("failed")
         finally:
             self.writer.shutdown(wait=True)
-            if not self.session.stop.is_set():
-                self.session.finish("failed", error=self.error)
+            # Publish a retained best even if the final write failed. Completed
+            # artifacts are full fidelity and no longer rotated by cleanup.
+            presentation = {"schema": 1, **{key: value for key, value in (self.view_geometry or {}).items()
+                                           if key != "cameras"}}
+            result = {**self.best, "root": str(self.root.absolute()), "presentation": presentation} if self.best else None
+            self.session.finish("failed" if self.error else terminal, error=self.error, result=result)
 
 
 _job = read_job_json(os.environ["LFS_BLENDER_JOB"])

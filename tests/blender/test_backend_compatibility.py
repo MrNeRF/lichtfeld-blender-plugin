@@ -72,7 +72,8 @@ class NativeCompatibility(unittest.TestCase):
 
     def test_geometry_retry_recovers_and_clears_error(self):
         bridge, namespace = self.bridge()
-        value = {'schema': 1, 'source_frame': 'blender-world', 'model_to_data': geometry.IDENTITY,
+        value = {'schema': 1, 'source_frame': 'blender-world',
+                 'model_to_data': [[2, 0, 0, 3], [0, 3, 0, 4], [0, 0, 4, 5], [0, 0, 0, 1]],
                  'data_to_source': geometry.FLIP, 'cameras': []}
         hook = {'iteration': 1, 'loss': .1, 'num_gaussians': 2, 'iterations': 4, 'is_paused': False}
         with patch.object(geometry, 'from_native_scene', side_effect=[ValueError('temporary'), value]), patch.object(geometry, 'publish') as publish:
@@ -84,6 +85,13 @@ class NativeCompatibility(unittest.TestCase):
             self.assertEqual(publish.call_args.args[1]['source_frame'], 'blender-world')
             bridge.session.update.assert_called_with(geometry_error='')
             namespace['lf'].session.return_value.request_stop.assert_not_called()
+        bridge.root = Path('unused')
+        bridge.best = {'path': 'retained.ply'}
+        bridge.writer = Mock()
+        bridge.on_end({'iteration': 4, 'terminal_state': 'completed'})
+        presentation = bridge.session.finish.call_args.kwargs['result']['presentation']
+        self.assertEqual(presentation['model_to_data'], value['model_to_data'])
+        self.assertEqual(presentation['data_to_source'], value['data_to_source'])
 
     def test_missing_hook_fields_fail_before_training_steps(self):
         bridge, namespace = self.bridge()
@@ -100,7 +108,24 @@ class NativeCompatibility(unittest.TestCase):
             bridge.writer = Mock()
             bridge.on_end({'iteration': 4, 'terminal_state': outcome})
             expected = outcome if outcome in {'completed', 'stopped', 'failed'} else 'failed'
-            bridge.session.finish.assert_called_once_with(expected, result=bridge.best)
+            bridge.session.finish.assert_called_once()
+            self.assertEqual(bridge.session.finish.call_args.args, (expected,))
+            result = bridge.session.finish.call_args.kwargs['result']
+            self.assertEqual(result['path'], bridge.best['path'])
+            self.assertEqual(Path(result['root']), bridge.root.resolve())
+            self.assertEqual(result['presentation']['schema'], 1)
             if outcome in (None, 'unknown'):
                 self.assertIn('terminal_state', bridge.error)
             bridge.writer.shutdown.assert_called_once_with(wait=True)
+
+    def test_final_write_failure_still_publishes_retained_best(self):
+        bridge, namespace = self.bridge()
+        bridge.root = Path('unused')
+        bridge.best = {'path': 'retained.ply'}
+        bridge.writer = Mock()
+        bridge.finish_writer.side_effect = OSError('Final write failed')
+        bridge.on_end({'iteration': 4, 'terminal_state': 'completed'})
+        bridge.session.finish.assert_called_once()
+        self.assertEqual(bridge.session.finish.call_args.args, ('failed',))
+        self.assertEqual(bridge.session.finish.call_args.kwargs['result']['path'], 'retained.ply')
+        self.assertEqual(bridge.session.finish.call_args.kwargs['error'], 'Final write failed')

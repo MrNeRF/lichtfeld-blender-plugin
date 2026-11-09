@@ -176,5 +176,6 @@ With an observer-enabled LichtFeld Studio build, open **External training** in a
 If a run fails, retain its job folder and read the reported error and process log
 before retrying. A valid captured dataset can be reused without rerendering.
 Checkpoints and completed results remain separate from the transient live preview.
+After training finishes, a compatible LichtFeld Studio observer can use **Import saved model** to load the full saved best evaluated model, or the last valid model if no evaluated candidate exists. It creates an editable local model with the result's coordinate presentation and full SH data. The observer hides its transient preview after a successful import. Keep the job folder available until import completes.
 Job and dataset metadata can contain local paths and scene-derived content;
 review them before sharing.
