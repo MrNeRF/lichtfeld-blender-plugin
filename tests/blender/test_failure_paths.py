@@ -108,11 +108,12 @@ class FailurePaths(unittest.TestCase):
                 value["backend"] = metadata_backend
                 core.atomic_json(old / "job.json", value)
                 with patch.object(jobs.subprocess, "run") as run:
-                    job, parent = jobs.resume_data(old, 16, 4, backend="TRUSTED_PREFERENCES", preview_options={"full_preview":False,"preview_sh_degree":0})
+                    job, parent = jobs.resume_data(old, 16, 4, backend="TRUSTED_PREFERENCES", jobs_directory=Path(directory)/'jobs', preview_options={"full_preview":False,"preview_sh_degree":0})
                 run.assert_not_called()
                 self.assertEqual(job["preview_sh_degree"], 0)
                 self.assertEqual(job["sh_degree"], 0)
                 self.assertEqual(job["backend"], "TRUSTED_PREFERENCES")
+                self.assertEqual(Path(job['root']).parent, Path(directory)/'jobs')
                 self.assertEqual(core.training_command(job, "hook.py")[0], "TRUSTED_PREFERENCES")
                 self.assertEqual(job["connection_directory"], "")
                 self.assertEqual(parent, "previous")
@@ -126,7 +127,7 @@ class FailurePaths(unittest.TestCase):
             old = previous_job(directory)
             for value in ("", "  ", None, ["binary"]):
                 with self.assertRaises(ValueError):
-                    jobs.resume_data(old, 16, 4, backend=value)
+                    jobs.resume_data(old, 16, 4, backend=value, jobs_directory=directory)
             self.assertEqual(list(Path(directory).iterdir()), [old])
 
     def test_resume_rolls_back_partial_copy_and_metadata_failure(self):
@@ -138,7 +139,7 @@ class FailurePaths(unittest.TestCase):
             for target, effect in (("copy", broken_copy), ("metadata", OSError("disk full"))):
                 context = patch.object(jobs.shutil, "copyfileobj", side_effect=effect) if target == "copy" else patch.object(jobs, "atomic_json", side_effect=effect)
                 with context, self.assertRaises(OSError):
-                    jobs.resume_data(old, 16, 4, backend="TRUSTED")
+                    jobs.resume_data(old, 16, 4, backend="TRUSTED", jobs_directory=directory)
                 self.assertEqual(list(Path(directory).iterdir()), [old])
                 core.verify_artifact(old, core.read_json(old / "best.json"))
 
@@ -154,7 +155,7 @@ class FailurePaths(unittest.TestCase):
                 files.append((Path(path), flags, mode))
                 return real_open(path, flags, mode, **kw)
             with patch.object(Path, "mkdir", mkdir), patch.object(os, "open", opening):
-                job, _ = jobs.resume_data(old, 16, 4, backend="TRUSTED")
+                job, _ = jobs.resume_data(old, 16, 4, backend="TRUSTED", jobs_directory=directory)
             root = Path(job["root"])
             self.assertIn((root, 0o700), modes)
             self.assertIn((root / "artifacts", 0o700), modes)

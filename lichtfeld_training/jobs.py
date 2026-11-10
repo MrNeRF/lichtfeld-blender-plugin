@@ -69,7 +69,7 @@ def prepare_optimizer(job):
     job['optimizer_overrides'] = values
 
 
-def resume_data(directory, iterations, interval, *, backend, connection_directory="", preview_options=None):
+def resume_data(directory, iterations, interval, *, backend, jobs_directory, connection_directory="", preview_options=None):
     # Executable authority comes only from preferences, never imported job data.
     if not isinstance(backend, str) or not backend.strip():
         raise ValueError("Choose the LichtFeld executable in Settings before continuing")
@@ -105,7 +105,8 @@ def resume_data(directory, iterations, interval, *, backend, connection_director
         job['dataset_root'] = str(Path(origin['root'])/'dataset')
     previous_id = job["id"]
     identifier = uuid.uuid4().hex
-    root = previous.parent / identifier
+    root = Path(jobs_directory).resolve() / identifier
+    root.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     root.mkdir(mode=0o700)
     try:
         job.update(id=identifier, root=str(root), parent_job=str(previous), resume=str(checkpoint),
@@ -158,10 +159,10 @@ def open_folder(path):
         subprocess.Popen(["open" if os.sys.platform == "darwin" else "xdg-open", path])
 
 
-def check_environment(backend, directory, source="", generation=0, require_backend=True):
+def check_environment(backend, directory, source="", require_backend=True, *, backend_version=None):
     if require_backend and not backend:
         return {"ok":False,"backend":False,"folder":False,"message":"Choose the LichtFeld executable in Settings."}
-    version=verify_backend(backend) if require_backend else "Dataset capture folder is writable"
+    version=(backend_version if backend_version is not None else verify_backend(backend)) if require_backend else "Dataset capture folder is writable"
     root=Path(directory)
     root.mkdir(mode=0o700,parents=True,exist_ok=True)
     with tempfile.TemporaryFile(dir=root) as probe:probe.write(b"check")
@@ -314,7 +315,7 @@ def captured_dataset(directory, options=None):
     return job, previous, candidate, manifest
 
 
-def restart_data(directory, options, *, backend, connection_directory=""):
+def restart_data(directory, options, *, backend, jobs_directory, connection_directory=""):
     """Fresh model/optimizer, original capture, separate outputs; no source execution."""
     if not isinstance(backend, str) or not backend.strip():
         raise ValueError("Choose the LichtFeld executable in Settings")
@@ -342,7 +343,7 @@ def restart_data(directory, options, *, backend, connection_directory=""):
     for key in ("resume", "capture_staging_file", "source_identity", "source_sha256", "optimizer_overrides", "capture_only", "export_parent"):
         job.pop(key, None)
     identifier = uuid.uuid4().hex
-    root = previous.parent / identifier
+    root = Path(jobs_directory).resolve() / identifier
     job.update(id=identifier, root=str(root), parent_job=str(previous),
                dataset_root=str(dataset), reuse_dataset=True, backend=backend,
                connection_directory=connection_directory, dataset_views=manifest["views"])
@@ -352,6 +353,7 @@ def restart_data(directory, options, *, backend, connection_directory=""):
     else:
         from bridge_core import training_config
     training_config(job)
+    root.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     root.mkdir(mode=0o700)
     return job, original["id"]
 

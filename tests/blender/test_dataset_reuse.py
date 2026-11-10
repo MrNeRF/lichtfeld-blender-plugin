@@ -39,7 +39,8 @@ class DatasetReuse(unittest.TestCase):
             self.assertEqual(data,first)
             self.assertEqual(manifest['views'],4)
             self.assertEqual((first/'images/view_000000.png').read_bytes(),b'image fixture')
-            fresh,_=jobs.restart_data(first,{},backend='TRUSTED')
+            fresh,_=jobs.restart_data(first,{},backend='TRUSTED',jobs_directory=Path(directory)/'jobs')
+            self.assertEqual(Path(fresh['root']).parent, Path(directory)/'jobs')
             self.assertNotIn('capture_only',fresh)
             self.assertNotIn('export_parent',fresh)
             self.assertFalse(list(destination.glob('*.partial')))
@@ -72,17 +73,17 @@ class DatasetReuse(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             old=fixture(directory)
             for degree in range(4):
-                job,_=jobs.restart_data(old,{"sh_degree":3,"preview_sh_degree":degree,"full_preview":False},backend="TRUSTED")
+                job,_=jobs.restart_data(old,{"sh_degree":3,"preview_sh_degree":degree,"full_preview":False},backend="TRUSTED",jobs_directory=directory)
                 self.assertEqual(training_config(job)["optimization"]["sh_degree"],3)
                 self.assertEqual(job["preview_sh_degree"],degree)
             for degree in (-1,4,True,1.5,"0"):
                 with self.assertRaises(ValueError):
-                    jobs.restart_data(old,{"preview_sh_degree":degree},backend="TRUSTED")
+                    jobs.restart_data(old,{"preview_sh_degree":degree},backend="TRUSTED",jobs_directory=directory)
 
     def test_fresh_training_reuses_images_without_source_checkpoint_or_old_result(self):
         with tempfile.TemporaryDirectory() as directory:
             old=fixture(directory)
-            job, previous=jobs.restart_data(old,{"iterations":20,"eval_interval":10,"sh_degree":1},backend="TRUSTED")
+            job, previous=jobs.restart_data(old,{"iterations":20,"eval_interval":10,"sh_degree":1},backend="TRUSTED",jobs_directory=directory)
             self.assertEqual(previous,"original")
             self.assertNotIn("resume",job)
             self.assertTrue(job["reuse_dataset"])
@@ -94,7 +95,7 @@ class DatasetReuse(unittest.TestCase):
             self.assertNotIn("--resume",args)
             # Repeated experiments resolve the same immutable captured dataset.
             atomic_json(Path(job["root"])/"job.json",job)
-            second,_=jobs.restart_data(job["root"],{"iterations":8},backend="TRUSTED")
+            second,_=jobs.restart_data(job["root"],{"iterations":8},backend="TRUSTED",jobs_directory=directory)
             self.assertEqual(second["dataset_root"],job["dataset_root"])
             self.assertNotEqual(second["root"],job["root"])
 
@@ -103,10 +104,10 @@ class DatasetReuse(unittest.TestCase):
             old=fixture(directory)
             cases=[{"use_depth_loss":True},{"backend":"EVIL"},{"resolution":4096}]
             for options in cases:
-                with self.assertRaises(ValueError):jobs.restart_data(old,options,backend="TRUSTED")
+                with self.assertRaises(ValueError):jobs.restart_data(old,options,backend="TRUSTED",jobs_directory=directory)
                 self.assertEqual(len(list(Path(directory).iterdir())),1)
             (old/"dataset/images/view_000000.png").unlink()
-            with self.assertRaises(ValueError):jobs.restart_data(old,{},backend="TRUSTED")
+            with self.assertRaises(ValueError):jobs.restart_data(old,{},backend="TRUSTED",jobs_directory=directory)
             (old/"dataset/images/view_000000.png").write_bytes(b"fixture")
             atomic_json(old/"dataset/transforms.json",{"frames":[]})
-            with self.assertRaises(ValueError):jobs.restart_data(old,{},backend="TRUSTED")
+            with self.assertRaises(ValueError):jobs.restart_data(old,{},backend="TRUSTED",jobs_directory=directory)

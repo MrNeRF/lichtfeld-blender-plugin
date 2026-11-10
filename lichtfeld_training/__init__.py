@@ -1163,13 +1163,14 @@ class LF_OT_restart(bpy.types.Operator):
         directory = bpy.path.abspath(s.dataset_job_directory) if s.dataset_job_directory else s.job_directory
         backend = bpy.path.abspath(prefs.backend_path)
         connection = preflight.connection_folder(prefs)
+        jobs_directory = preflight.jobs_folder(prefs)
         options = training_settings(s)
         if not directory or not backend:
             self.report({"ERROR"}, "Choose a saved dataset job and configure LichtFeld in Settings")
             return {"CANCELLED"}
         s.operation_busy = True
         def work():
-            job, previous = jobs.restart_data(directory, options, backend=backend, connection_directory=connection)
+            job, previous = jobs.restart_data(directory, options, backend=backend, jobs_directory=jobs_directory, connection_directory=connection)
             launch_supervisor(job)
             return job
         def done(job):
@@ -1214,6 +1215,7 @@ class LF_OT_resume(bpy.types.Operator):
             return {"CANCELLED"}
         backend = bpy.path.abspath(prefs.backend_path)
         connection_directory = preflight.connection_folder(prefs)
+        jobs_directory = preflight.jobs_folder(prefs)
         directory = settings.job_directory
         steps = self.new_total if self.properties.is_property_set("new_total") else settings.iterations
         interval = settings.eval_interval
@@ -1221,7 +1223,7 @@ class LF_OT_resume(bpy.types.Operator):
         settings.operation_busy = True
         def work():
             job, previous = jobs.resume_data(directory, steps, interval,
-                                             backend=backend, connection_directory=connection_directory,
+                                             backend=backend, jobs_directory=jobs_directory, connection_directory=connection_directory,
                                              preview_options=preview_options)
             launch_supervisor(job)
             return job, previous

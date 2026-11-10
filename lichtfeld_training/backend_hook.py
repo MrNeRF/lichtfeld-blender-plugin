@@ -59,6 +59,7 @@ class TrainingBridge:
         self.last_status = 0.0
         self.command_id = ""
         self.command_error = ""
+        self.next_control_check = 0.0
         self.error = ""
         self.paused = False
         self.stopped = False
@@ -127,20 +128,23 @@ class TrainingBridge:
         if preview:
             self.preview = {**preview, "shared": preview}
         if record["kind"] == "best":
-            previous = self.best
-            self.best = record
-            atomic_json(self.root / "best.json", record)
-            if previous and previous["path"] != record["path"]:
-                try:
-                    artifact_path(self.root, previous["path"]).unlink(missing_ok=True)
-                except OSError:
-                    pass  # A consumer may still hold the previous best on Windows.
+            self.retain_best(record)
         else:
             self.preview = record
             if "path" in record:
                 self.preview_history.append(record)
             self.cleanup_previews()
         return True
+
+    def retain_best(self, record):
+        previous = self.best
+        atomic_json(self.root / "best.json", record)
+        self.best = record
+        if previous and previous["path"] != record["path"]:
+            try:
+                artifact_path(self.root, previous["path"]).unlink(missing_ok=True)
+            except OSError:
+                pass  # A consumer may still hold the previous best on Windows.
 
     def write_candidate(self, arrays, iteration, kind, score=None):
         if kind == "preview":
@@ -197,6 +201,8 @@ class TrainingBridge:
         return arrays
 
     def cleanup_previews(self):
+        if not self.preview_history:
+            return
         ack = read_json(self.root / "ack.json", {})
         acknowledged = next((i for i, item in enumerate(self.preview_history)
                              if item["id"] == ack.get("id")), -1)
@@ -294,8 +300,10 @@ class TrainingBridge:
             self.count = hook["num_gaussians"]
             if self.finish_writer():
                 self.publish("stopping" if self.stopped else "training")
-            self.cleanup_previews()
-            self.commands()
+            if time.monotonic() >= self.next_control_check:
+                self.cleanup_previews()
+                self.commands()
+                self.next_control_check = time.monotonic() + 0.1
             # The stock trainer drains post-step callbacks before its next mutation.
             # Exact iteration matching is essential; never use the last unrelated row.
             score = metric_at(self.root / "output/metrics.csv", self.iteration) if self.iteration in self.eval_steps else None
@@ -347,11 +355,9 @@ class TrainingBridge:
             if score and better({**score, "count": model.num_points},
                                 {**self.best["score"], "count": self.best["count"]}
                                 if self.best and self.best.get("score") else None):
-                self.best = write_splat(self.root, self.capture(), self.iteration, "best", score)
-                atomic_json(self.root / "best.json", self.best)
+                self.retain_best(write_splat(self.root, self.capture(), self.iteration, "best", score))
             if self.best is None:
-                self.best = write_splat(self.root, self.capture(), self.iteration, "last")
-                atomic_json(self.root / "best.json", self.best)
+                self.retain_best(write_splat(self.root, self.capture(), self.iteration, "last"))
             self.publish("failed" if self.error else "finalizing")
         except Exception as error:
             self.error = str(error)

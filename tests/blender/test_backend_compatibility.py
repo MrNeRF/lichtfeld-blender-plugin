@@ -61,6 +61,7 @@ class NativeCompatibility(unittest.TestCase):
         bridge.finish_writer = Mock(return_value=False)
         bridge.cleanup_previews = Mock()
         bridge.commands = Mock()
+        bridge.next_control_check = 0.0
         bridge.eval_steps = set()
         bridge.previews_enabled = False
         bridge.pending = None

@@ -152,6 +152,12 @@ class TrainingCoreTest(unittest.TestCase):
                 metrics = root / "output/metrics.csv"
                 metrics.write_text("iteration,psnr,ssim\n4,30,0.9\n")
                 bridge.on_step({"iteration": 4, "loss": 1, "num_gaussians": 2, "iterations": 8, "is_paused": False})
+                bridge.next_control_check = 0
+                clock = types.SimpleNamespace(monotonic=lambda: 1000, time=module.time.time, sleep=module.time.sleep)
+                with patch.object(module, 'time', clock), patch.object(bridge, 'commands', wraps=bridge.commands) as commands:
+                    for iteration in (5, 6):
+                        bridge.on_step({'iteration': iteration, 'loss': 1, 'num_gaussians': 2, 'iterations': 8, 'is_paused': False})
+                    commands.assert_called_once()
                 model.means_raw.array[:] = 8
                 metrics.write_text("iteration,psnr,ssim\n4,30,0.9\n8,29,0.8\n")
                 bridge.on_step({"iteration": 8, "loss": 1, "num_gaussians": 2, "iterations": 8, "is_paused": False})
@@ -175,13 +181,15 @@ class TrainingCoreTest(unittest.TestCase):
                                         "model_to_data": np.diag([2., 3., 4., 1.]).tolist(), "cameras": []}
                 bridge.publish("failed")
                 self.assertEqual(core.read_json(bridge.session.root / "session.json")["state"], "stopping")
+                metrics.write_text("iteration,psnr,ssim\n4,30,0.9\n8,31,0.95\n")
                 bridge.on_end({"iteration": 8, "terminal_state": "completed"})
                 from lichtfeld_sessions.transport import resolve_result, validate_session
                 status = validate_session(core.read_json(bridge.session.root / "session.json"))
                 self.assertEqual(status["state"], "completed")
-                self.assertEqual(status["result"]["iteration"], 4)
+                self.assertEqual(status["result"]["iteration"], 8)
+                self.assertFalse((root / record['path']).exists())
                 saved, presentation = resolve_result(status)
-                self.assertEqual(saved, core.verify_artifact(root, record).resolve())
+                self.assertEqual(saved, core.verify_artifact(root, status['result']).resolve())
                 self.assertEqual(presentation["model_to_data"], bridge.view_geometry["model_to_data"])
                 self.assertNotIn("cameras", presentation)
                 bridge.writer.shutdown(wait=True)
