@@ -44,6 +44,44 @@ def arrays():
 
 
 class GeometryUpdates(unittest.TestCase):
+    def test_terminal_result_uses_its_root_hash_identity_and_presentation(self):
+        with tempfile.TemporaryDirectory() as directory, patch.object(transport, "registry_root", return_value=Path(directory) / 'sessions'):
+            root = Path(directory) / 'saved'
+            publisher = transport.SessionPublisher({'job_root': str(Path(directory) / 'other-job')})
+            result = core.write_splat(root, arrays(), 17, 'best')
+            result.pop('id')
+            transform = np.eye(4)
+            transform[0, 3] = 9
+            result.update(root=str(root), presentation={'schema': 1, 'model_to_data': transform.tolist()})
+            publisher.finish('completed', result=result)
+            observer = reader.Observer(publisher.root, external=True)
+            try:
+                frame = take(observer)
+                self.assertEqual(frame['record']['id'], result['sha256'])
+                self.assertEqual(frame['transport'], 'ply')
+                np.testing.assert_array_equal(frame['data']['means'], arrays()['means'])
+                self.assertEqual(frame['geometry']['model_to_data'], transform.tolist())
+                self.assertEqual(observer.status['state'], 'completed')
+                observer.acknowledge(frame['record']['id'])
+                until(lambda: not observer.pending)
+                self.assertIsNone(observer.take())
+            finally:
+                observer.close(); observer.thread.join(5)
+                publisher.thread.join(3); publisher.pool.close()
+
+    def test_invalid_terminal_result_keeps_terminal_status_visible(self):
+        with tempfile.TemporaryDirectory() as directory, patch.object(transport, "registry_root", return_value=Path(directory)):
+            publisher = transport.SessionPublisher({})
+            publisher.finish('failed', result={'kind': 'best'})
+            observer = reader.Observer(publisher.root, external=True)
+            try:
+                until(lambda: observer.error)
+                self.assertEqual(observer.status['state'], 'failed')
+                self.assertIsNone(observer.take())
+            finally:
+                observer.close(); observer.thread.join(5)
+                publisher.thread.join(3); publisher.pool.close()
+
     def test_saved_model_decodes_from_verified_stream_and_can_cancel(self):
         with tempfile.TemporaryDirectory() as directory:
             expected = arrays()

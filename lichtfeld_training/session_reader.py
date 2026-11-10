@@ -5,9 +5,9 @@ from pathlib import Path
 import queue
 import threading
 import time
-from lichtfeld_sessions.transport import TERMINAL, SessionClient, read_json, read_snapshot, process_alive, validate_session, session_liveness, artifact_path, verified_artifact
+from lichtfeld_sessions.transport import TERMINAL, SessionClient, read_json, read_snapshot, process_alive, validate_session, validate_result, session_liveness, artifact_path, verified_artifact
 from .job_control import Controller
-from lichtfeld_sessions.geometry import load as load_geometry
+from lichtfeld_sessions.geometry import FLIP, IDENTITY, validate as validate_geometry, load as load_geometry
 from .bridge_core import read_job_json
 
 
@@ -157,6 +157,7 @@ class Observer:
         try:
             while not self.stop.is_set():
                 record = None
+                result = None
                 reading_status = True
                 try:
                     if self.bootstrap:
@@ -204,10 +205,20 @@ class Observer:
                             state = "disconnected"
                         job = {"id": "session:" + status.get("id", self.root.name), "sources": []}
                         root = Path(status.get("job_root", self.root))
+                        self.status = {**status, "state": state, "liveness": liveness, "job": job, "root": str(root)}
                         result = status.get("result") if state in TERMINAL else None
                         snapshot = status.get("snapshot")
-                        record = result or ({**snapshot, "shared": snapshot} if snapshot else None)
-                        self.status = {**status, "state": state, "liveness": liveness, "job": job, "root": str(root)}
+                        if result is not None:
+                            result = validate_result(result)
+                            presentation = validate_geometry(result["presentation"])
+                            root = Path(result["root"])
+                            self.status["root"] = str(root)
+                            # A terminal result has no mandatory snapshot id and
+                            # must use its full artifact, never a limited preview.
+                            record = {**result, "id": result["sha256"]}
+                            record.pop("shared", None)
+                        else:
+                            record = {**snapshot, "shared": snapshot} if snapshot else None
                     else:
                         state = metadata("state.json")
                         runtime = metadata("runtime.json")
@@ -339,8 +350,12 @@ class Observer:
                                 data, count = self.prepare(arrays), len(arrays["means"])
                             finally:
                                 del arrays
+                        frame_geometry = self.geometry
+                        if self.external and result is not None:
+                            frame_geometry = {**(self.geometry or {}), "data_to_source": FLIP,
+                                              "model_to_data": IDENTITY, **presentation}
                         frame = {"record": record, "job": job, "transport": transport,
-                                 "count": count, "geometry": self.geometry,
+                                 "count": count, "geometry": frame_geometry,
                                  "geometry_ref": self.geometry_ref, "geometry_only": geometry_only,
                                  "geometry_revision": (self.geometry_ref or {}).get("revision", ""),
                                  "data": data}
