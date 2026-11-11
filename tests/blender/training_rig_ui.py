@@ -37,6 +37,18 @@ def heartbeat():
         state["cameras"] = sum(o.type == "CAMERA" for o in settings.camera_collection.objects)
         assert state["cameras"] == 1000 and state["ticks"] > 5, state
         state["elapsed"] = now - state["started"]
+        # The completed modal transaction is one undo step, including its subject.
+        assert settings.rig_reference.mode == 'OBJECTS' and settings.rig_reference.objects
+        rig_name = settings.camera_collection.name
+        assert bpy.ops.ed.undo() == {'FINISHED'}
+        assert bpy.context.scene.lichtfeld_training.camera_collection is None
+        assert bpy.context.scene.lichtfeld_training.rig_reference.mode == 'UNSET'
+        assert bpy.ops.ed.redo() == {'FINISHED'}
+        settings = bpy.context.scene.lichtfeld_training
+        assert settings.camera_collection.name == rig_name
+        assert settings.rig_reference.objects[0].object is not None
+        assert settings.camera_collection.lichtfeld_rig_reference.objects[0].object == settings.rig_reference.objects[0].object
+        state['reference_undo_redo'] = True
         output.write_text(json.dumps(state))
         print("RIG_EVENT_LOOP_HEARTBEAT_OK", state, flush=True)
         bpy.ops.wm.quit_blender()
@@ -57,7 +69,7 @@ def render_interleave():
     rig=settings.camera_collection
     original_ids=[o.as_pointer() for o in rig.objects if o.type=='CAMERA']
     scene.camera=next(o for o in rig.objects if o.type=='CAMERA')
-    scene.render.engine='CYCLES';scene.cycles.device='CPU';scene.cycles.samples=1024
+    scene.render.engine='CYCLES';scene.cycles.device='CPU';scene.cycles.samples=8192
     scene.cycles.use_adaptive_sampling=False;scene.cycles.use_denoising=False
     scene.render.resolution_x=128;scene.render.resolution_y=128;scene.render.resolution_percentage=100
     bpy.context.preferences.view.render_display_type='NONE'

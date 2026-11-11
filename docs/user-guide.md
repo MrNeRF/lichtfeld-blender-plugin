@@ -67,6 +67,25 @@ are not retried automatically.
 
 ### Generate or edit a rig
 
+**Capture content and quality** chooses what is rendered. **Rig reference** chooses
+the surfaces used to position the cameras and calculate **Reference center**.
+These are independent: use **Use selected for rig** on a character, then capture
+the **Entire scene** without changing the rig subject. Later viewport selections
+do not replace the remembered rig objects. A reference can also be a collection
+or the entire scene. Changing either choice does not move cameras until you apply
+rig parameters. The reference itself remains part of the capture when included
+in the chosen capture content; placement meshes and path curves remain helpers.
+
+A new rig with **Not set** adopts its current capture surfaces once and remembers
+them. Existing older rigs have no recorded reference: their cameras remain usable
+for capture, but choose a reference explicitly before applying rig changes. Loading
+a rig restores its saved reference without changing capture content. Renaming a
+reference object preserves its identity. A deleted or unavailable remembered object
+blocks Apply until you choose the reference again; it never falls back to the
+current selection. Apply reevaluates current reference bounds.
+The panel flags reference changes that still need Apply. Load restores the saved
+reference and clears that pending change without moving cameras.
+
 | Distribution | Coverage |
 | --- | --- |
 | Sphere | Views distributed across the whole sphere |
@@ -103,7 +122,7 @@ the rejected update does not delete it. Additional untagged custom cameras remai
 untouched. Ring count and elevation controls are shown with the distribution;
 aim controls are hidden when path tangents or mesh normals determine direction.
 
-Aim at the subject center, an object's origin, the cursor, or an explicit position
+Aim at the reference center, an object's origin, the cursor, or an explicit position
 with offsets. The viewport target helper makes aim adjustments visible. Moving
 the target reorients cameras while retaining their positions. A path-following
 orientation uses the path tangent instead of that target.

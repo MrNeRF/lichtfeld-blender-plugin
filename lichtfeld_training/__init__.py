@@ -102,17 +102,10 @@ def process_options(detach=False):
 
 def sources_for(context):
     settings = context.scene.lichtfeld_training
-    if settings.scope == "COLLECTION":
-        if not settings.source_collection:
-            raise ValueError("Choose a source collection")
-        objects = settings.source_collection.all_objects
-    elif settings.scope == "SCENE":
-        objects = context.scene.objects
-    else:
-        objects = preflight.selection_objects(context)
-    sources = [obj for obj in objects
-               if obj.type in {"MESH", "CURVE", "SURFACE", "FONT", "META"}
-               and not obj.get("lichtfeld_result") and obj not in preflight.capture_helpers(settings)]
+    if settings.scope == 'COLLECTION' and not settings.source_collection:
+        raise ValueError('Choose a source collection')
+    helpers = preflight.capture_helpers(settings)
+    sources = [obj for obj in preflight.capture_objects(context) if preflight.is_surface(obj, helpers)]
     if not sources:
         raise ValueError("Select surface objects, or choose a source collection")
     return sorted(sources, key=lambda obj: obj.name)
@@ -230,7 +223,19 @@ class LichtFeldSourceRef(bpy.types.PropertyGroup):
     object: PointerProperty(type=bpy.types.Object)
 
 
+class LichtFeldRigReference(bpy.types.PropertyGroup):
+    mode: EnumProperty(name='Rig reference', description='Subject used to position and aim the rig; independent of the content rendered', items=[
+        ('UNSET', 'Not set', 'A new rig adopts the capture source once; older rigs require an explicit reference before applying changes'),
+        ('OBJECTS', 'Remembered objects', 'Fit around the objects remembered with Use selected for rig'),
+        ('COLLECTION', 'Collection', 'Fit around surface objects in the chosen collection'),
+        ('SCENE', 'Entire scene', 'Fit around surface objects in this scene')])
+    objects: CollectionProperty(type=LichtFeldSourceRef, description='Remembered rig surface objects; renaming preserves identity, missing objects require an explicit replacement')
+    collection: PointerProperty(name='Reference collection', type=bpy.types.Collection,
+                                description='Collection used for rig bounds, without restricting captured content')
+
+
 class LichtFeldSettings(bpy.types.PropertyGroup):
+    rig_reference: PointerProperty(type=LichtFeldRigReference, description='Independent subject used for camera placement; never restricts captured content')
     mode: EnumProperty(name="Workflow", items=[("NEW", "New", "Prepare a dataset or start a new training job"),
         ("OPEN", "Open job", "Reconnect to an existing training job"),
         ("CONNECT", "Connect", "Read-only view of an active trainer")])
@@ -282,7 +287,7 @@ class LichtFeldSettings(bpy.types.PropertyGroup):
     rig_target: PointerProperty(name="Target object", type=bpy.types.Object)
     rig_aim: PointerProperty(name="Viewport aim target", type=bpy.types.Object)
     rig_aim_mode: EnumProperty(name="Aim at", items=[
-        ("SOURCE", "Subject center", "Center of the source bounding box"),
+        ("SOURCE", "Reference center", "Center of the rig reference bounding box; capture content is independent"),
         ("OBJECT", "Object origin", "World origin of the selected target object"),
         ("CURSOR", "3D cursor", "Current world position of the 3D cursor"),
         ("VIEWPORT", "Viewport target", "Keep the current generated target position when applying rig changes"),
@@ -467,7 +472,7 @@ class LF_OT_tight_framing(bpy.types.Operator):
 class LF_OT_rig(bpy.types.Operator):
     bl_idname = "lichtfeld.create_rig"
     bl_label = "Create capture rig"
-    bl_description = "Add an orbit rig around the source; existing rigs can also be used"
+    bl_description = "Create or update cameras around the rig reference without changing the content to capture"
     bl_options = {"REGISTER", "UNDO"}
 
     @classmethod
@@ -484,8 +489,17 @@ class LF_OT_rig(bpy.types.Operator):
         return True
 
     def generate(self, context):
-        sources = sources_for(context)
-        recipe = rig_recipe(context.scene.lichtfeld_training)
+        settings = context.scene.lichtfeld_training
+        reference = settings.rig_reference
+        legacy = settings.camera_collection and settings.camera_collection.get('lichtfeld_generated')
+        if reference.mode == 'UNSET' and not legacy:
+            sources = sources_for(context)
+        else:
+            sources = yield from rig_edit.reference_sources(context, reference)
+        helpers = preflight.capture_helpers(settings)
+        capture_sources = ([obj for obj in preflight.selection_objects(context) if preflight.is_surface(obj, helpers)]
+                           if settings.scope == 'SELECTION' else None)
+        recipe = rig_recipe(settings)
         low, high = Vector((float("inf"),) * 3), Vector((float("-inf"),) * 3)
         depsgraph = context.evaluated_depsgraph_get()
         for obj in sources:
@@ -532,6 +546,16 @@ class LF_OT_rig(bpy.types.Operator):
         collection = bpy.data.collections.new("LichtFeld Capture Cameras")
         context.scene.collection.children.link(collection)
         self.collection = collection
+        prepared_reference = collection.lichtfeld_rig_reference
+        if reference.mode == 'UNSET':
+            prepared_reference.mode = 'OBJECTS'
+            for obj in sources:
+                entry = prepared_reference.objects.add()
+                entry.object = obj
+                entry.name = obj.name
+                yield
+        else:
+            rig_edit.copy_reference(reference, prepared_reference)
         target = bpy.data.objects.new("LichtFeld Aim Target", None)
         target.empty_display_type = "SPHERE"
         target.show_in_front = True
@@ -562,8 +586,9 @@ class LF_OT_rig(bpy.types.Operator):
             yield
         for _ in rig_edit.commit(self, settings, previous, collection, target, recipe):
             yield
-        if settings.scope == "SELECTION":
-            for _ in preflight.remember_sources(settings, sources):
+        rig_edit.copy_reference(settings.camera_collection.lichtfeld_rig_reference, reference)
+        if capture_sources:
+            for _ in preflight.remember_sources(settings, capture_sources):
                 yield
         self.report({"INFO"}, f"Applied {len(points)} cameras. Review coverage before training.")
 
@@ -685,20 +710,36 @@ class LF_OT_pick_sources(bpy.types.Operator):
     bl_idname = "lichtfeld.pick_sources"
     bl_label = "Use selected objects"
     bl_description = "Remember the selected surface objects as the source, independently of later viewport selections"
+    for_rig: BoolProperty(default=False, options={'HIDDEN'}, description='Remember this selection for rig placement only; captured content stays unchanged')
+
+    @classmethod
+    def description(cls, context, properties):
+        return ('Use selected surface objects for rig placement and aiming; captured content stays unchanged'
+                if properties.for_rig else cls.bl_description)
     @classmethod
     def poll(cls, context):
         s = context.scene.lichtfeld_training
         return not s.running and not s.operation_busy
     def execute(self, context):
         s = context.scene.lichtfeld_training
-        sources = [obj for obj in context.selected_objects if obj.type in {"MESH", "CURVE", "SURFACE", "FONT", "META"} and not obj.get("lichtfeld_result")]
+        sources = [obj for obj in context.selected_objects if preflight.is_surface(obj, preflight.capture_helpers(s))]
+        for_rig = self.for_rig
         if not sources:
-            self.report({"ERROR"}, "Select the surface objects to capture first")
+            self.report({"ERROR"}, "Select surface objects for the rig reference first" if for_rig else "Select the surface objects to capture first")
             return {"CANCELLED"}
         def apply():
             try:
-                for _ in preflight.remember_sources(s, sources):
-                    yield
+                if for_rig:
+                    entries = []
+                    for obj in sources:
+                        entries.append({'object': obj, 'name': obj.name})
+                        yield
+                    s.rig_reference['objects'] = entries
+                    s.rig_reference.collection = None
+                    s.rig_reference.mode = 'OBJECTS'
+                    preflight.invalidate(s.id_data)
+                else:
+                    yield from preflight.remember_sources(s, sources)
             finally:
                 s.operation_busy = False
         if bpy.app.background:
@@ -745,6 +786,7 @@ class LF_OT_read_rig(bpy.types.Operator):
             s.rig_curve = objects['curve']
             s.rig_mesh = objects['mesh']
             s.rig_aim = next((obj for obj in collection.objects if obj.get("lichtfeld_aim")), None)
+            rig_edit.copy_reference(collection.lichtfeld_rig_reference, s.rig_reference)
             s.rig_parameter_source = collection
         except (ValueError, TypeError, KeyError) as error:
             self.report({"ERROR"}, "Invalid rig metadata: " + str(error))
@@ -1751,7 +1793,7 @@ class LF_PT_training(bpy.types.Panel):
         ready = preflight.cached(context, prefs, capture_only=capture_only)
         errors = preflight.issues(ready)
         box = setup.box()
-        box.label(text="1  Source and quality")
+        box.label(text="1  Capture content and quality")
         box.prop(settings, "scope", text="")
         if settings.scope == "COLLECTION":
             box.prop(settings, "source_collection", text="")
@@ -1776,6 +1818,20 @@ class LF_PT_training(bpy.types.Panel):
             if settings.rig_parameter_source != settings.camera_collection:
                 wrapped(box, "Load this rig's parameters before editing. Choosing a collection keeps the current controls.")
         if not settings.camera_collection or settings.rig_generator:
+            reference = settings.rig_reference
+            box.prop(reference, 'mode')
+            if reference.mode == 'COLLECTION':
+                box.prop(reference, 'collection', text='')
+            elif reference.mode == 'OBJECTS':
+                box.label(text=f'Remembered rig objects: {len(reference.objects):,}')
+                if reference.objects:
+                    entry = reference.objects[0]
+                    wrapped(box, ('First: ' if len(reference.objects) > 1 else '') + entry.object.name if entry.object else 'Missing: ' + entry.name)
+            elif reference.mode == 'UNSET':
+                wrapped(box, 'Choose a reference to edit this older rig. Its existing cameras can still be captured.' if managed else
+                        'The first rig uses the capture source once. You can choose a different reference here.')
+            box.operator('lichtfeld.pick_sources', text='Use selected for rig', icon='RESTRICT_SELECT_OFF').for_rig = True
+            wrapped(box, 'Rig reference controls camera placement only. Capture content is chosen above.')
             box.prop(settings, "rig_mode")
             if settings.rig_mode != "MESH" or settings.rig_mesh_distribution != "FACES":
                 box.prop(settings, "views", text="Rig camera count")
@@ -1818,9 +1874,10 @@ class LF_PT_training(bpy.types.Panel):
                     row.operator("lichtfeld.select_aim", text="Move aim target in viewport", icon="EMPTY_AXIS")
             wrapped(box,"Apply parameters to update camera placement. Move the aim target to change camera direction live.")
             box.operator("lichtfeld.create_rig", text="Apply rig parameters" if managed else "Create camera rig", icon="ADD")
-        rig_changed = managed and settings.camera_collection.get("lichtfeld_rig_recipe") != rig_recipe(settings)
+        rig_changed = managed and (settings.camera_collection.get("lichtfeld_rig_recipe") != rig_recipe(settings) or ready.get('reference_changed', False))
         box.label(text="Load parameters to edit this rig" if managed and settings.rig_parameter_source != settings.camera_collection else
-                  "Rig/framing changed: apply parameters" if rig_changed else "Capture uses the existing cameras",
+                  "Rig/framing changed: apply parameters" if rig_changed else
+                  "Checking rig parameters…" if managed and ready.get('checking') else "Capture uses the existing cameras",
                   icon="INFO")
         box = setup.box()
         box.label(text="3  Capture", icon="RENDER_STILL")
@@ -1923,7 +1980,7 @@ def loaded(_):
         ui_runtime.submit(lambda name=name: jobs.remembered_job(directory, source, name), done)
 
 
-_CLASSES = (LichtFeldPreferences, LichtFeldSourceRef, LichtFeldSettings, LF_OT_notice, LF_OT_verify, LF_OT_setup, LF_OT_tight_framing, LF_OT_rig,
+_CLASSES = (LichtFeldPreferences, LichtFeldSourceRef, LichtFeldRigReference, LichtFeldSettings, LF_OT_notice, LF_OT_verify, LF_OT_setup, LF_OT_tight_framing, LF_OT_rig,
             LF_OT_start, LF_OT_export_dataset, LF_OT_pick_sources, LF_OT_select_aim, LF_OT_inspect_camera, LF_OT_read_rig, LF_OT_command, LF_OT_import, LF_OT_resume, LF_OT_dataset, LF_OT_new_capture, LF_OT_inspect_dataset, LF_OT_restart, LF_OT_folder, LF_OT_reconnect, LF_OT_load_job, LF_OT_compare,
             LF_OT_scan_sessions, LF_OT_attach_session, LF_OT_detach_session, LF_OT_previous_job, LF_OT_color_look, LF_OT_color_command, LF_OT_model_view, LF_OT_color_view, LF_OT_capture_lighting,
             *capture_preview.CLASSES, *scene_render.CLASSES, LF_PT_training)
@@ -1935,6 +1992,7 @@ def register():
     for cls in _CLASSES:
         bpy.utils.register_class(cls)
     bpy.types.Scene.lichtfeld_training = PointerProperty(type=LichtFeldSettings)
+    bpy.types.Collection.lichtfeld_rig_reference = PointerProperty(type=LichtFeldRigReference)
     bpy.app.handlers.save_post.append(saved)
     bpy.app.handlers.load_post.append(loaded)
     bpy.app.handlers.load_pre.append(unloading)
@@ -1953,6 +2011,7 @@ def unregister():
     if unloading in bpy.app.handlers.load_pre:
         bpy.app.handlers.load_pre.remove(unloading)
     del bpy.types.Scene.lichtfeld_training
+    del bpy.types.Collection.lichtfeld_rig_reference
     for cls in reversed(_CLASSES):
         bpy.utils.unregister_class(cls)
     _imported.clear()

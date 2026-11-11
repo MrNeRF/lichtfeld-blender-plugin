@@ -56,4 +56,21 @@ except ValueError:pass
 else:raise AssertionError('Mirrored camera passed capture validation')
 bpy.data.objects.remove(camera,do_unlink=True);bpy.data.cameras.remove(data)
 print('MESH_RIG_NONDESTRUCTIVE_NORMALS_COUNT_TARGET_AND_RECIPE_PASS',flush=True)
+
+# Remember capture surfaces, not the selected placement guides. They must stay
+# absent after replacing the guide and after leaving mesh placement altogether.
+cube=bpy.data.objects['Cube']
+s.scope='SELECTION';s.source_objects.clear();s.source_selection=''
+for obj in bpy.context.selected_objects:obj.select_set(False)
+cube.select_set(True);helper.select_set(True)
+assert bpy.ops.lichtfeld.create_rig()=={'FINISHED'}
+assert [item.object for item in s.source_objects]==[cube]
+replacement=helper.copy();replacement.data=helper.data.copy()
+bpy.context.scene.collection.objects.link(replacement);s.rig_mesh=replacement
+assert bpy.ops.lichtfeld.create_rig()=={'FINISHED'}
+assert ext.sources_for(bpy.context)==[cube]
+s.rig_mode='SPHERE';s.rig_mesh=None;s.views=4
+assert bpy.ops.lichtfeld.create_rig()=={'FINISHED'}
+assert ext.sources_for(bpy.context)==[cube]
+print('RIG_GUIDES_NEVER_REMEMBERED_AS_CAPTURE_CONTENT_PASS',flush=True)
 ext.ui_runtime.clear()

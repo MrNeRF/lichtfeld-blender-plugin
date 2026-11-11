@@ -57,6 +57,20 @@ or parent objects; the validation action only selects the named camera.
 
 `rig_edit.commit` validates generated indices and aim-helper uniqueness before
 mutating existing cameras, retaining the existing staged update/rollback path.
+`rig_reference` stores an independent Blender RNA group in the scene controls and
+each managed camera collection. Remembered objects retain ID pointers and a name
+for reporting deleted references. Collections use a native Collection pointer;
+entire-scene mode resolves the current scene explicitly. Native group copies are
+independent, survive save/reload and retain missing-pointer entries. References
+are resolved cooperatively by the rig transaction, never by panel draw. Load
+restores the reference without writing capture scope or remembered capture sources.
+Older rigs have an unset reference and retain valid capture poses; refitting
+requires an explicit reference. No migration guesses historical bounds.
+Scene membership uses Object identity, including local and linked IDs with the
+same name. The existing cooperative preflight compares active saved/current
+references; panel drawing only reads its cached result. Pin, Load and Apply
+invalidate readiness even when the number of remembered objects stays the same.
+
 `rig_parameter_source` records which collection last supplied or received the
 scene's rig controls. Selection alone never changes those controls; Apply and
 viewport aim require the selected managed rig to match that source. Recipe

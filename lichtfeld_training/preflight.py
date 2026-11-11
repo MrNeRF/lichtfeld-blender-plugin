@@ -19,18 +19,20 @@ def jobs_folder(prefs):
 
 def connection_folder(prefs): return str(Path(jobs_folder(prefs)) / '.connections')
 
+def is_surface(obj, helpers=()):
+ return obj is not None and obj.type in {'MESH','CURVE','SURFACE','FONT','META'} and not obj.get('lichtfeld_result') and obj not in helpers
+
 def selection_objects(context):
  s=context.scene.lichtfeld_training
- types={'MESH','CURVE','SURFACE','FONT','META'}
  if s.source_objects:
   return [item.object for item in s.source_objects if item.object and
-          item.object.name in context.scene.objects and item.object.type in types and not item.object.get('lichtfeld_result')]
+          item.object.name in context.scene.objects and is_surface(item.object)]
  try:names=json.loads(s.source_selection or '[]')
  except (ValueError,TypeError):names=[]
  if not isinstance(names,list):names=[]
  remembered=[obj for name in names if isinstance(name,str) and (obj:=context.scene.objects.get(name)) is not None
-             and obj.type in types and not obj.get('lichtfeld_result')]
- return remembered or [obj for obj in context.selected_objects if obj.type in types and not obj.get('lichtfeld_result')]
+             and is_surface(obj)]
+ return remembered or [obj for obj in context.selected_objects if is_surface(obj)]
 
 
 def remember_sources(settings, sources):
@@ -40,6 +42,12 @@ def remember_sources(settings, sources):
   settings.source_objects.add().object=obj
   yield
  settings.source_selection=json.dumps([obj.name for obj in sources])
+
+def capture_objects(context):
+ s=context.scene.lichtfeld_training
+ if s.scope=='COLLECTION':return s.source_collection.all_objects if s.source_collection else ()
+ if s.scope=='SELECTION':return selection_objects(context)
+ return context.scene.objects
 
 def capture_helpers(settings):
  helper=getattr(settings,'rig_mesh',None)
@@ -56,7 +64,16 @@ def signature(context):
   s.camera_collection.as_pointer() if s.camera_collection else 0,context.scene.frame_current,
   tuple(obj.as_pointer() for obj in capture_helpers(s)),
   bpy.data.filepath,bpy.data.is_dirty,_save_generation,capture_settings.signature(context.scene,s),scene_render.signature(context.scene),
-  tuple(sorted(obj.as_pointer() for obj in selection_objects(context))) if s.scope=="SELECTION" else ())
+  tuple(sorted(obj.as_pointer() for obj in selection_objects(context))) if s.scope=="SELECTION" else (),
+  s.rig_reference.mode,s.rig_reference.collection.as_pointer() if s.rig_reference.collection else 0,len(s.rig_reference.objects))
+
+def invalidate(scene):
+ global _work,_next
+ pointer=scene.as_pointer()
+ _cache.pop(pointer,None)
+ if _work and _work[0]==pointer:
+  _work[1].close();_work=None
+ _next=0
 
 def environment(prefs,force=False,capture_only=False):
  key=(bpy.path.abspath(prefs.backend_path),jobs_folder(prefs),bpy.data.filepath,not capture_only)
@@ -86,13 +103,8 @@ def collect(context,capture_only=False):
   capture_settings.camera_for(s)
   scene_render.snapshot(context.scene)
  except (ValueError,KeyError) as error:errors.append(str(error))
- if s.scope=='COLLECTION':
-  objects=s.source_collection.all_objects if s.source_collection else ()
- elif s.scope=="SELECTION":objects=selection_objects(context)
- else:objects=context.scene.objects
- for obj in objects:
-  selected=True
-  if selected and obj.type in {'MESH','CURVE','SURFACE','FONT','META'} and not obj.get('lichtfeld_result') and obj not in helpers:
+ for obj in capture_objects(context):
+  if is_surface(obj, helpers):
    sources.append(obj.name);visibility[obj.name]=is_hidden(obj,context.view_layer,members=members)
   yield
  if not sources:errors.append('Choose at least one surface object.')
@@ -106,6 +118,10 @@ def collect(context,capture_only=False):
      message=str(error);errors.append(message);camera_issues[message]=obj.name
    yield
  cameras.sort()
+ reference_changed=False
+ if s.camera_collection and s.camera_collection.get('lichtfeld_generated'):
+  from . import rig_edit
+  reference_changed=yield from rig_edit.reference_changed(s.rig_reference,s.camera_collection.lichtfeld_rig_reference)
  try:capture_settings.validate_view_count(len(cameras))
  except ValueError as error:errors.append(str(error))
  if s.scope=='SCENE':
@@ -127,7 +143,7 @@ def collect(context,capture_only=False):
  if s.growth_end>s.refine_end:errors.append('Growth must end before refinement ends.')
  if s.use_normal_loss and s.normal_start_fraction>=s.normal_end_fraction:errors.append('Normal supervision start must be before its end.')
  return {'sources':sources,'cameras':cameras,'generated_cameras':generated_cameras,'camera_issues':camera_issues,'visibility':visibility,'visibility_sources':visibility_sources or sources,'capture_errors':capture_errors,'errors':capture_errors if capture_only else list(dict.fromkeys(errors)),
-         'signature':initial,'frame':context.scene.frame_current}
+         'signature':initial,'frame':context.scene.frame_current,'reference_changed':reference_changed}
 
 def synchronous(context,prefs):
  work=collect(context)
