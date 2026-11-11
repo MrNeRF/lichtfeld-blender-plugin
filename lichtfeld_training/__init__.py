@@ -1191,17 +1191,29 @@ class LF_OT_restart(bpy.types.Operator):
 
 class LF_OT_resume(bpy.types.Operator):
     bl_idname = "lichtfeld.resume_job"
-    bl_label = "Continue from checkpoint"
+    bl_label = "Continue saved checkpoint"
     bl_description = "Continue saved model and optimizer state in a separate run"
     new_total: IntProperty(name="New total steps", min=4, max=1000000, default=2000)
-    def invoke(self, context, event):
+    @staticmethod
+    def saved_status(context):
         current = ui_runtime.peek(context.scene)
-        self.new_total = max(context.scene.lichtfeld_training.iterations,
-                             int(current.status.get("iteration", 0)) + 1000 if current else 2000)
-        return context.window_manager.invoke_props_dialog(self, width=360)
+        return current.status if current else {}
+
+    def default_total(self, context):
+        status = self.saved_status(context)
+        return max(int(status.get('job', {}).get('iterations', 2000)),
+                   int(status.get('iteration', 0)) + 1000)
+
+    def invoke(self, context, event):
+        self.new_total = self.default_total(context)
+        return context.window_manager.invoke_props_dialog(self, width=420)
     def draw(self, context):
         self.layout.label(text="Continue the saved model and optimizer.")
         self.layout.prop(self, "new_total")
+        interval = self.saved_status(context).get('job', {}).get('eval_interval')
+        if interval is not None:
+            self.layout.label(text=f"Evaluate every {interval:,} steps (saved job)")
+        self.layout.label(text="Saved training and preview settings are retained.")
 
     def execute(self, context):
         scene = context.scene
@@ -1217,14 +1229,11 @@ class LF_OT_resume(bpy.types.Operator):
         connection_directory = preflight.connection_folder(prefs)
         jobs_directory = preflight.jobs_folder(prefs)
         directory = settings.job_directory
-        steps = self.new_total if self.properties.is_property_set("new_total") else settings.iterations
-        interval = settings.eval_interval
-        preview_options = {name: getattr(settings, name) for name in ("preview_mode", "preview_seconds", "preview_points", "preview_sh_degree", "full_preview")}
+        steps = self.new_total if self.properties.is_property_set("new_total") else self.default_total(context)
         settings.operation_busy = True
         def work():
-            job, previous = jobs.resume_data(directory, steps, interval,
-                                             backend=backend, jobs_directory=jobs_directory, connection_directory=connection_directory,
-                                             preview_options=preview_options)
+            job, previous = jobs.resume_data(directory, steps,
+                                             backend=backend, jobs_directory=jobs_directory, connection_directory=connection_directory)
             launch_supervisor(job)
             return job, previous
         def done(value):

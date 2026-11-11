@@ -17,13 +17,31 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from bridge_core import (atomic_json, read_json, read_job_json, read_dataset_json, training_config, metric_at,
                          better, write_splat, artifact_path, require_backend_api)
 import lichtfeld as lf
-from job_control import validate_command
+from job_control import validate_command, claim_training_start, stop_requested
 
 
 def numerical_runtime(job):
-    atomic_json(Path(job["root"]) / "runtime.json", {
+    root = Path(job['root'])
+    if not claim_training_start(root):
+        raise InterruptedError('Stopped before training started')
+    atomic_json(root / "runtime.json", {
         "job_id": job["id"], "state": "preparing numerical runtime", "updated": time.time()})
-    return ensure_numpy(lf)
+    cancelled = False
+    def should_cancel():
+        nonlocal cancelled
+        cancelled = cancelled or stop_requested(root, job['id'])
+        return cancelled
+    try:
+        if should_cancel():
+            raise InterruptedError('Stopped before training started')
+        result = ensure_numpy(lf, should_cancel=should_cancel)
+        if should_cancel():
+            raise InterruptedError('Stopped before training started')
+        return result
+    except Exception as error:
+        if cancelled:
+            raise InterruptedError('Stopped before training started') from error
+        raise
 
 
 class TrainingBridge:
@@ -65,7 +83,7 @@ class TrainingBridge:
         self.stopped = False
         self.previews_enabled = True
         self.preview_history = []
-        self.iteration = 0
+        self.iteration = job.get('resume_iteration', 0) if job.get('resume') else 0
         self.supervision_checked = False
         self.supervision = ""
         self.loss = 0.0
@@ -261,6 +279,10 @@ class TrainingBridge:
     def on_start(self, hook):
         try:
             self.check_hook_api(hook)
+            self.count = hook['num_gaussians']
+            # Consume queued controls before the first potentially long step.
+            self.commands()
+            self.publish('stopping' if self.stopped else 'training')
         except Exception as error:
             self.error = str(error)
             self.publish('failed')
@@ -284,9 +306,9 @@ class TrainingBridge:
                 self.supervision_checked = True
                 if self.job.get('use_depth_loss') and self.job.get('depth_loss_weight',2)>0:
                     dataset = Path(self.job.get('dataset_root',str(self.root/'dataset')))
-                    anchors = read_json(dataset/'depths/depth_anchors.json',{}).get('anchors',{})
+                    anchors = read_dataset_json(dataset/'depths/depth_anchors.json',{}).get('anchors',{})
                     active = sum(bool(item.get('depth',{}).get('valid')) for item in anchors.values())
-                    manifest = read_json(dataset/'manifest.json',{})
+                    manifest = read_dataset_json(dataset/'manifest.json',{})
                     expected = manifest.get('views',0)-len(manifest.get('validation',[]))
                     if not active or active < expected:
                         raise RuntimeError('Depth supervision could not be anchored for all training views. Check resolution, coverage and depth variation, or disable depth supervision.')
@@ -384,5 +406,6 @@ try:
     _bridge = TrainingBridge(_job)
 except Exception as error:
     atomic_json(Path(_job['root']) / 'runtime.json', {
-        'job_id': _job['id'], 'state': 'failed', 'error': str(error), 'updated': time.time()})
+        'job_id': _job['id'], 'state': 'stopped' if isinstance(error, InterruptedError) else 'failed',
+        'message': str(error), 'error': '' if isinstance(error, InterruptedError) else str(error), 'updated': time.time()})
     raise

@@ -16,6 +16,28 @@ ACTIONS = {"pause", "resume", "stop", "preview_on", "preview_off"}
 COMMAND_SECONDS = 30
 
 
+def claim_training_start(root):
+    """One-shot handoff: the script bootstrap or startup cancellation wins.
+
+    Jobs always have a fresh root. The supervisor may terminate its child only
+    if it wins this claim; after the hook wins, all stops stay cooperative.
+    """
+    try:
+        fd = os.open(Path(root) / 'startup.claim', os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except FileExistsError:
+        return False
+    os.close(fd)
+    return True
+
+
+def stop_requested(root, job_id):
+    try:
+        command = read_json(Path(root) / 'command.json', {})
+        return validate_command(root, job_id, command) == 'stop'
+    except ValueError:
+        return False
+
+
 class Controller:
     """Kernel lock, released even on process death; never delete the lock inode."""
     def __init__(self, root):

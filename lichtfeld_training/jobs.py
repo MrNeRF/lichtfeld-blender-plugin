@@ -69,7 +69,7 @@ def prepare_optimizer(job):
     job['optimizer_overrides'] = values
 
 
-def resume_data(directory, iterations, interval, *, backend, jobs_directory, connection_directory="", preview_options=None):
+def resume_data(directory, iterations, *, backend, jobs_directory, connection_directory="", preview_options=None):
     # Executable authority comes only from preferences, never imported job data.
     if not isinstance(backend, str) or not backend.strip():
         raise ValueError("Choose the LichtFeld executable in Settings before continuing")
@@ -110,7 +110,7 @@ def resume_data(directory, iterations, interval, *, backend, jobs_directory, con
     root.mkdir(mode=0o700)
     try:
         job.update(id=identifier, root=str(root), parent_job=str(previous), resume=str(checkpoint),
-                   iterations=iterations, eval_interval=interval)
+                   iterations=iterations, resume_iteration=step)
         best = read_json(previous / "best.json")
         if best and best.get("score"):
             source = verify_artifact(previous, best)
@@ -340,7 +340,7 @@ def restart_data(directory, options, *, backend, jobs_directory, connection_dire
         errors.append("Normal supervision start must precede its end")
     if errors:
         raise ValueError(" ".join(errors))
-    for key in ("resume", "capture_staging_file", "source_identity", "source_sha256", "optimizer_overrides", "capture_only", "export_parent"):
+    for key in ("resume", "resume_iteration", "capture_staging_file", "source_identity", "source_sha256", "optimizer_overrides", "capture_only", "export_parent"):
         job.pop(key, None)
     identifier = uuid.uuid4().hex
     root = Path(jobs_directory).resolve() / identifier

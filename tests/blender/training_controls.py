@@ -20,12 +20,17 @@ bpy.ops.wm.open_mainfile(filepath=str(area / "smoke-result.blend"))
 root = Path((area / "smoke-job.txt").read_text())
 if "--backend" in sys.argv:
     extension.preferences().backend_path = sys.argv[sys.argv.index("--backend") + 1]
+extension.preferences().jobs_directory = str(area / 'continued-jobs')
 original_result = next(obj for obj in bpy.context.scene.objects if obj.get("lichtfeld_job_id") == root.name)
 original_best = extension.read_json(root / "best.json")
+original_job = extension.read_json(root / 'job.json')
 settings = bpy.context.scene.lichtfeld_training
 settings.job_directory = str(root)
-settings.iterations = extension.read_json(root / "runtime.json")["iteration"] + 2000
-settings.eval_interval = 500
+saved_step = extension.read_json(root / 'runtime.json')['iteration']
+expected_total = max(original_job['iterations'], saved_step + 1000)
+settings.iterations = saved_step + 50000
+settings.eval_interval = 7  # Unrelated scene settings must not change a continuation.
+settings.full_preview = not original_job.get('full_preview', True)
 ready_deadline=time.monotonic()+10
 while not extension.allowed(bpy.context,'continue') and time.monotonic()<ready_deadline:
  extension.poll_jobs();time.sleep(.02)
@@ -36,6 +41,11 @@ while settings.operation_busy and time.monotonic() < resume_deadline:
     time.sleep(0.02)
 assert not settings.operation_busy, settings.detail
 root = Path(settings.job_directory)
+assert root.parent == area / 'continued-jobs'
+continued_job = extension.read_json(root / 'job.json')
+assert continued_job['iterations'] == expected_total
+assert continued_job['eval_interval'] == original_job['eval_interval']
+assert continued_job['full_preview'] == original_job.get('full_preview', True)
 inherited = extension.read_json(root / "best.json")
 assert inherited["sha256"] == original_best["sha256"]
 deadline = time.monotonic() + 180
@@ -57,11 +67,12 @@ until(lambda state, runtime: runtime.get("state") == "training" and extension.al
 bpy.ops.lichtfeld.training_command(action="pause")
 _, runtime = until(lambda state, runtime: runtime.get("state") == "paused")
 iteration = runtime["iteration"]
+assert iteration >= saved_step, runtime
 time.sleep(0.7)
 assert extension.read_json(root / "runtime.json")["iteration"] == iteration
 print("PAUSE_VERIFIED", iteration, flush=True)
 bpy.ops.lichtfeld.training_command(action="resume")
-until(lambda state, runtime: runtime.get("state") == "training")
+until(lambda state, runtime: runtime.get("state") == "training" and runtime.get('iteration', 0) > saved_step)
 bpy.ops.lichtfeld.training_command(action="stop")
 state, _ = until(lambda state, runtime: state.get("state") == "stopped")
 assert state.get("result"), state

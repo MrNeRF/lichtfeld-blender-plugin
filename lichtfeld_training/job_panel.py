@@ -28,8 +28,12 @@ def draw(layout, context, settings, status, reader_error, wrapped, color_view=Fa
         step = int(status.get("iteration", 0))
         total = int(status.get("iterations", status.get("job", {}).get("iterations", 0)))
         count = status.get("capture", {})
-        text = (f"View {count.get('done', 0)} / {count.get('total', len(status.get('job', {}).get('cameras', [])))}" if capture else
-                f"Step {step:,} / {total:,}" if total else "Preparing…")
+        if capture:
+            text = f"View {count.get('done', 0)} / {count.get('total', len(status.get('job', {}).get('cameras', [])))}"
+        elif phase in workflow.STARTUP_PHASES or not total:
+            text = 'Preparing…'
+        else:
+            text = f"Step {step:,} / {total:,}"
         job.progress(factor=settings.progress, type="BAR", text=text)
         if capture and not external:
             render = status.get('capture_render', {})
@@ -46,10 +50,10 @@ def draw(layout, context, settings, status, reader_error, wrapped, color_view=Fa
             row.enabled = flags["pause"]
             row.operator(command, text="Resume" if settings.paused else "Pause", icon="PAUSE").action = "resume" if settings.paused else "pause"
             row.operator(command, text="Stop and save", icon="CANCEL").action = "stop"
-        elif capture and not external:
+        elif not external and (capture or phase in workflow.STARTUP_PHASES):
             row = job.row()
             row.enabled = flags["stop"]
-            row.operator(command, text="Cancel capture", icon="CANCEL").action = "stop"
+            row.operator(command, text="Cancel capture" if capture else "Cancel startup", icon="CANCEL").action = "stop"
     if not capture_only and (not capture or result or external):
         preview = layout.box()
         preview.label(text="Preview", icon="OUTLINER_DATA_POINTCLOUD")

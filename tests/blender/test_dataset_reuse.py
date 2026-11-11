@@ -20,7 +20,7 @@ def fixture(directory):
     atomic_json(dataset/"manifest.json",{"views":4,"transforms_file":"transforms.json","transforms_sha256":digest(dataset/"transforms.json")})
     atomic_json(root/"job.json",{"schema":1,"id":"original","root":str(root),"dataset_root":str(dataset),
         "source_file":"SOURCE_NO_LONGER_EXISTS.blend","backend":"UNTRUSTED","blender":"UNTRUSTED",
-        "scope":"COLLECTION","test_every":4,"iterations":100,"eval_interval":50,"max_points":1000,"sh_degree":0,"resume":"OLD.licht"})
+        "scope":"COLLECTION","test_every":4,"iterations":100,"eval_interval":50,"max_points":1000,"sh_degree":0,"resume":"OLD.licht","resume_iteration":50})
     (root/"best.json").write_text('{"old":"best"}')
     return root
 
@@ -86,6 +86,7 @@ class DatasetReuse(unittest.TestCase):
             job, previous=jobs.restart_data(old,{"iterations":20,"eval_interval":10,"sh_degree":1},backend="TRUSTED",jobs_directory=directory)
             self.assertEqual(previous,"original")
             self.assertNotIn("resume",job)
+            self.assertNotIn('resume_iteration', job)
             self.assertTrue(job["reuse_dataset"])
             self.assertEqual(job["backend"],"TRUSTED")
             self.assertFalse((Path(job["root"])/"best.json").exists())

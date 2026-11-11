@@ -16,7 +16,7 @@ class WorkflowTests(unittest.TestCase):
   self.assertEqual(workflow.status_label('finalizing capture'),'Preparing dataset')
   self.assertEqual(workflow.phase('Controller lost'),'controller lost')
  def test_phase_controls(self):
-  for state in workflow.CAPTURE_PHASES:
+  for state in workflow.CAPTURE_PHASES|workflow.STARTUP_PHASES:
    flags=workflow.actions(state)
    self.assertTrue(flags['stop'])
    self.assertFalse(flags['pause'])
@@ -27,7 +27,7 @@ class WorkflowTests(unittest.TestCase):
    self.assertFalse(workflow.actions(state)['pause'])
    self.assertFalse(workflow.actions(state)['stop'])
  def test_readonly(self):
-  for state in workflow.TRAINING_PHASES|workflow.CAPTURE_PHASES|workflow.TERMINAL:
+  for state in workflow.TRAINING_PHASES|workflow.CAPTURE_PHASES|workflow.STARTUP_PHASES|workflow.TERMINAL:
    flags=workflow.actions(state,external=True,checkpoint=True,best=True)
    self.assertFalse(any(flags[k] for k in ('pause','stop','previews','import','continue')))
  def test_continue_requires_checkpoint_and_terminal(self):

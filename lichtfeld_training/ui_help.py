@@ -163,7 +163,10 @@ def command_description(cls, _context, properties):
     if getattr(properties, 'action', '') == 'stop' and _context and getattr(_context, 'scene', None):
         from . import workflow, preview_scene
         source = preview_scene.source_scene(_context.scene) or _context.scene
-        if workflow.phase(source.lichtfeld_training.status) in workflow.CAPTURE_PHASES:
+        phase = workflow.phase(source.lichtfeld_training.status)
+        if phase in workflow.STARTUP_PHASES:
+            return 'Cancel startup before training begins; existing checkpoints and saved models stay unchanged'
+        if phase in workflow.CAPTURE_PHASES:
             return 'Cancel capture and preserve completed images. Training will not start for this cancelled capture'
         return 'Stop the owned training and save a resumable checkpoint; completed best models remain available'
     return ACTIONS.get(getattr(properties, 'action', ''), cls.bl_description)

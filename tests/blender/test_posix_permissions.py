@@ -31,7 +31,7 @@ class PosixPermissions(unittest.TestCase):
                 (previous / "model.ply").write_bytes(b"private model")
                 atomic_json(previous / "best.json", {"path": "model.ply", "id": "best",
                     "bytes": 13, "sha256": digest(previous / "model.ply"), "score": {"psnr": 30}})
-                job, _ = jobs.resume_data(previous, 16, 4, backend="trusted", jobs_directory=parent)
+                job, _ = jobs.resume_data(previous, 16, backend="trusted", jobs_directory=parent)
                 root = Path(job["root"])
                 model = verify_artifact(root, read_json(root / "best.json"))
                 for path, mode in ((root, 0o700), (root / "artifacts", 0o700), (model, 0o600)):
