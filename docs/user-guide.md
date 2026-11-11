@@ -80,10 +80,21 @@ Curve paths support poly, Bézier and NURBS splines; a closed path avoids repeat
 the first endpoint. Mesh placement uses evaluated geometry and transformed normals;
 the offset and viewing direction control which side is observed.
 
-Select an existing generated rig and load its saved parameters before editing.
+Select an existing generated rig and use **Load this rig's parameters** before
+editing. Choosing a collection leaves the controls unchanged; **Apply rig parameters**
+and the viewport aim action remain unavailable until that rig has been loaded.
+Loading changes the controls only. Applying updates the chosen rig. Previously
+saved scenes without a recorded parameter source also need one explicit Load.
 Updating it preserves generated camera identities where possible and retains
 additional custom cameras in the collection. Inspect coverage after changing
 placement, count, lens, aspect ratio or target.
+
+Duplicating a generated camera also copies its generated index. An update rejects
+duplicate or invalid indices and multiple aim helpers before changing existing
+cameras. Move the duplicate out of the rig collection before applying changes;
+the rejected update does not delete it. Additional untagged custom cameras remain
+untouched. Ring count and elevation controls are shown with the distribution;
+aim controls are hidden when path tangents or mesh normals determine direction.
 
 Aim at the subject center, an object's origin, the cursor, or an explicit position
 with offsets. The viewport target helper makes aim adjustments visible. Moving

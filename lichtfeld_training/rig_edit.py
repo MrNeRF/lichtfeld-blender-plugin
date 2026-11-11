@@ -85,24 +85,35 @@ def commit(owner, settings, previous, staging, target, recipe):
         staging["lichtfeld_generated"] = True
         staging["lichtfeld_rig_recipe"] = recipe
         remember_objects(staging, settings)
+        settings.rig_parameter_source = staging
         owner.committed = True
         owner.collection = None
         return
     if previous.library:
         raise ValueError("Make the rig collection local before updating it")
-    old = sorted((obj for obj in previous.objects if obj.type == "CAMERA" and obj.get("lichtfeld_generated")),
-                 key=lambda obj: (obj.get("lichtfeld_camera_index", -1), obj.name))
+    old = [obj for obj in previous.objects if obj.type == "CAMERA" and obj.get("lichtfeld_generated")]
     new = sorted((obj for obj in staging.objects if obj.type == "CAMERA"),
                  key=lambda obj: obj["lichtfeld_camera_index"])
-    old_target = next((obj for obj in previous.objects if obj.get("lichtfeld_aim")), None)
+    targets = [obj for obj in previous.objects if obj.get("lichtfeld_aim")]
+    if len(targets) > 1:
+        raise ValueError('Multiple aim helpers in this rig. Remove duplicated helpers from the rig collection before updating')
+    old_target = targets[0] if targets else None
     if uses_aim and settings.rig_target and (settings.rig_target in old or settings.rig_target == old_target):
         raise ValueError("The aim object must be outside its own capture rig")
     # Validate before mutating any existing camera.
+    indices = {}
     for obj in old:
+        index = obj.get('lichtfeld_camera_index')
+        if type(index) is not int or index < 0:
+            raise ValueError(f'Invalid generated camera index: {obj.name}. Remove this camera from the rig collection before updating')
+        if index in indices:
+            raise ValueError(f'Duplicated generated cameras: {indices[index]} and {obj.name}. Remove the duplicate from the rig collection before updating')
+        indices[index] = obj.name
         constraint = obj.constraints.get(AIM)
         if obj.library or (constraint and constraint.type != "TRACK_TO"):
             raise ValueError("Make generated cameras local and keep LichtFeld Aim reserved")
         yield
+    old.sort(key=lambda obj: obj['lichtfeld_camera_index'])
     owner.rig_backup = []
     for index, (original, prepared) in enumerate(zip(old, new)):
         constraint = original.constraints.get(AIM)
@@ -155,6 +166,7 @@ def commit(owner, settings, previous, staging, target, recipe):
     previous["lichtfeld_rig_recipe"] = recipe
     remember_objects(previous, settings)
     settings.camera_collection = previous
+    settings.rig_parameter_source = previous
 
 
 def decode_recipe(encoded):

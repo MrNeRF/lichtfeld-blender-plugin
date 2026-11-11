@@ -303,6 +303,8 @@ class LichtFeldSettings(bpy.types.PropertyGroup):
         ("TARGET", "Look at target", "Aim at the explicit target or source center"),
         ("TANGENT", "Follow path", "Aim along the sampled path")])
     rig_generator: BoolProperty(name="Edit camera rig")
+    rig_parameter_source: PointerProperty(type=bpy.types.Collection, options={'HIDDEN'},
+        description="Generated rig whose parameters were explicitly loaded or last applied; choosing another collection does not replace the controls")
     rig_details: BoolProperty(name="Rig geometry and lens")
     optimizer_file: StringProperty(name="Additional native parameters (JSON)", subtype="FILE_PATH")
     mask_mode: EnumProperty(name="Foreground mask",items=[
@@ -471,7 +473,13 @@ class LF_OT_rig(bpy.types.Operator):
 
     @classmethod
     def poll(cls, context):
-        return not context.scene.lichtfeld_training.running and not context.scene.lichtfeld_training.operation_busy
+        s = context.scene.lichtfeld_training
+        if s.running or s.operation_busy:
+            return False
+        if s.camera_collection and s.camera_collection.get('lichtfeld_generated') and s.rig_parameter_source != s.camera_collection:
+            cls.poll_message_set("Load this rig's parameters before applying changes")
+            return False
+        return True
 
     def generate(self, context):
         sources = sources_for(context)
@@ -700,11 +708,17 @@ class LF_OT_read_rig(bpy.types.Operator):
         if not collection or not collection.get("lichtfeld_generated") or s.running or s.operation_busy:
             return {"CANCELLED"}
         encoded = collection.get("lichtfeld_rig_recipe", "")
-        if len(encoded) > 65536:
-            self.report({"ERROR"}, "Rig metadata is too large")
-            return {"CANCELLED"}
         try:
             values = rig_edit.decode_recipe(encoded)
+            objects = {}
+            for name, key in (('target', 'lichtfeld_rig_target'), ('curve', 'lichtfeld_rig_curve'),
+                              ('mesh', 'lichtfeld_placement_mesh')):
+                obj = collection.get(key) or bpy.data.objects.get(values.get(name, ''))
+                if obj is not None and (not isinstance(obj, bpy.types.Object) or
+                                        name == 'curve' and obj.type != 'CURVE' or
+                                        name == 'mesh' and obj.type != 'MESH'):
+                    raise ValueError('Invalid rig object reference: ' + name)
+                objects[name] = obj
             for name in ("rig_mode", "views", "rig_min", "rig_max", "rig_rings", "rig_distance",
                          "rig_phase", "rig_lens", "rig_orientation", "rig_auto_fit", "rig_radius",
                          "rig_mesh_distribution", "rig_mesh_orientation", "rig_mesh_offset"):
@@ -715,10 +729,11 @@ class LF_OT_read_rig(bpy.types.Operator):
             s.rig_aim_mode = values.get("aim_mode", "OBJECT" if values.get("target") else "SOURCE")
             s.rig_aim_position = values.get("aim_position", (0, 0, 0))
             s.rig_aim_offset = values.get("aim_offset", (0, 0, 0))
-            s.rig_target = collection.get('lichtfeld_rig_target') or bpy.data.objects.get(values.get("target", ""))
-            s.rig_curve = collection.get('lichtfeld_rig_curve') or bpy.data.objects.get(values.get("curve", ""))
-            s.rig_mesh = collection.get('lichtfeld_placement_mesh') or bpy.data.objects.get(values.get("mesh", ""))
+            s.rig_target = objects['target']
+            s.rig_curve = objects['curve']
+            s.rig_mesh = objects['mesh']
             s.rig_aim = next((obj for obj in collection.objects if obj.get("lichtfeld_aim")), None)
+            s.rig_parameter_source = collection
         except (ValueError, TypeError, KeyError) as error:
             self.report({"ERROR"}, "Invalid rig metadata: " + str(error))
             return {"CANCELLED"}
@@ -729,6 +744,13 @@ class LF_OT_select_aim(bpy.types.Operator):
     bl_idname = "lichtfeld.select_aim"
     bl_label = "Select aim target"
     bl_description = "Select the generated Empty. Moving it updates camera directions without moving their positions"
+    @classmethod
+    def poll(cls, context):
+        s = context.scene.lichtfeld_training
+        return (not s.running and not s.operation_busy and s.camera_collection is not None and
+                s.rig_parameter_source == s.camera_collection and s.rig_aim is not None and
+                s.rig_aim.name in s.camera_collection.objects)
+
     def execute(self, context):
         settings = context.scene.lichtfeld_training
         target = settings.rig_aim
@@ -1714,12 +1736,19 @@ class LF_PT_training(bpy.types.Panel):
             box.prop(settings,"rig_generator",icon="TRIA_DOWN" if settings.rig_generator else "TRIA_RIGHT",emboss=False)
         if managed:
             box.operator("lichtfeld.read_rig", text="Load this rig's parameters", icon="IMPORT")
+            if settings.rig_parameter_source != settings.camera_collection:
+                wrapped(box, "Load this rig's parameters before editing. Choosing a collection keeps the current controls.")
         if not settings.camera_collection or settings.rig_generator:
             box.prop(settings, "rig_mode")
             if settings.rig_mode != "MESH" or settings.rig_mesh_distribution != "FACES":
                 box.prop(settings, "views", text="Rig camera count")
             if settings.rig_mode not in {"PATH", "MESH"}:
                 box.operator("lichtfeld.tight_framing",icon="VIEW_CAMERA")
+                if settings.rig_mode != 'SPHERE':
+                    box.prop(settings, "rig_min")
+                    box.prop(settings, "rig_max")
+                if settings.rig_mode == 'RINGS':
+                    box.prop(settings, "rig_rings")
             if settings.rig_mode == 'PATH':
                 box.prop(settings, "rig_curve")
                 box.prop(settings, "rig_orientation")
@@ -1736,13 +1765,10 @@ class LF_PT_training(bpy.types.Panel):
                     box.prop(settings, "rig_auto_fit")
                     box.prop(settings, "rig_distance" if settings.rig_auto_fit else "rig_radius")
                     box.prop(settings, "rig_phase")
-                    if settings.rig_mode != 'SPHERE':
-                        box.prop(settings, "rig_min")
-                        box.prop(settings, "rig_max")
-                    if settings.rig_mode == 'RINGS':
-                        box.prop(settings, "rig_rings")
                 box.prop(settings, "rig_lens")
-            if settings.rig_mode != "MESH" or settings.rig_mesh_orientation == "TARGET":
+            uses_aim = not (settings.rig_mode == 'PATH' and settings.rig_orientation == 'TANGENT' or
+                            settings.rig_mode == 'MESH' and settings.rig_mesh_orientation != 'TARGET')
+            if uses_aim:
                 box.prop(settings, "rig_aim_mode")
                 if settings.rig_aim_mode == "OBJECT":
                     box.prop(settings, "rig_target")
@@ -1756,7 +1782,8 @@ class LF_PT_training(bpy.types.Panel):
             wrapped(box,"Apply parameters to update camera placement. Move the aim target to change camera direction live.")
             box.operator("lichtfeld.create_rig", text="Apply rig parameters" if managed else "Create camera rig", icon="ADD")
         rig_changed = managed and settings.camera_collection.get("lichtfeld_rig_recipe") != rig_recipe(settings)
-        box.label(text="Rig/framing changed: apply parameters" if rig_changed else "Capture uses the existing cameras",
+        box.label(text="Load parameters to edit this rig" if managed and settings.rig_parameter_source != settings.camera_collection else
+                  "Rig/framing changed: apply parameters" if rig_changed else "Capture uses the existing cameras",
                   icon="INFO")
         box = setup.box()
         box.label(text="3  Capture", icon="RENDER_STILL")
