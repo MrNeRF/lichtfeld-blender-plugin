@@ -100,6 +100,8 @@ while True:
         ready = complete.value
         break
 assert ready['cameras'] == sorted(names)
+assert (ready['format']['width'],ready['format']['height'])==(576,1024)
+assert ready['render']['engine']==source.render.engine
 assert [camera.name for camera in ext.cameras_for(s)] == ready['cameras']
 s.capture_preview_index = 1
 for _ in ext.capture_preview.open_steps(source, bpy.context.window, None):

@@ -17,6 +17,22 @@ the open scene after launch does not change that job's images.
 
 ## Choose an operation
 
+The capture plan, rig action, framing check, save action and primary capture/export action are
+at the top of setup. The plan shows the capture content, View Layer, applied rig
+reference, actual camera count, output dimensions, renderer/backend and static
+frame. Pending rig controls are flagged separately; they do not replace existing
+camera poses until Apply.
+
+Expand **Capture content and quality**, **Capture cameras**, **Render and output**,
+or **Training and preview** to edit the corresponding controls. These are native
+Blender sections; closing them keeps the main actions available. Dataset-only
+capture hides training controls. Training saved images hides scene capture controls
+and offers its own start action above the training settings.
+
+**Check camera framing** opens the existing temporary framing scene. It checks
+camera selection, output size and optical overrides; it does not render an RGB
+test image. **Back to capture setup** restores the original scene.
+
 | You want to… | Choose… |
 | --- | --- |
 | Render the scene and train a new splat | Capture and train |

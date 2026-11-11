@@ -4,14 +4,15 @@
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
-import sys
+import sys, importlib
 import time
 import bpy
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
-bpy.ops.preferences.addon_enable(module='lichtfeld_training')
-import lichtfeld_training as ext
+module='bl_ext.user_default.lichtfeld_training' if '--installed' in sys.argv else 'lichtfeld_training'
+bpy.ops.preferences.addon_enable(module=module)
+ext=importlib.import_module(module)
 
 scene = bpy.context.scene
 s = scene.lichtfeld_training
@@ -40,13 +41,14 @@ class Layout:
     def box(self): return self.child()
     def row(self, **kwargs): return self.child()
     def column(self, **kwargs): return self.child()
+    def panel(self, *args, **kwargs): return self.child(),self.child()
     def prop(self, owner, name, **kwargs): self.records.append(('prop', name))
     def label(self, **kwargs): self.records.append(('label',))
     def operator(self, name, **kwargs):
         self.records.append(('operator', name))
         return SimpleNamespace()
 
-context = SimpleNamespace(scene=scene, region=SimpleNamespace(width=300), preferences=bpy.context.preferences)
+context = SimpleNamespace(scene=scene, view_layer=bpy.context.view_layer, region=SimpleNamespace(width=300), preferences=bpy.context.preferences)
 ready = {'checking':False, 'errors':[], 'cameras':[1,2,3,4], 'environment':{'ok':True}}
 for task, action in [('CAPTURE','lichtfeld.start_training'), ('EXPORT','lichtfeld.export_dataset'),
                      ('REUSE','lichtfeld.restart_training')]:

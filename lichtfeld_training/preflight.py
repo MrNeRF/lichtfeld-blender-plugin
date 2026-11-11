@@ -94,14 +94,15 @@ def collect(context,capture_only=False):
  sources=[];cameras=[];errors=[];visibility={};visibility_sources=[];generated_cameras=0;camera_issues={}
  graph=context.evaluated_depsgraph_get()
  helpers=capture_helpers(s)
+ capture_format=None;render=None
  members={}
  for obj in context.view_layer.objects:
   if obj is not None:members[obj.name]=obj
   yield
  try:
-  capture_settings.format_for(context.scene,s)
+  capture_format=capture_settings.format_for(context.scene,s)
   capture_settings.camera_for(s)
-  scene_render.snapshot(context.scene)
+  render=scene_render.snapshot(context.scene)
  except (ValueError,KeyError) as error:errors.append(str(error))
  for obj in capture_objects(context):
   if is_surface(obj, helpers):
@@ -143,7 +144,7 @@ def collect(context,capture_only=False):
  if s.growth_end>s.refine_end:errors.append('Growth must end before refinement ends.')
  if s.use_normal_loss and s.normal_start_fraction>=s.normal_end_fraction:errors.append('Normal supervision start must be before its end.')
  return {'sources':sources,'cameras':cameras,'generated_cameras':generated_cameras,'camera_issues':camera_issues,'visibility':visibility,'visibility_sources':visibility_sources or sources,'capture_errors':capture_errors,'errors':capture_errors if capture_only else list(dict.fromkeys(errors)),
-         'signature':initial,'frame':context.scene.frame_current,'reference_changed':reference_changed}
+         'signature':initial,'frame':context.scene.frame_current,'reference_changed':reference_changed,'format':capture_format,'render':render}
 
 def synchronous(context,prefs):
  work=collect(context)
@@ -161,7 +162,7 @@ def cached(context,prefs,capture_only=False):
  errors=list(result.get('capture_errors',result['errors']) if capture_only else result['errors'])
  devices=scene_render.readiness(context.scene)
  if not devices['ok']:errors.append(devices.get('message','Check Render devices'))
- return {**result,'errors':errors,'checking':devices.get('checking',False),'environment':environment(prefs,capture_only=capture_only)}
+ return {**result,'errors':errors,'checking':devices.get('checking',False),'render_device':devices.get('effective'),'environment':environment(prefs,capture_only=capture_only)}
 
 def issues(result,require_saved=True):
  errors=list(result['errors'])
