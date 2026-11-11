@@ -10,6 +10,11 @@ AIM = "LichtFeld Aim"
 FOLLOW = "LichtFeld Follow"
 
 
+def render_busy(context):
+    """Main datablocks must stay unchanged while Blender's render job owns them."""
+    return bpy.app.is_job_running('RENDER') or context.window_manager.is_interface_locked
+
+
 def remember_objects(collection, settings):
     for key, value in (('lichtfeld_placement_mesh', settings.rig_mesh),
                        ('lichtfeld_rig_curve', settings.rig_curve), ('lichtfeld_rig_target', settings.rig_target)):

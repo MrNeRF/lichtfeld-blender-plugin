@@ -62,6 +62,14 @@ scene's rig controls. Selection alone never changes those controls; Apply and
 viewport aim require the selected managed rig to match that source. Recipe
 decoding and object-reference checks finish before Load changes the controls.
 
+The rig operator checks `rig_edit.render_busy` before starting and at each modal
+timer boundary. Native `RENDER` jobs and the window manager's interface lock
+prevent generator advancement and closure, so neither edits nor generator-finally
+cleanup change datablocks used by a render. Pre-commit cancellation is remembered
+without closing the generator until the next safe timer boundary; post-commit
+cleanup resumes through the same transaction. The existing event timer remains
+nonblocking, and non-timer events pass through to Blender.
+
 After a render-worker failure with complete image progress, the supervisor reaps
 the worker before attempting `--finalize-capture` once against `capture.blend`.
 The existing worker validates journal identity, count, camera calibration and

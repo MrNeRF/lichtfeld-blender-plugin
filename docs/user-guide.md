@@ -89,6 +89,13 @@ Updating it preserves generated camera identities where possible and retains
 additional custom cameras in the collection. Inspect coverage after changing
 placement, count, lens, aspect ratio or target.
 
+Rig creation and updates are unavailable while Blender is rendering or a job has
+locked the interface. If a render starts during an update, rig work pauses until
+the render finishes, including rollback and temporary-data cleanup. Cancellation
+requested before the update commits is deferred; cleanup waits for
+the render to finish. An update that has already committed finishes its remaining
+cleanup afterward. The extension does not start or cancel Blender renders.
+
 Duplicating a generated camera also copies its generated index. An update rejects
 duplicate or invalid indices and multiple aim helpers before changing existing
 cameras. Move the duplicate out of the rig collection before applying changes;

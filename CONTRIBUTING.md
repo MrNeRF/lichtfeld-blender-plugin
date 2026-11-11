@@ -97,7 +97,17 @@ blender --background --factory-startup --python-exit-code 1 --python tests/blend
 The fixture creates its own small scene and records the actual job path in the
 scratch directory. `--geometry` enables depth/normal supervision; `--installed`
 loads the installed extension instead of the source module. GUI fixtures need
-a visible disposable Blender process. Some integration fixtures consume earlier
+a disposable, non-background Blender process. The rig render-interleaving fixture
+uses native Cycles CPU jobs and writes its result into the selected scratch folder:
+
+```sh
+blender --factory-startup --disable-autoexec --python-exit-code 1 --python tests/blender/training_rig_ui.py -- /path/to/scratch --installed --render-interleave
+```
+
+Run it with an installed ZIP in the isolated profile described above. Add
+`--locked-render` to exercise post-commit cleanup with Lock Interface enabled.
+Omit `--render-interleave` for the ordinary 1,000-camera event-loop fixture.
+Some integration fixtures consume earlier
 fixture outputs; inspect their arguments/setup before running them.
 
 Keep all test-generated projects, images, logs, runtime environments and job
