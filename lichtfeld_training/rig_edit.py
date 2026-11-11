@@ -10,6 +10,43 @@ AIM = "LichtFeld Aim"
 FOLLOW = "LichtFeld Follow"
 
 
+def copy_reference(source, destination):
+    """Copy native RNA storage, including missing-ID tombstones, without aliases."""
+    if source.mode == 'OBJECTS' and source.get('objects') is not None:
+        destination['objects'] = source['objects']
+    else:
+        destination.objects.clear()
+    destination.collection = source.collection if source.mode == 'COLLECTION' else None
+    destination.mode = source.mode
+
+
+def reference_sources(context, reference):
+    """Resolve the explicit rig subject cooperatively; never fall back on selection."""
+    from . import preflight
+    if reference.mode == 'OBJECTS':
+        objects = reference.objects
+    elif reference.mode == 'COLLECTION':
+        if reference.collection is None:
+            raise ValueError('Choose a rig reference collection; the previous collection may have been removed')
+        objects = reference.collection.all_objects
+    elif reference.mode == 'SCENE':
+        objects = context.scene.objects
+    else:
+        raise ValueError('Choose a rig reference before applying parameters to this older rig')
+    sources = []
+    helpers = preflight.capture_helpers(context.scene.lichtfeld_training)
+    for entry in objects:
+        obj = entry.object if reference.mode == 'OBJECTS' else entry
+        if reference.mode == 'OBJECTS' and (obj is None or obj.name not in context.scene.objects or not preflight.is_surface(obj, helpers)):
+            raise ValueError('A rig reference object is missing or unavailable: ' + entry.name + '. Choose the reference again')
+        if preflight.is_surface(obj, helpers) and obj.name in context.scene.objects:
+            sources.append(obj)
+        yield
+    if not sources:
+        raise ValueError('The rig reference has no surface objects in this scene')
+    return sources
+
+
 def render_busy(context):
     """Main datablocks must stay unchanged while Blender's render job owns them."""
     return bpy.app.is_job_running('RENDER') or context.window_manager.is_interface_locked
@@ -27,7 +64,7 @@ def remember_objects(collection, settings):
 def aim_point(context, settings, center):
     if settings.rig_aim_mode == "OBJECT":
         if not settings.rig_target:
-            raise ValueError("Choose a target object or aim at Subject center")
+            raise ValueError("Choose a target object or aim at Reference center")
         point = settings.rig_target.matrix_world.translation.copy()
     elif settings.rig_aim_mode == "CURSOR":
         point = context.scene.cursor.location.copy()
@@ -35,7 +72,7 @@ def aim_point(context, settings, center):
         point = Vector(settings.rig_aim_position)
     elif settings.rig_aim_mode == "VIEWPORT":
         if not settings.rig_aim or not settings.camera_collection or settings.rig_aim.name not in settings.camera_collection.objects:
-            raise ValueError("Create a rig target first or choose Subject center")
+            raise ValueError("Create a rig target first or choose Reference center")
         point = settings.rig_aim.matrix_world.translation.copy()
     else:
         point = center.copy()
@@ -166,6 +203,7 @@ def commit(owner, settings, previous, staging, target, recipe):
     owner.rig_backup = []
     if target != final_target:
         bpy.data.objects.remove(target, do_unlink=True)
+    copy_reference(staging.lichtfeld_rig_reference, previous.lichtfeld_rig_reference)
     bpy.data.collections.remove(staging)
     owner.collection = None
     previous["lichtfeld_rig_recipe"] = recipe

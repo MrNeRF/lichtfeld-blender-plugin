@@ -19,18 +19,20 @@ def jobs_folder(prefs):
 
 def connection_folder(prefs): return str(Path(jobs_folder(prefs)) / '.connections')
 
+def is_surface(obj, helpers=()):
+ return obj is not None and obj.type in {'MESH','CURVE','SURFACE','FONT','META'} and not obj.get('lichtfeld_result') and obj not in helpers
+
 def selection_objects(context):
  s=context.scene.lichtfeld_training
- types={'MESH','CURVE','SURFACE','FONT','META'}
  if s.source_objects:
   return [item.object for item in s.source_objects if item.object and
-          item.object.name in context.scene.objects and item.object.type in types and not item.object.get('lichtfeld_result')]
+          item.object.name in context.scene.objects and is_surface(item.object)]
  try:names=json.loads(s.source_selection or '[]')
  except (ValueError,TypeError):names=[]
  if not isinstance(names,list):names=[]
  remembered=[obj for name in names if isinstance(name,str) and (obj:=context.scene.objects.get(name)) is not None
-             and obj.type in types and not obj.get('lichtfeld_result')]
- return remembered or [obj for obj in context.selected_objects if obj.type in types and not obj.get('lichtfeld_result')]
+             and is_surface(obj)]
+ return remembered or [obj for obj in context.selected_objects if is_surface(obj)]
 
 
 def remember_sources(settings, sources):
@@ -40,6 +42,12 @@ def remember_sources(settings, sources):
   settings.source_objects.add().object=obj
   yield
  settings.source_selection=json.dumps([obj.name for obj in sources])
+
+def capture_objects(context):
+ s=context.scene.lichtfeld_training
+ if s.scope=='COLLECTION':return s.source_collection.all_objects if s.source_collection else ()
+ if s.scope=='SELECTION':return selection_objects(context)
+ return context.scene.objects
 
 def capture_helpers(settings):
  helper=getattr(settings,'rig_mesh',None)
@@ -86,13 +94,8 @@ def collect(context,capture_only=False):
   capture_settings.camera_for(s)
   scene_render.snapshot(context.scene)
  except (ValueError,KeyError) as error:errors.append(str(error))
- if s.scope=='COLLECTION':
-  objects=s.source_collection.all_objects if s.source_collection else ()
- elif s.scope=="SELECTION":objects=selection_objects(context)
- else:objects=context.scene.objects
- for obj in objects:
-  selected=True
-  if selected and obj.type in {'MESH','CURVE','SURFACE','FONT','META'} and not obj.get('lichtfeld_result') and obj not in helpers:
+ for obj in capture_objects(context):
+  if is_surface(obj, helpers):
    sources.append(obj.name);visibility[obj.name]=is_hidden(obj,context.view_layer,members=members)
   yield
  if not sources:errors.append('Choose at least one surface object.')

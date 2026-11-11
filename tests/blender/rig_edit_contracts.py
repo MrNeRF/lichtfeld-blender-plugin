@@ -251,4 +251,77 @@ with tempfile.TemporaryDirectory() as directory:
     assert bpy.ops.lichtfeld.create_rig.poll()
 print('RIG_SELECTION_EXPLICIT_LOAD_APPLY_AND_SAVE_PASS',flush=True)
 
+# Rig bounds stay independent of capture scope and subsequent viewport selection.
+cube=bpy.data.objects['Cube']
+rig=s.camera_collection
+before={o.name:tuple(o.location) for o in rig.objects if o.type=='CAMERA'}
+distant=cube.copy();distant.data=cube.data.copy();distant.name='Distant capture content'
+bpy.context.scene.collection.objects.link(distant);distant.location=(100,0,0)
+s.scope='SCENE'
+assert bpy.ops.lichtfeld.create_rig()=={'FINISHED'}
+assert before=={o.name:tuple(o.location) for o in rig.objects if o.type=='CAMERA'}
+assert distant in ext.sources_for(bpy.context) and cube in ext.sources_for(bpy.context)
+for obj in bpy.context.selected_objects:obj.select_set(False)
+distant.select_set(True)
+assert bpy.ops.lichtfeld.pick_sources(for_rig=True)=={'FINISHED'}
+assert s.scope=='SCENE' and s.rig_reference.objects[0].object==distant
+assert rig.lichtfeld_rig_reference.objects[0].object==cube
+assert bpy.ops.lichtfeld.create_rig()=={'FINISHED'}
+assert all((o.location-Vector(before[o.name])-Vector((100,0,0))).length<1e-4
+           for o in rig.objects if o.type=='CAMERA')
+# Loading the saved subject never rewrites the capture scope or source selection.
+s.scope='COLLECTION';s.source_collection=bpy.data.collections['Rig subject']
+captured=s.source_collection
+s.rig_reference.mode='SCENE'
+assert bpy.ops.lichtfeld.read_rig()=={'FINISHED'}
+assert s.scope=='COLLECTION' and s.source_collection==captured
+assert s.rig_reference.mode=='OBJECTS' and s.rig_reference.objects[0].object==distant
+distant.name='Renamed rig reference'
+assert s.rig_reference.objects[0].object==distant
+assert distant not in ext.preflight.capture_helpers(s)
+rig_name=rig.name
+with tempfile.TemporaryDirectory() as directory:
+    filepath=str(Path(directory)/'independent-reference.blend')
+    bpy.ops.wm.save_as_mainfile(filepath=filepath)
+    bpy.ops.wm.open_mainfile(filepath=filepath,load_ui=False)
+    s=bpy.context.scene.lichtfeld_training;rig=s.camera_collection
+    distant=bpy.data.objects['Renamed rig reference']
+    assert rig.name==rig_name and rig.lichtfeld_rig_reference.objects[0].object==distant
+    assert s.rig_reference.objects[0].object==distant
+    bpy.data.objects.remove(distant,do_unlink=True)
+    before={o.name:tuple(o.location) for o in rig.objects if o.type=='CAMERA'}
+    assert bpy.ops.lichtfeld.read_rig()=={'FINISHED'}
+    assert s.rig_reference.objects[0].object is None
+    try:bpy.ops.lichtfeld.create_rig()
+    except RuntimeError as error:assert 'rig reference object is missing' in str(error),error
+    else:raise AssertionError('Missing reference silently changed the subject')
+    assert before=={o.name:tuple(o.location) for o in rig.objects if o.type=='CAMERA'}
+    assert len(ext.cameras_for(s))==8
+    # Old managed rigs retain capture poses but cannot infer a historical subject.
+    rig.lichtfeld_rig_reference.mode='UNSET'
+    assert bpy.ops.lichtfeld.read_rig()=={'FINISHED'}
+    assert s.rig_reference.mode=='UNSET' and len(ext.cameras_for(s))==8
+    try:bpy.ops.lichtfeld.create_rig()
+    except RuntimeError as error:assert 'older rig' in str(error),error
+    else:raise AssertionError('Legacy subject inferred from current capture scope')
+    s.rig_reference.mode='COLLECTION';s.rig_reference.collection=s.source_collection
+    assert bpy.ops.lichtfeld.create_rig()=={'FINISHED'}
+    assert rig.lichtfeld_rig_reference.collection==s.source_collection
+    assert s.scope=='COLLECTION'
+    reference_collection=bpy.data.collections.new('Temporary rig reference')
+    bpy.context.scene.collection.children.link(reference_collection)
+    reference_collection.objects.link(bpy.data.objects['Cube'])
+    s.rig_reference.collection=reference_collection
+    assert bpy.ops.lichtfeld.create_rig()=={'FINISHED'}
+    bpy.data.collections.remove(reference_collection)
+    assert bpy.ops.lichtfeld.read_rig()=={'FINISHED'}
+    assert s.rig_reference.collection is None
+    try:bpy.ops.lichtfeld.create_rig()
+    except RuntimeError as error:assert 'rig reference collection' in str(error),error
+    else:raise AssertionError('Deleted reference collection silently changed the subject')
+    s.rig_reference.mode='SCENE'
+    assert bpy.ops.lichtfeld.create_rig()=={'FINISHED'}
+    assert rig.lichtfeld_rig_reference.mode=='SCENE' and s.scope=='COLLECTION'
+print('INDEPENDENT_RIG_REFERENCE_CAPTURE_LOAD_RENAME_DELETE_LEGACY_SAVE_PASS',flush=True)
+
 bpy.ops.preferences.addon_disable(module=module)
