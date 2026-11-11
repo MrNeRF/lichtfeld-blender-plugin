@@ -117,7 +117,7 @@ class FailurePaths(unittest.TestCase):
                 self.assertEqual(job['resume_iteration'], 7)
                 self.assertEqual(core.training_config(job)['optimization']['eval_steps'], [4, 8, 12, 16])
                 self.assertEqual(job["backend"], "TRUSTED_PREFERENCES")
-                self.assertEqual(Path(job['root']).parent, Path(directory)/'jobs')
+                self.assertTrue(Path(job['root']).parent.samefile(Path(directory)/'jobs'))
                 self.assertEqual(core.training_command(job, "hook.py")[0], "TRUSTED_PREFERENCES")
                 self.assertEqual(job["connection_directory"], "")
                 self.assertEqual(parent, "previous")

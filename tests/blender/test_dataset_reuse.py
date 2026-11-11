@@ -40,7 +40,7 @@ class DatasetReuse(unittest.TestCase):
             self.assertEqual(manifest['views'],4)
             self.assertEqual((first/'images/view_000000.png').read_bytes(),b'image fixture')
             fresh,_=jobs.restart_data(first,{},backend='TRUSTED',jobs_directory=Path(directory)/'jobs')
-            self.assertEqual(Path(fresh['root']).parent, Path(directory)/'jobs')
+            self.assertTrue(Path(fresh['root']).parent.samefile(Path(directory)/'jobs'))
             self.assertNotIn('capture_only',fresh)
             self.assertNotIn('export_parent',fresh)
             self.assertFalse(list(destination.glob('*.partial')))
