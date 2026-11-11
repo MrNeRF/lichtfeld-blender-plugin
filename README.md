@@ -71,7 +71,7 @@ The interface is currently in English.
 3. Open its preferences, select the actual LichtFeld **executable file**, and
    choose a permanent jobs directory. Select **Verify installation**.
 4. In the 3D Viewport, press **N** and open the **LichtFeld** sidebar tab.
-   **Settings** returns to the extension preferences.
+   The gear button returns to the extension preferences; the question mark opens the user guide.
 
 Installing from source means building the ZIP above; this is a regular Blender
 extension, not a startup script. Updating the ZIP does not require changing its
@@ -87,7 +87,7 @@ there is no need to install the protocol manually.
 ## First capture and training
 
 1. Open your scene, choose a static frame, and save the `.blend` file.
-2. In **New → Capture and train**, select the source: selected surface objects,
+2. Choose **Activity → Capture and train**, then select the source: selected surface objects,
    a collection, or the entire scene.
 3. Select a collection containing at least four perspective cameras, or choose
    **Create camera rig** in **Capture cameras**. Use **Check camera framing** before starting.
@@ -141,7 +141,7 @@ Closing Blender leaves an extension-owned headless job running. Reopen the saved
 project to recover its remembered job, or use **Open job**. One controller can
 issue commands for a job; other scenes/processes can observe it read-only.
 
-**Connect trainer** attaches a read-only viewer to an independently started
+**View trainer** finds active trainers on entry; **Refresh trainers** updates the list on request. There is no periodic discovery scan. Connecting attaches a read-only viewer to an independently started
 trainer. Disconnecting that viewer does not stop its trainer. A training run owned
 by the LichtFeld Studio GUI still stops when its owning window closes.
 

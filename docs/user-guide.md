@@ -17,11 +17,9 @@ the open scene after launch does not change that job's images.
 
 ## Choose an operation
 
-The capture plan, rig action, framing check, save action and primary capture/export action are
-at the top of setup. The plan shows the capture content, View Layer, applied rig
-reference, actual camera count, output dimensions, renderer/backend and static
-frame. Pending rig controls are flagged separately; they do not replace existing
-camera poses until Apply.
+Choose the **Activity** first: capture and train, generate a dataset only, or train saved images. **Open job** and **View trainer** open existing work without changing this setup; **Back to setup** returns to it. **Return to previous job** is available when a previous job was retained. The gear button opens configuration, and the question mark opens this guide.
+
+The compact capture summary shows the content, actual camera count and output dimensions. Expand **Capture details** for the View Layer, applied rig reference, renderer, lens and static frame. Pending rig controls remain visible in the compact summary; they do not replace existing camera poses until Apply. Rig, framing, save and capture/export actions stay above the editing sections.
 
 Expand **Capture content and quality**, **Capture cameras**, **Render and output**,
 or **Training and preview** to edit the corresponding controls. These are native
@@ -252,8 +250,7 @@ project recovers monitoring automatically. **Open job** is available when that
 remembered reference is missing or another job must be inspected.
 
 Closing Blender leaves an extension-owned headless trainer running. One controller
-owns its commands; another process can observe it read-only. **Connect trainer**
-observes compatible independently launched trainers and their capture cameras.
+owns its commands; another process can observe it read-only. **View trainer** searches once when opened; **Refresh trainers** requests another search. Loading a project or leaving a scene in this view does not start periodic discovery. Monitoring an already connected trainer continues automatically. **Connect to trainer** observes compatible independently launched trainers and their capture cameras.
 Disconnecting that view leaves the trainer running. A trainer owned by the
 LichtFeld Studio GUI still stops when its owning LichtFeld Studio window closes.
 

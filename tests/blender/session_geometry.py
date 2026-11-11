@@ -100,11 +100,14 @@ assert not any(c.get('lichtfeld_session_cameras') for c in scene.collection.chil
 callbacks=[]
 a={'id':'a','pid':1,'label':'A'};b={'id':'b','pid':2,'label':'B'}
 with patch.object(ext.ui_runtime,'submit',side_effect=lambda fn,done,fail:callbacks.append(done)):
- ext.refresh_sessions(force=True);callbacks.pop()( [a,b] )
+ ext.refresh_sessions()
+ ext.refresh_sessions()
+ assert len(callbacks)==1,'Concurrent refresh requests must share the pending scan'
+ callbacks.pop()( [a,b] )
  s.discovered_session='b'
- ext.refresh_sessions(force=True);callbacks.pop()( [b,a] )
+ ext.refresh_sessions();callbacks.pop()( [b,a] )
  assert s.discovered_session=='b'
- ext.refresh_sessions(force=True);callbacks.pop()( [] )
+ ext.refresh_sessions();callbacks.pop()( [] )
  assert s.discovered_session=='NONE'
 print('ASYMMETRIC_MODEL_CAMERA_COORDINATES_AND_LIVE_DISCOVERY_PASS',flush=True)
 ext.ui_runtime.clear()

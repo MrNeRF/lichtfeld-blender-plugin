@@ -21,6 +21,12 @@ view=max(bpy.context.window.screen.areas,key=lambda a:a.width*a.height);view.typ
 state={'step':0,'start':time.monotonic()}
 def popup():
  with bpy.context.temp_override(area=view,region=next(r for r in view.regions if r.type=='WINDOW')):bpy.ops.wm.call_panel(name='LF_PT_training',keep_open=True)
+
+def snapshot(name):
+ # Programmatic RNA changes do not necessarily invalidate the displayed region.
+ for current in bpy.context.screen.areas:current.tag_redraw()
+ bpy.ops.wm.redraw_timer(type='DRAW_WIN_SWAP',iterations=1)
+ bpy.ops.screen.screenshot(filepath=str(area/name))
 def tick():
  try:
   assert time.monotonic()-state['start']<60
@@ -31,7 +37,7 @@ def tick():
    if ext.preflight.issues(ext.preflight.cached(bpy.context,prefs)):return .1
    popup();state['step']=2;return 1
   if state['step']==2:
-   bpy.ops.screen.screenshot(filepath=str(area/'settings-ready.png'))
+   snapshot('settings-ready.png')
    bpy.context.window.event_simulate(type='ESC',value='PRESS')
    view.spaces.active.show_region_ui=True
    state['step']=3;return .5
@@ -40,24 +46,38 @@ def tick():
    region.active_panel_category='LichtFeld'
    state['step']=4;return .5
   if state['step']==4:
-   bpy.ops.screen.screenshot(filepath=str(area/'sidebar-capture.png'))
+   snapshot('sidebar-capture.png')
    s.dataset_mode='EXPORT';state['step']=5;return .5
   if state['step']==5:
-   bpy.ops.screen.screenshot(filepath=str(area/'sidebar-export.png'))
+   snapshot('sidebar-export.png')
    state['source']=bpy.context.scene
    with bpy.context.temp_override(area=view,region=next(r for r in view.regions if r.type=='WINDOW')):
     assert bpy.ops.lichtfeld.capture_framing()=={'FINISHED'}
    state['step']=6;return .1
   if state['step']==6:
    assert ext.capture_preview.source_scene(bpy.context.scene)==state['source']
-   bpy.ops.screen.screenshot(filepath=str(area/'sidebar-framing.png'))
+   snapshot('sidebar-framing.png')
    assert bpy.ops.lichtfeld.close_capture_framing()=={'FINISHED'}
    assert bpy.context.scene==state['source'] and not s.operation_busy
    s.dataset_mode='REUSE';state['step']=7;return .5
   if state['step']==7:
-   bpy.ops.screen.screenshot(filepath=str(area/'sidebar-saved-images.png'))
-   s.dataset_mode='CAPTURE'
-   (area/'result.json').write_text(json.dumps({'ok':True,'framing_return':True,'tasks':['CAPTURE','EXPORT','REUSE']}))
+   snapshot('sidebar-saved-images.png')
+   s.previous_job=str(area/'previous-job')
+   assert bpy.ops.lichtfeld.setup_view(mode='OPEN')=={'FINISHED'}
+   state['step']=8;return .5
+  if state['step']==8:
+   snapshot('sidebar-open.png')
+   assert bpy.ops.lichtfeld.setup_view(mode='CONNECT')=={'FINISHED'}
+   state['step']=9;return .5
+  if state['step']==9:
+   if ext._session_scan_pending:return .1
+   snapshot('sidebar-trainers.png')
+   assert bpy.ops.lichtfeld.setup_view(mode='NEW')=={'FINISHED'}
+   assert s.dataset_mode=='REUSE'
+   s.dataset_mode='CAPTURE';state['step']=10;return .5
+  if state['step']==10:
+   snapshot('sidebar-return.png')
+   (area/'result.json').write_text(json.dumps({'ok':True,'framing_return':True,'navigation_return':True,'tasks':['CAPTURE','EXPORT','REUSE']}))
    print('SETTINGS_UI_TASKS_NATIVE_SECTIONS_AND_FRAMING_RETURN_PASS',flush=True)
    bpy.ops.wm.quit_blender();return None
  except Exception:
