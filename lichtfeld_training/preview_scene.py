@@ -8,9 +8,11 @@ Raw display prevents a second transfer. This fixes compositing, not differences
 between Blender's rasterizer and the trainer's rasterizer.
 """
 import bpy
+from .session_reader import SH3_TAIL_START, SH3_TAIL_ATTRIBUTES, pack_sh3_tail
 
 SOURCE = 'lichtfeld_color_source'
 RESULT = 'lichtfeld_color_result'
+MATERIAL_LAYOUT = 2  # SH3 must fit the mesh-preview attribute budget too.
 _return_shading = {}
 
 
@@ -50,16 +52,15 @@ def material_spec(degree):
                 mul(-.5900435899266435,mul(x,sub(xx,mul(3,yy))))]
         tail = []
         if degree == 3:
-            packed = [node('ShaderNodeAttribute', attribute_name=f'lichtfeld_rgb_tail_{i}') for i in range(3)]
+            packed = [node('ShaderNodeAttribute', attribute_name=f'lichtfeld_rgb_tail_{i}') for i in range(SH3_TAIL_ATTRIBUTES)]
             xyzs = [node('ShaderNodeSeparateXYZ', [(0, (item[0], 'Vector'))]) for item in packed]
             def combine(x,y,z):return node('ShaderNodeCombineXYZ', [(0,x),(1,y),(2,z)])
-            tail = [(packed[0][0], 'Vector'),
-                combine((packed[0][0], 'Alpha'), (xyzs[1][0], 'X'), (xyzs[1][0], 'Y')),
-                combine((xyzs[1][0], 'Z'), (packed[1][0], 'Alpha'), (xyzs[2][0], 'X')),
-                combine((xyzs[2][0], 'Y'), (xyzs[2][0], 'Z'), (packed[2][0], 'Alpha'))]
+            channels = [socket for item, xyz in zip(packed, xyzs)
+                        for socket in ((xyz[0], 'X'), (xyz[0], 'Y'), (xyz[0], 'Z'), (item[0], 'Alpha'))]
+            tail = [combine(*channels[i:i+3]) for i in range(0, len(channels), 3)]
         for i,value in enumerate(basis):
-            if i >= 11 and degree == 3:
-                coefficient = tail[i-11]
+            if i >= SH3_TAIL_START and degree == 3:
+                coefficient = tail[i-SH3_TAIL_START]
             else:
                 attribute=node('ShaderNodeAttribute',attribute_name=f'radiance:sh_{i}')
                 coefficient=(attribute[0], 'Vector')
@@ -73,7 +74,7 @@ def material_spec(degree):
 
 def material_steps(degree):
     for index,material in enumerate(bpy.data.materials):
-        if material.get('lichtfeld_encoded_material') == 1 and material.get('lichtfeld_sh_degree') == degree:
+        if material.get('lichtfeld_encoded_material') == MATERIAL_LAYOUT and material.get('lichtfeld_sh_degree') == degree:
             return material
         if index % 32 == 31:yield
     material=bpy.data.materials.new(f'LichtFeld trainer colors SH{degree}')
@@ -94,7 +95,7 @@ def material_steps(degree):
                 else:target.default_value=value
             nodes.append(node)
             yield
-        material['lichtfeld_encoded_material']=1
+        material['lichtfeld_encoded_material']=MATERIAL_LAYOUT
         material['lichtfeld_sh_degree']=degree
         complete=True
         return material
@@ -132,28 +133,29 @@ def degree_for(cloud):
 def ensure_tail_steps(cloud):
     """Upgrade saved pre-packing SH3 results without numerical work on the UI."""
     if degree_for(cloud) != 3:return
-    names=[f'lichtfeld_rgb_tail_{i}' for i in range(3)]
+    names=[f'lichtfeld_rgb_tail_{i}' for i in range(SH3_TAIL_ATTRIBUTES)]
     if all(cloud.attributes.get(name) and cloud.attributes[name].data_type=='FLOAT4' for name in names):return
     if not cloud.is_editable:raise ValueError('Make the result local before opening the trainer color view')
     import numpy as np
     from . import ui_runtime
     values=[]
-    for i in range(11,15):
+    for i in range(SH3_TAIL_START,15):
         array=np.empty(len(cloud.points)*3,dtype=np.float32)
         cloud.attributes[f'radiance:sh_{i}'].data.foreach_get('vector',array)
         values.append(array.reshape(-1,3))
         yield
-    future=ui_runtime._executor.submit(lambda: np.stack(values,axis=1).reshape(-1,3,4))
+    future=ui_runtime._executor.submit(lambda: pack_sh3_tail(np.stack(values,axis=1)))
     while not future.done():yield
     packed=future.result()
     for i,name in enumerate(names):
-        attribute=cloud.attributes.get(name)
-        if attribute and attribute.data_type!='FLOAT4':raise ValueError('A custom attribute conflicts with the reserved trainer color attributes')
-        if attribute is None:attribute=cloud.attributes.new(name,'FLOAT4','POINT')
-        yield
         # Packing and contiguous conversion stay on the numerical worker.
         future=ui_runtime._executor.submit(lambda i=i: np.ascontiguousarray(packed[:,i]).ravel())
         while not future.done():yield
+        attribute=cloud.attributes.get(name)
+        if attribute and attribute.data_type!='FLOAT4':raise ValueError('A custom attribute conflicts with the reserved trainer color attributes')
+        if attribute is None:attribute=cloud.attributes.new(name,'FLOAT4','POINT')
+        # Publish each attribute with its values before yielding. Cancellation
+        # must not leave a complete-looking tail containing an unwritten field.
         attribute.data.foreach_set('vector',future.result())
         yield
     cloud.update_tag()

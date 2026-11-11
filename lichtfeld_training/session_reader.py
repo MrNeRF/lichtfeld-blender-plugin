@@ -10,6 +10,14 @@ from .job_control import Controller
 from lichtfeld_sessions.geometry import FLIP, IDENTITY, validate as validate_geometry, load as load_geometry
 from .bridge_core import read_job_json
 
+SH3_TAIL_START = 7
+SH3_TAIL_ATTRIBUTES = 6
+
+
+def pack_sh3_tail(coefficients):
+    """Pack the last eight RGB coefficients into six material attributes."""
+    return coefficients.reshape(len(coefficients), SH3_TAIL_ATTRIBUTES, 4)
+
 
 def load_record(root, record, should_cancel=lambda: False):
     if record.get("shared"):
@@ -70,11 +78,11 @@ def blender_fields(arrays):
     fields.extend((f"radiance:sh_{i}", "FLOAT_VECTOR", "vector", arrays["sh"][:, i + 1])
                   for i in range(arrays["sh"].shape[1] - 1))
     if arrays["sh"].shape[1] == 16:
-        # EEVEE's material attribute budget drops the 16th requested attribute.
-        # Pack the last four RGB coefficients in three FLOAT4 attributes, while
-        # retaining all standard attributes for native Blender rendering/export.
-        tail = arrays["sh"][:, 12:16].reshape(len(rotation), 3, 4)
-        fields.extend((f"lichtfeld_rgb_tail_{i}", "FLOAT4", "vector", tail[:, i]) for i in range(3))
+        # Stay within EEVEE's mesh material budget too (material previews),
+        # retaining standard attributes for native Gaussian rendering/export.
+        tail = pack_sh3_tail(arrays["sh"][:, SH3_TAIL_START + 1:16])
+        fields.extend((f"lichtfeld_rgb_tail_{i}", "FLOAT4", "vector", tail[:, i])
+                      for i in range(SH3_TAIL_ATTRIBUTES))
     return [(name, kind, prop, np.ascontiguousarray(value, dtype=np.float32).ravel())
             for name, kind, prop, value in fields]
 

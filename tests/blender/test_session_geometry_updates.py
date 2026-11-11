@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2026 LichtFeld Studio Authors
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Paused session geometry updates do not require another Gaussian publication."""
+"""Session geometry updates and Blender attribute contracts."""
 import importlib
 import os
 from pathlib import Path
@@ -44,6 +44,15 @@ def arrays():
 
 
 class GeometryUpdates(unittest.TestCase):
+    def test_sh3_material_tail_preserves_point_channel_and_coefficient_order(self):
+        model = arrays()
+        model['sh'] = np.arange(3*16*3, dtype=np.float32).reshape(3,16,3)
+        fields = {name: value for name, kind, prop, value in reader.blender_fields(model)}
+        for i in range(15):
+            np.testing.assert_array_equal(fields[f'radiance:sh_{i}'].reshape(3,3), model['sh'][:,i+1])
+        packed = np.stack([fields[f'lichtfeld_rgb_tail_{i}'].reshape(3,4) for i in range(6)], axis=1)
+        np.testing.assert_array_equal(packed.reshape(3,8,3), model['sh'][:,8:16])
+
     def test_terminal_result_uses_its_root_hash_identity_and_presentation(self):
         with tempfile.TemporaryDirectory() as directory, patch.object(transport, "registry_root", return_value=Path(directory) / 'sessions'):
             root = Path(directory) / 'saved'
