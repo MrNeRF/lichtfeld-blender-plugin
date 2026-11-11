@@ -66,6 +66,10 @@ are resolved cooperatively by the rig transaction, never by panel draw. Load
 restores the reference without writing capture scope or remembered capture sources.
 Older rigs have an unset reference and retain valid capture poses; refitting
 requires an explicit reference. No migration guesses historical bounds.
+Scene membership uses Object identity, including local and linked IDs with the
+same name. The existing cooperative preflight compares active saved/current
+references; panel drawing only reads its cached result. Pin, Load and Apply
+invalidate readiness even when the number of remembered objects stays the same.
 
 `rig_parameter_source` records which collection last supplied or received the
 scene's rig controls. Selection alone never changes those controls; Apply and

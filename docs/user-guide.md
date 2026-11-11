@@ -83,6 +83,8 @@ a rig restores its saved reference without changing capture content. Renaming a
 reference object preserves its identity. A deleted or unavailable remembered object
 blocks Apply until you choose the reference again; it never falls back to the
 current selection. Apply reevaluates current reference bounds.
+The panel flags reference changes that still need Apply. Load restores the saved
+reference and clears that pending change without moving cameras.
 
 | Distribution | Coverage |
 | --- | --- |

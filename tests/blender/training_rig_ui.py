@@ -69,7 +69,7 @@ def render_interleave():
     rig=settings.camera_collection
     original_ids=[o.as_pointer() for o in rig.objects if o.type=='CAMERA']
     scene.camera=next(o for o in rig.objects if o.type=='CAMERA')
-    scene.render.engine='CYCLES';scene.cycles.device='CPU';scene.cycles.samples=1024
+    scene.render.engine='CYCLES';scene.cycles.device='CPU';scene.cycles.samples=8192
     scene.cycles.use_adaptive_sampling=False;scene.cycles.use_denoising=False
     scene.render.resolution_x=128;scene.render.resolution_y=128;scene.render.resolution_percentage=100
     bpy.context.preferences.view.render_display_type='NONE'

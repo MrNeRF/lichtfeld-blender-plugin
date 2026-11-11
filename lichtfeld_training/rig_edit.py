@@ -18,6 +18,25 @@ def copy_reference(source, destination):
         destination.objects.clear()
     destination.collection = source.collection if source.mode == 'COLLECTION' else None
     destination.mode = source.mode
+    if isinstance(destination.id_data, bpy.types.Scene):
+        from . import preflight
+        preflight.invalidate(destination.id_data)
+
+
+def reference_changed(current, saved):
+    """Compare the active reference incrementally, outside panel drawing."""
+    if current.mode != saved.mode:
+        return True
+    if current.mode == 'COLLECTION':
+        return current.collection != saved.collection
+    if current.mode == 'OBJECTS':
+        if len(current.objects) != len(saved.objects):
+            return True
+        for left, right in zip(current.objects, saved.objects):
+            if left.object != right.object:
+                return True
+            yield
+    return False
 
 
 def reference_sources(context, reference):
@@ -33,13 +52,21 @@ def reference_sources(context, reference):
         objects = context.scene.objects
     else:
         raise ValueError('Choose a rig reference before applying parameters to this older rig')
+    # Scene collections allow local and linked IDs with identical names. Build
+    # one transaction-local identity set cooperatively, not a name lookup/cache.
+    members = set()
+    if reference.mode != 'SCENE':
+        for obj in context.scene.objects:
+            members.add(obj)
+            yield
     sources = []
     helpers = preflight.capture_helpers(context.scene.lichtfeld_training)
     for entry in objects:
         obj = entry.object if reference.mode == 'OBJECTS' else entry
-        if reference.mode == 'OBJECTS' and (obj is None or obj.name not in context.scene.objects or not preflight.is_surface(obj, helpers)):
+        in_scene = reference.mode == 'SCENE' or obj in members
+        if reference.mode == 'OBJECTS' and (not in_scene or not preflight.is_surface(obj, helpers)):
             raise ValueError('A rig reference object is missing or unavailable: ' + entry.name + '. Choose the reference again')
-        if preflight.is_surface(obj, helpers) and obj.name in context.scene.objects:
+        if in_scene and preflight.is_surface(obj, helpers):
             sources.append(obj)
         yield
     if not sources:

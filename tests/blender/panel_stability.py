@@ -4,11 +4,12 @@
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
-import sys
+import sys, importlib
 import bpy
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-bpy.ops.preferences.addon_enable(module="lichtfeld_training")
-import lichtfeld_training as ext
+module='bl_ext.user_default.lichtfeld_training' if '--installed' in sys.argv else 'lichtfeld_training'
+bpy.ops.preferences.addon_enable(module=module)
+ext=importlib.import_module(module)
 s = bpy.context.scene.lichtfeld_training
 s.job_directory = ""
 s.running = False
@@ -18,11 +19,11 @@ s.camera_collection = bpy.data.collections.new("Stability cameras")
 s.camera_collection["lichtfeld_generated"] = True
 
 class Layout:
-    def __init__(self): self.fields = []; self.rows = []
+    def __init__(self): self.fields = []; self.rows = []; self.labels = []
     def box(self): return self
     def row(self, **kw): return self
     def column(self, **kw): return self
-    def label(self, **kw): self.rows.append("label")
+    def label(self, **kw): self.rows.append("label"); self.labels.append(kw.get('text',''))
     def prop(self, settings, name, **kw):
         self.fields.append((name, len(self.rows)))
         self.rows.append("prop")
@@ -44,6 +45,17 @@ assert all(order == orders[0] for order in orders), orders
 assert any(name == "iterations" for name, row in orders[0][0])
 print("WHOLE_SETUP_LAYOUT_STABLE_PASS", len(orders[0][1]))
 
+s.rig_parameter_source=s.camera_collection
+s.camera_collection['lichtfeld_rig_recipe']=ext.rig_recipe(s)
+for checking,pending,expected in ((False,True,'Rig/framing changed: apply parameters'),
+    (True,False,'Checking rig parameters…'),(False,False,'Capture uses the existing cameras')):
+    ready={'checking':checking,'reference_changed':pending,'cameras':[],'environment':{}}
+    layout=Layout()
+    with patch.object(ext.preflight,'cached',return_value=ready),patch.object(ext.preflight,'issues',return_value=[]),patch.object(ext,'preferences',return_value=None):
+        ext.LF_PT_training.draw(SimpleNamespace(layout=layout),context)
+    assert expected in layout.labels,(expected,layout.labels)
+print('REFERENCE_ONLY_PENDING_STATE_AND_CHECKING_NOTICE_PASS')
+
 pre = ext.preflight
 area = SimpleNamespace(type="VIEW_3D", tag_redraw=Mock())
 fake_bpy = SimpleNamespace(data=SimpleNamespace(screens=[SimpleNamespace(areas=[area])]))
@@ -59,4 +71,4 @@ with patch.object(pre, "bpy", fake_bpy), patch.object(pre, "environment"), patch
 assert area.tag_redraw.call_count == 1, area.tag_redraw.call_count
 print("UNCHANGED_VALIDATION_NO_REDRAW_PASS")
 pre.clear()
-bpy.ops.preferences.addon_disable(module="lichtfeld_training")
+bpy.ops.preferences.addon_disable(module=module)

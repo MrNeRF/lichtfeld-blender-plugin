@@ -496,7 +496,9 @@ class LF_OT_rig(bpy.types.Operator):
             sources = sources_for(context)
         else:
             sources = yield from rig_edit.reference_sources(context, reference)
-        capture_sources = preflight.selection_objects(context) if settings.scope == 'SELECTION' else None
+        helpers = preflight.capture_helpers(settings)
+        capture_sources = ([obj for obj in preflight.selection_objects(context) if preflight.is_surface(obj, helpers)]
+                           if settings.scope == 'SELECTION' else None)
         recipe = rig_recipe(settings)
         low, high = Vector((float("inf"),) * 3), Vector((float("-inf"),) * 3)
         depsgraph = context.evaluated_depsgraph_get()
@@ -735,6 +737,7 @@ class LF_OT_pick_sources(bpy.types.Operator):
                     s.rig_reference['objects'] = entries
                     s.rig_reference.collection = None
                     s.rig_reference.mode = 'OBJECTS'
+                    preflight.invalidate(s.id_data)
                 else:
                     yield from preflight.remember_sources(s, sources)
             finally:
@@ -1871,9 +1874,10 @@ class LF_PT_training(bpy.types.Panel):
                     row.operator("lichtfeld.select_aim", text="Move aim target in viewport", icon="EMPTY_AXIS")
             wrapped(box,"Apply parameters to update camera placement. Move the aim target to change camera direction live.")
             box.operator("lichtfeld.create_rig", text="Apply rig parameters" if managed else "Create camera rig", icon="ADD")
-        rig_changed = managed and settings.camera_collection.get("lichtfeld_rig_recipe") != rig_recipe(settings)
+        rig_changed = managed and (settings.camera_collection.get("lichtfeld_rig_recipe") != rig_recipe(settings) or ready.get('reference_changed', False))
         box.label(text="Load parameters to edit this rig" if managed and settings.rig_parameter_source != settings.camera_collection else
-                  "Rig/framing changed: apply parameters" if rig_changed else "Capture uses the existing cameras",
+                  "Rig/framing changed: apply parameters" if rig_changed else
+                  "Checking rig parameters…" if managed and ready.get('checking') else "Capture uses the existing cameras",
                   icon="INFO")
         box = setup.box()
         box.label(text="3  Capture", icon="RENDER_STILL")

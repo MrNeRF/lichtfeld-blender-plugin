@@ -64,7 +64,16 @@ def signature(context):
   s.camera_collection.as_pointer() if s.camera_collection else 0,context.scene.frame_current,
   tuple(obj.as_pointer() for obj in capture_helpers(s)),
   bpy.data.filepath,bpy.data.is_dirty,_save_generation,capture_settings.signature(context.scene,s),scene_render.signature(context.scene),
-  tuple(sorted(obj.as_pointer() for obj in selection_objects(context))) if s.scope=="SELECTION" else ())
+  tuple(sorted(obj.as_pointer() for obj in selection_objects(context))) if s.scope=="SELECTION" else (),
+  s.rig_reference.mode,s.rig_reference.collection.as_pointer() if s.rig_reference.collection else 0,len(s.rig_reference.objects))
+
+def invalidate(scene):
+ global _work,_next
+ pointer=scene.as_pointer()
+ _cache.pop(pointer,None)
+ if _work and _work[0]==pointer:
+  _work[1].close();_work=None
+ _next=0
 
 def environment(prefs,force=False,capture_only=False):
  key=(bpy.path.abspath(prefs.backend_path),jobs_folder(prefs),bpy.data.filepath,not capture_only)
@@ -109,6 +118,10 @@ def collect(context,capture_only=False):
      message=str(error);errors.append(message);camera_issues[message]=obj.name
    yield
  cameras.sort()
+ reference_changed=False
+ if s.camera_collection and s.camera_collection.get('lichtfeld_generated'):
+  from . import rig_edit
+  reference_changed=yield from rig_edit.reference_changed(s.rig_reference,s.camera_collection.lichtfeld_rig_reference)
  try:capture_settings.validate_view_count(len(cameras))
  except ValueError as error:errors.append(str(error))
  if s.scope=='SCENE':
@@ -130,7 +143,7 @@ def collect(context,capture_only=False):
  if s.growth_end>s.refine_end:errors.append('Growth must end before refinement ends.')
  if s.use_normal_loss and s.normal_start_fraction>=s.normal_end_fraction:errors.append('Normal supervision start must be before its end.')
  return {'sources':sources,'cameras':cameras,'generated_cameras':generated_cameras,'camera_issues':camera_issues,'visibility':visibility,'visibility_sources':visibility_sources or sources,'capture_errors':capture_errors,'errors':capture_errors if capture_only else list(dict.fromkeys(errors)),
-         'signature':initial,'frame':context.scene.frame_current}
+         'signature':initial,'frame':context.scene.frame_current,'reference_changed':reference_changed}
 
 def synchronous(context,prefs):
  work=collect(context)
