@@ -12,8 +12,10 @@ import subprocess
 import uuid
 if __package__:
     from .bridge_core import atomic_json, read_json, read_job_json, read_dataset_json, verify_artifact, preview_sh_limit, SCHEMA
+    from .capture_settings import validate_view_count
 else:
     from bridge_core import atomic_json, read_json, read_job_json, read_dataset_json, verify_artifact, preview_sh_limit, SCHEMA
+    from capture_settings import validate_view_count
 
 
 def verify_backend(path):
@@ -276,10 +278,9 @@ def captured_dataset(directory, options=None):
         origin = read_job(Path(parent) / "job.json")
     else:
         raise ValueError("The dataset ancestry is too deep")
-    manifest = read_json(candidate / "manifest.json", {})
+    manifest = read_dataset_json(candidate / "manifest.json", {})
     views = manifest.get("views")
-    if type(views) is not int or not 4 <= views <= 1000:
-        raise ValueError("The saved capture needs 4–1,000 complete views")
+    validate_view_count(views)
     transforms_path = artifact_path(candidate, manifest.get("transforms_file", "transforms.json"))
     if not transforms_path.is_file() or digest(transforms_path) != manifest.get("transforms_sha256"):
         raise ValueError("The saved camera poses are missing or changed")

@@ -54,7 +54,16 @@ A camera collection can contain existing and generated cameras, including nested
 collections. Capture uses all its perspective cameras in name order. At least
 four are required; unsupported projection types and scaled camera transforms
 are reported before capture. The generated-camera count describes the generated
-part of the rig; manually added cameras can make the total larger.
+part of the rig; manually added cameras can make the total larger. Capture,
+dataset export and training on saved images support 4–10,000 views. Generated
+rigs support up to 1,000 cameras; the collection can include additional cameras.
+
+If the renderer exits after every image has been captured, LichtFeld makes one
+automatic attempt to finish the dataset from the frozen capture scene and saved
+calibration. RGB images, masks and numerical maps are reused without rendering
+or rewriting them. Incomplete or mismatched calibration stops recovery and
+preserves the captured files. Partial captures and user-requested cancellations
+are not retried automatically.
 
 ### Generate or edit a rig
 

@@ -26,6 +26,7 @@ sharing or rendered images. Studio is optional for extension-owned training.
 | `state.json`, `runtime.json` | Supervisor and training status |
 | `capture-render.json` | Frozen renderer/device request and capture progress |
 | `capture.blend` | Isolated project used by the render worker |
+| `capture-frames.json`, `capture-progress.json` | Capture calibration journal and completed-view progress |
 | `dataset/images/` | Captured RGB images |
 | `dataset/transforms.json` | Calibrated camera poses/intrinsics for ordinary capture |
 | `dataset/capture_transforms.json` | Original capture calibration when using COLMAP observations |
@@ -41,6 +42,19 @@ training on saved images references its existing dataset. Stored result records
 identify their actual artifact paths. Readers validate job identity, safe artifact
 paths, shape/size limits and integrity before import. Temporary export names are
 published atomically after a complete, validated capture.
+
+Capture count validation has one owner in `capture_settings`, shared by readiness,
+capture, initialization and saved-dataset validation. The supported range is
+4–10,000 views. Readiness, job creation and framing use name order, including
+cameras in nested collections.
+
+After a render-worker failure with complete image progress, the supervisor reaps
+the worker before attempting `--finalize-capture` once against `capture.blend`.
+The existing worker validates journal identity, count, camera calibration and
+saved maps; the supervisor does not implement a second decoder. Cancellation
+prevents the retry and remains available during finalization. Successful recovery
+clears the earlier render error, and the existing saved-dataset validator checks
+the resulting dataset before export or training.
 
 Fresh training on saved images creates a separate job with the same immutable
 capture input and a new optimizer/model. Checkpoint continuation is explicit and

@@ -7,10 +7,15 @@ import os
 import uuid
 import zipfile
 import numpy as np
+if __package__:
+    from .capture_settings import validate_view_count
+else:
+    from capture_settings import validate_view_count
 
 
 def view_budget(limit, views):
-    if type(limit) is not int or not 4 <= limit <= 250000 or not 4 <= views <= 10000:
+    validate_view_count(views)
+    if type(limit) is not int or not 4 <= limit <= 250000:
         raise ValueError("Invalid initialization budget or capture view count")
     return max(256, min(4096, math.ceil(4 * limit / views)))
 

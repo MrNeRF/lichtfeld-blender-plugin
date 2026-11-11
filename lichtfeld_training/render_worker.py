@@ -12,7 +12,7 @@ import numpy as np
 from mathutils import Vector
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from bridge_core import atomic_json, read_json, read_job_json, read_dataset_json, digest
+from bridge_core import atomic_json, read_json, read_job_json, read_dataset_json, digest, artifact_path
 
 
 def intrinsics(scene, camera, width, height):
@@ -166,7 +166,7 @@ def render_dataset(job_path, reuse_images=False):
     bpy.context.window.scene = scene
     bpy.context.window.view_layer = scene.view_layers.get(job.get("view_layer", "")) or scene.view_layers[0]
     scene.frame_set(job["frame"])
-    from capture_settings import job_format, validate_camera, copy_camera, apply_format
+    from capture_settings import job_format, validate_camera, copy_camera, apply_format, validate_view_count
     capture_format = job_format(job, scene)
     camera_overrides = validate_camera(job.get('capture_camera', {}))
     missing = []
@@ -184,8 +184,9 @@ def render_dataset(job_path, reuse_images=False):
     if len(sources) != len(job["sources"]):
         raise ValueError("A source object is missing from the capture")
     cameras = [bpy.data.objects[name] for name in job["cameras"] if name in bpy.data.objects]
-    if len(cameras) != len(job["cameras"]) or len(cameras) < 4:
-        raise ValueError("Choose at least four perspective cameras")
+    validate_view_count(len(cameras))
+    if len(cameras) != len(job["cameras"]):
+        raise ValueError("A capture camera is missing")
     if visible_seed:
         from capture_seed import view_budget
         view_budget(job['seed_points'], len(cameras))  # Validate before any render.
@@ -276,9 +277,10 @@ def render_dataset(job_path, reuse_images=False):
     scene.render.use_sequencer = False
     source_display = capture_color_profile(scene)
     width, height = capture_format['width'], capture_format['height']
-    saved_frames = read_dataset_json(root / 'capture-frames.json', {}).get('frames', []) if reuse_images else []
-    if reuse_images and (job.get('use_depth_loss') or job.get('use_normal_loss')) and len(saved_frames) != len(cameras):
-        raise ValueError('Saved map capture is incomplete. Existing images are preserved.')
+    journal = read_dataset_json(root / 'capture-frames.json', {}) if reuse_images else {}
+    saved_frames = journal.get('frames', [])
+    if reuse_images and (journal.get('job_id') != job['id'] or len(saved_frames) != len(cameras)):
+        raise ValueError('Saved camera calibration is incomplete or belongs to another capture. Existing images are preserved.')
     frames = []
     geometry = None
     if not reuse_images and (visible_seed or job.get('use_depth_loss') or job.get('use_normal_loss')):
@@ -318,13 +320,15 @@ def render_dataset(job_path, reuse_images=False):
                 # Preserve the exact calibration that rendered these images, after
                 # checking it against the frozen scene. Do not introduce roundoff.
                 frame = dict(saved)
+                if isolated and (not frame.get('mask_path') or not artifact_path(output, frame['mask_path']).is_file()):
+                    raise ValueError('A saved foreground mask is missing. Existing images are preserved.')
                 for kind, enabled in (('depths', job.get('use_depth_loss')), ('normals', job.get('use_normal_loss'))):
                     path = output / kind / f'view_{index:06d}.tiff'
                     if enabled and (not path.is_file() or path.is_symlink()):
                         raise ValueError(f'Saved {kind} for view {index+1} are missing. Existing images are preserved.')
             if geometry:
                 frame.update(geometry.export(np.array(matrix), job.get('use_depth_loss'), job.get('use_normal_loss'), frame, rgba))
-            if isolated:
+            if isolated and not reuse_images:
                 mask = bpy.data.images.new("LichtFeld alpha", width=width, height=height, alpha=False)
                 try:
                     pixels = np.empty(width * height * 4, dtype=np.float32)
@@ -382,6 +386,14 @@ def render_dataset(job_path, reuse_images=False):
         "transforms_sha256": digest(output / transforms_file),
         "validation": [frame["file_path"] for i, frame in enumerate(frames) if i % job["test_every"] == 0],
     })
+    if reuse_images:
+        try:
+            status = read_json(root / 'capture-render.json', {})
+            status = status if isinstance(status, dict) else {}
+            status.pop('error', None)
+            atomic_json(root / 'capture-render.json', {**status, 'state': 'completed'})
+        except (OSError, ValueError) as error:
+            print(f'Could not update render diagnostics: {error}', flush=True)
 
 
 if __name__ == "__main__":
