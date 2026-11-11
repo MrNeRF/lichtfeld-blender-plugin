@@ -47,6 +47,10 @@ if '--mesh' in sys.argv:
     s.rig_mode='MESH';s.rig_mesh=helper;s.rig_mesh_distribution='FACES'
 prefs=ext.preferences();prefs.backend_path='';prefs.jobs_directory=str(area/'jobs')
 assert bpy.ops.lichtfeld.create_rig()=={'FINISHED'}
+if '--scaled' in sys.argv:
+    for camera in s.camera_collection.objects:
+        if camera.type=='CAMERA':camera.scale=(2,3,4)
+    bpy.context.view_layer.update()
 if '--shift' in sys.argv:
     bpy.context.scene.render.pixel_aspect_y=1.3
     if '--rectangular' not in sys.argv:
@@ -71,6 +75,8 @@ while time.monotonic()<deadline:
     if state.get('state') in {'completed','failed','stopped'}:break
     time.sleep(.1)
 assert state.get('state')=='completed',state
+if '--scaled' in sys.argv:
+    assert all(tuple(camera.scale)==(2,3,4) for camera in s.camera_collection.objects if camera.type=='CAMERA')
 if '--mesh' in sys.argv:
     assert not helper.hide_render
     assert ext.read_json(root/'job.json')['capture_helpers']==[helper.name]

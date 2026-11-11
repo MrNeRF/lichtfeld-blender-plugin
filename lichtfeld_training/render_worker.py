@@ -166,7 +166,7 @@ def render_dataset(job_path, reuse_images=False):
     bpy.context.window.scene = scene
     bpy.context.window.view_layer = scene.view_layers.get(job.get("view_layer", "")) or scene.view_layers[0]
     scene.frame_set(job["frame"])
-    from capture_settings import job_format, validate_camera, copy_camera, apply_format, validate_view_count
+    from capture_settings import job_format, validate_camera, copy_camera, apply_format, validate_view_count, camera_pose
     capture_format = job_format(job, scene)
     camera_overrides = validate_camera(job.get('capture_camera', {}))
     missing = []
@@ -297,11 +297,7 @@ def render_dataset(job_path, reuse_images=False):
             scene.camera = camera
             depsgraph = bpy.context.evaluated_depsgraph_get()
             evaluated = camera.evaluated_get(depsgraph)
-            location, rotation, scale = evaluated.matrix_world.decompose()
-            if any(abs(component - 1) > 1e-4 for component in scale):
-                raise ValueError(f"Apply scale on camera {camera.name} and its parents before capture")
-            matrix = rotation.to_matrix().to_4x4()
-            matrix.translation = location
+            matrix = camera_pose(camera, depsgraph)
             relative = f"images/view_{index:06d}.png"
             scene.render.filepath = str(output / relative)
             if geometry:

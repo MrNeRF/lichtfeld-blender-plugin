@@ -74,7 +74,8 @@ def environment(prefs,force=False,capture_only=False):
 def collect(context,capture_only=False):
  initial=signature(context)
  s=context.scene.lichtfeld_training
- sources=[];cameras=[];errors=[];visibility={};visibility_sources=[];generated_cameras=0
+ sources=[];cameras=[];errors=[];visibility={};visibility_sources=[];generated_cameras=0;camera_issues={}
+ graph=context.evaluated_depsgraph_get()
  helpers=capture_helpers(s)
  members={}
  for obj in context.view_layer.objects:
@@ -100,8 +101,9 @@ def collect(context,capture_only=False):
    if obj.type=='CAMERA':
     cameras.append(obj.name)
     generated_cameras+=bool(obj.get('lichtfeld_generated'))
-    if obj.data.type!='PERSP':errors.append('All capture cameras must be Perspective.')
-    if any(abs(v-1)>1e-4 for v in obj.matrix_world.decompose()[2]):errors.append('Apply camera/parent scale before capture.')
+    try:capture_settings.camera_pose(obj,graph)
+    except ValueError as error:
+     message=str(error);errors.append(message);camera_issues[message]=obj.name
    yield
  cameras.sort()
  try:capture_settings.validate_view_count(len(cameras))
@@ -124,7 +126,7 @@ def collect(context,capture_only=False):
  if s.refine_start>=s.refine_end:errors.append('Refinement start must be before its end.')
  if s.growth_end>s.refine_end:errors.append('Growth must end before refinement ends.')
  if s.use_normal_loss and s.normal_start_fraction>=s.normal_end_fraction:errors.append('Normal supervision start must be before its end.')
- return {'sources':sources,'cameras':cameras,'generated_cameras':generated_cameras,'visibility':visibility,'visibility_sources':visibility_sources or sources,'capture_errors':capture_errors,'errors':capture_errors if capture_only else list(dict.fromkeys(errors)),
+ return {'sources':sources,'cameras':cameras,'generated_cameras':generated_cameras,'camera_issues':camera_issues,'visibility':visibility,'visibility_sources':visibility_sources or sources,'capture_errors':capture_errors,'errors':capture_errors if capture_only else list(dict.fromkeys(errors)),
          'signature':initial,'frame':context.scene.frame_current}
 
 def synchronous(context,prefs):

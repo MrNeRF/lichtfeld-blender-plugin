@@ -124,10 +124,9 @@ def cameras_for(settings):
     cameras = sorted((obj for obj in settings.camera_collection.all_objects if obj.type == "CAMERA"),
                      key=lambda obj: obj.name)
     capture_settings.validate_view_count(len(cameras))
-    if any(any(abs(v-1)>1e-4 for v in obj.matrix_world.decompose()[2]) for obj in cameras):
-        raise ValueError("Apply camera/parent scale before capture")
-    if any(obj.data.type != "PERSP" for obj in cameras):
-        raise ValueError("Capture cameras must use Perspective projection")
+    graph = bpy.context.evaluated_depsgraph_get()
+    for camera in cameras:
+        capture_settings.camera_pose(camera, graph)
     return cameras
 
 
@@ -764,6 +763,31 @@ class LF_OT_select_aim(bpy.types.Operator):
         target.select_set(True)
         context.view_layer.objects.active = target
         return {"FINISHED"}
+
+
+class LF_OT_inspect_camera(bpy.types.Operator):
+    bl_idname = 'lichtfeld.inspect_capture_camera'
+    bl_label = 'Select camera'
+    bl_description = 'Select the camera named in this validation issue to inspect its transform, constraints and parents; no transforms are applied'
+    bl_options = {'REGISTER', 'UNDO'}
+    camera_name: StringProperty(options={'HIDDEN'})
+
+    @classmethod
+    def poll(cls, context):
+        s = context.scene.lichtfeld_training
+        return context.mode == 'OBJECT' and not s.running and not s.operation_busy
+
+    def execute(self, context):
+        camera = context.view_layer.objects.get(self.camera_name)
+        if not camera or camera.type != 'CAMERA':
+            self.report({'ERROR'}, 'Camera is not in this view layer; enable its collection in the Outliner')
+            return {'CANCELLED'}
+        for obj in context.selected_objects:
+            obj.select_set(False)
+        camera.hide_set(False)
+        camera.select_set(True)
+        context.view_layer.objects.active = camera
+        return {'FINISHED'}
 
 
 class LF_OT_notice(bpy.types.Operator):
@@ -1828,8 +1852,12 @@ class LF_PT_training(bpy.types.Panel):
         box = setup.box()
         box.prop(settings, "validation_details", icon="TRIA_DOWN" if settings.validation_details else "TRIA_RIGHT", emboss=False)
         if settings.validation_details:
-            for error in errors:
+            for error in errors[:5]:
                 wrapped(box, error)
+                if name := ready.get('camera_issues', {}).get(error):
+                    box.operator('lichtfeld.inspect_capture_camera', icon='CAMERA_DATA').camera_name = name
+            if len(errors) > 5:
+                wrapped(box, f'{len(errors)-5:,} more issues; resolve the listed issues first.')
             if not errors:
                 box.label(text="Capture setup is ready", icon="CHECKMARK")
 
@@ -1883,7 +1911,7 @@ def loaded(_):
 
 
 _CLASSES = (LichtFeldPreferences, LichtFeldSourceRef, LichtFeldSettings, LF_OT_notice, LF_OT_verify, LF_OT_setup, LF_OT_tight_framing, LF_OT_rig,
-            LF_OT_start, LF_OT_export_dataset, LF_OT_pick_sources, LF_OT_select_aim, LF_OT_read_rig, LF_OT_command, LF_OT_import, LF_OT_resume, LF_OT_dataset, LF_OT_new_capture, LF_OT_inspect_dataset, LF_OT_restart, LF_OT_folder, LF_OT_reconnect, LF_OT_load_job, LF_OT_compare,
+            LF_OT_start, LF_OT_export_dataset, LF_OT_pick_sources, LF_OT_select_aim, LF_OT_inspect_camera, LF_OT_read_rig, LF_OT_command, LF_OT_import, LF_OT_resume, LF_OT_dataset, LF_OT_new_capture, LF_OT_inspect_dataset, LF_OT_restart, LF_OT_folder, LF_OT_reconnect, LF_OT_load_job, LF_OT_compare,
             LF_OT_scan_sessions, LF_OT_attach_session, LF_OT_detach_session, LF_OT_previous_job, LF_OT_color_look, LF_OT_color_command, LF_OT_model_view, LF_OT_color_view, LF_OT_capture_lighting,
             *capture_preview.CLASSES, *scene_render.CLASSES, LF_PT_training)
 

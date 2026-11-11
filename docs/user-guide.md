@@ -52,8 +52,8 @@ Generated capture cameras and imported results are excluded from source geometry
 
 A camera collection can contain existing and generated cameras, including nested
 collections. Capture uses all its perspective cameras in name order. At least
-four are required; unsupported projection types and scaled camera transforms
-are reported before capture. The generated-camera count describes the generated
+four are required; unsupported projection types and transforms that cannot be
+calibrated are reported by camera name before capture. The generated-camera count describes the generated
 part of the rig; manually added cameras can make the total larger. Capture,
 dataset export and training on saved images support 4–10,000 views. Generated
 rigs support up to 1,000 cameras; the collection can include additional cameras.
@@ -120,6 +120,20 @@ official output percentage and pixel-aspect values participate in calibration.
 Optional capture-camera overrides apply lens, sensor, shift and clipping settings
 to copies of every capture camera. They preserve camera poses and the original rig.
 Depth of field, motion blur and render borders are disabled for calibrated capture.
+
+Camera copies use Blender's evaluated, scale-free camera frame. Orthogonal scale
+on the camera or its parents is normalized automatically on the copies, including
+animated and constrained transforms at the capture frame. The source cameras,
+parents, animation and constraints are preserved. Framing preview and calibration
+use the same pose as capture; you do not need to apply scale manually.
+
+Shear, mirrored frames, zero/near-zero scale and non-finite transforms cannot be
+represented by this calibrated camera model. **Validation details** names the
+camera and offers **Select camera** to inspect it and its parents. This action
+does not apply transforms. Correct the source transform or use an independent
+camera with a valid pose; applying parent transforms automatically could change
+other objects or animation. The panel shows the first five issues and the number
+remaining; resolving those reveals the next issues.
 
 Capture records the chosen settings for its background process. Changing them
 after launch affects the next capture. High samples, complex volumes and large

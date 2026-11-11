@@ -104,8 +104,6 @@ def open_steps(source, window, area):
             raise ValueError('Choose a camera collection first')
         settings.capture_preview_index = min(settings.capture_preview_index, len(cameras))
         original = cameras[settings.capture_preview_index - 1]
-        if original.data.type != 'PERSP':
-            raise ValueError('Capture framing requires a Perspective camera')
         layer = source.view_layers.get(window.scene.get('capture_source_layer', '')) if source_scene(window.scene) else window.view_layer
         layer = layer or source.view_layers[0]
         previous_scene, previous_layer = window.scene, window.view_layer
