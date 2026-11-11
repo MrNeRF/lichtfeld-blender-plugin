@@ -76,8 +76,13 @@ The interface is currently in English.
 Installing from source means building the ZIP above; this is a regular Blender
 extension, not a startup script. Updating the ZIP does not require changing its
 version number during development.
-After updating an enabled extension, restart Blender so Python loads the updated
-bundled dependency.
+After updating an enabled extension, save your work and fully restart Blender
+before using it. Python can retain older extension modules until the process
+exits, even when the ZIP was installed successfully. If activation reports a
+missing attribute after an update, restart Blender and enable the extension
+again if necessary. Reinstalling repeatedly in the same process does not clear
+those modules. Installed extensions use Blender's managed wheel environment;
+there is no need to install the protocol manually.
 
 ## First capture and training
 
