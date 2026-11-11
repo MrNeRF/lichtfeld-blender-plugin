@@ -7,7 +7,8 @@ PRESETS = {
  'HIGH': (30000,2000,144,1024,64,1000000),
 }
 PRESET_FIELDS=('iterations','eval_interval','views','resolution','samples','max_points')
-CAPTURE_PHASES={'preparing','preparing capture','preparing source snapshot','validating backend','rendering','starting','exporting dataset','finalizing capture'}
+CAPTURE_PHASES={'preparing','preparing capture','preparing source snapshot','rendering','exporting dataset','finalizing capture'}
+STARTUP_PHASES={'validating backend','starting','preparing numerical runtime'}
 TRAINING_PHASES={'training','paused'}
 TERMINAL={'completed','stopped','failed'}
 
@@ -27,7 +28,7 @@ def actions(state, external=False, result=False, best=False, checkpoint=False, b
  state=phase(state)
  return {
   'pause':not external and control and state in TRAINING_PHASES,
-  'stop':not external and control and state in CAPTURE_PHASES|TRAINING_PHASES,
+  'stop':not external and control and state in CAPTURE_PHASES|STARTUP_PHASES|TRAINING_PHASES,
   'previews':not external and control and state in TRAINING_PHASES,
   'import':not busy and not external and best,
   'compare':not busy and result,

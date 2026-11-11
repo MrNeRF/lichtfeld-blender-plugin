@@ -9,7 +9,7 @@ import tempfile
 import time
 import types
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 SOURCE = Path(__file__).resolve().parents[2] / "lichtfeld_training"
 sys.path.insert(0, str(SOURCE))
 import job_control as control
@@ -98,6 +98,66 @@ class JobControlTests(unittest.TestCase):
                 self.assertFalse(supervisor.stop_requested(Path(root), "job"))
             finally:
                 owner.close()
+
+    def test_supervisor_cancel_and_script_handoff_have_one_winner(self):
+        for case in ('cancel', 'handoff', 'expired', 'package_cancelled'):
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                job = {'id': 'job', 'root': str(root), 'backend': 'trusted', 'resume': 'checkpoint.licht'}
+                atomic_json(root / 'job.json', job)
+                checkpoint = root / 'checkpoint.licht'
+                checkpoint.write_bytes(b'unchanged checkpoint')
+                best = {'path': 'best.ply'}
+                atomic_json(root / 'best.json', best)
+                runtime = {'job_id': 'job', 'state': 'finalizing', 'terminal_state': 'stopped'}
+                if case == 'package_cancelled':
+                    runtime = {'job_id': 'job', 'state': 'stopped', 'message': 'Cancelled numerical runtime'}
+                atomic_json(root / 'runtime.json', runtime)
+                owner = control.Controller(root)
+                try:
+                    self.assertTrue(owner.acquire())
+                    command = owner.command('job', 'stop')
+                    if case == 'expired':
+                        command['expires'] = command['created'] - 1
+                    child = Mock(pid=123, returncode=1 if case == 'package_cancelled' else 0)
+                    child.poll.side_effect = [None, None, 0] if case == 'cancel' else [None, 0, 0]
+                    started = False
+                    def launch(*args, **kwargs):
+                        nonlocal started
+                        started = True
+                        atomic_json(root / 'command.json', command)
+                        return child
+                    def read_stop(path, job_id):
+                        if started and case != 'cancel':
+                            # The script wins exactly between the command read and
+                            # the supervisor's attempted cancellation claim.
+                            control.claim_training_start(root)
+                        return control.stop_requested(path, job_id)
+                    with patch.object(supervisor.subprocess, 'run', return_value=types.SimpleNamespace(
+                            stdout=b'LichtFeld Studio', stderr=b'', returncode=0)), \
+                         patch.object(supervisor.subprocess, 'Popen', side_effect=launch), \
+                         patch.object(supervisor, 'training_config', return_value={}), \
+                         patch.object(supervisor, 'training_command', return_value=['trusted']), \
+                         patch.object(supervisor, 'verify_artifact'), \
+                         patch.object(supervisor, 'stop_requested', side_effect=read_stop), \
+                         patch.object(supervisor.time, 'sleep'):
+                        supervisor.supervise(root / 'job.json')
+                    state = read_json(root / 'state.json')
+                    self.assertEqual(state['state'], 'stopped', state)
+                    self.assertEqual(checkpoint.read_bytes(), b'unchanged checkpoint')
+                    self.assertFalse((root / 'supervisor.lock').exists())
+                    if case == 'cancel':
+                        child.terminate.assert_called_once()
+                        child.wait.assert_called_once()
+                        self.assertIn('before training', state['message'])
+                    else:
+                        child.terminate.assert_not_called()
+                        if case == 'package_cancelled':
+                            self.assertEqual(state['message'], 'Cancelled numerical runtime')
+                        else:
+                            self.assertEqual(state['result'], best)
+                finally:
+                    owner.close()
 
     def test_observers_share_view_but_not_control_and_timeout_clears_backlog(self):
         with tempfile.TemporaryDirectory() as directory:

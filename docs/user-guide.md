@@ -28,10 +28,20 @@ Fresh training on saved images creates a new model and optimizer in a separate
 job. It does not restore the previous splat, even if a preview remains in the
 viewport. Continuing a checkpoint restores its model, optimizer and saved
 settings. Increasing its total steps extends/rescales the remaining schedule.
+The continuation dialog proposes a new total from the saved job, shows its
+evaluation interval, and keeps its training settings and preview quality.
+Unrelated settings in the current scene do not replace them.
 
 Camera, resolution, source, lighting and map changes require a new capture.
 Training-only settings can be changed when starting a fresh run on saved images.
 Previous jobs and their results remain available.
+New runs and continuations use the **Training jobs** folder in Settings, even
+when their source dataset is stored elsewhere.
+
+During trainer startup, **Cancel startup** cancels loading or numerical-runtime
+preparation and preserves existing checkpoints and saved models. Once training
+starts, **Stop and save** requests a graceful stop at a training boundary and
+saves a resumable checkpoint. Closing Blender leaves the separate trainer running.
 
 ## Source and capture cameras
 

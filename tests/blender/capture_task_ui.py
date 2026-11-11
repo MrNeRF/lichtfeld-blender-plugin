@@ -5,6 +5,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 import sys
+import time
 import bpy
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -87,6 +88,28 @@ assert not collect(True)['errors']
 assert any('Refinement' in error for error in collect(False)['errors'])
 assert ext.jobs.check_environment('', prefs.jobs_directory, require_backend=False)['ok']
 assert not ext.jobs.check_environment('', prefs.jobs_directory, require_backend=True)['ok']
+
+# Saving refreshes source identity and permissions, not the executable probe.
+prefs.backend_path = 'TRUSTED'
+ext.preflight.clear()
+def wait_environment():
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        value = ext.preflight.environment(prefs)
+        ext.poll_jobs()
+        if not value.get('checking'):
+            return value
+        time.sleep(.01)
+    raise AssertionError('Environment check timed out')
+with patch.object(ext.jobs, 'verify_backend', return_value='Verified backend') as verify:
+    before = wait_environment()
+    assert before['ok'], before
+    bpy.ops.wm.save_as_mainfile(filepath=str(area/'source.blend'))
+    after = wait_environment()
+    assert after['ok'], after
+    assert after['generation'] != before['generation']
+    verify.assert_called_once()
+prefs.backend_path = ''
 with patch.object(ext.preflight, 'environment') as environment, patch.object(ext.scene_render, 'tick'):
     ext.preflight.tick(bpy.context, prefs)
     assert environment.call_args.kwargs['capture_only'] is True

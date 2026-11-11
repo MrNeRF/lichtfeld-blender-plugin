@@ -60,6 +60,6 @@ with tempfile.TemporaryDirectory(dir=str(ROOT/'artifacts')) as directory:
  assert 4 <= manifest['initialization']['points'] <= s.seed_points
  assert manifest['view_geometry_file']=='view_geometry.json'
  # Export metadata is reusable by fresh training without exporting again.
- job,_=ext.jobs.restart_data(output,{'iterations':100,'optimizer_schedule':{'refine_start':0,'refine_end':.95,'growth_end':.5}},backend='TRUSTED')
+ job,_=ext.jobs.restart_data(output,{'iterations':100,'optimizer_schedule':{'refine_start':0,'refine_end':.95,'growth_end':.5}},backend='TRUSTED',jobs_directory=prefs.jobs_directory)
  assert not job.get('capture_only') and not job.get('export_parent')
  print('DATASET_ONLY_CAPTURE_EXPORT_REUSE_AND_NONFATAL_FOLDER_PASS',flush=True)

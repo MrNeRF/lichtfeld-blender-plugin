@@ -17,13 +17,31 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from bridge_core import (atomic_json, read_json, read_job_json, read_dataset_json, training_config, metric_at,
                          better, write_splat, artifact_path, require_backend_api)
 import lichtfeld as lf
-from job_control import validate_command
+from job_control import validate_command, claim_training_start, stop_requested
 
 
 def numerical_runtime(job):
-    atomic_json(Path(job["root"]) / "runtime.json", {
+    root = Path(job['root'])
+    if not claim_training_start(root):
+        raise InterruptedError('Stopped before training started')
+    atomic_json(root / "runtime.json", {
         "job_id": job["id"], "state": "preparing numerical runtime", "updated": time.time()})
-    return ensure_numpy(lf)
+    cancelled = False
+    def should_cancel():
+        nonlocal cancelled
+        cancelled = cancelled or stop_requested(root, job['id'])
+        return cancelled
+    try:
+        if should_cancel():
+            raise InterruptedError('Stopped before training started')
+        result = ensure_numpy(lf, should_cancel=should_cancel)
+        if should_cancel():
+            raise InterruptedError('Stopped before training started')
+        return result
+    except Exception as error:
+        if cancelled:
+            raise InterruptedError('Stopped before training started') from error
+        raise
 
 
 class TrainingBridge:
@@ -59,12 +77,13 @@ class TrainingBridge:
         self.last_status = 0.0
         self.command_id = ""
         self.command_error = ""
+        self.next_control_check = 0.0
         self.error = ""
         self.paused = False
         self.stopped = False
         self.previews_enabled = True
         self.preview_history = []
-        self.iteration = 0
+        self.iteration = job.get('resume_iteration', 0) if job.get('resume') else 0
         self.supervision_checked = False
         self.supervision = ""
         self.loss = 0.0
@@ -127,20 +146,23 @@ class TrainingBridge:
         if preview:
             self.preview = {**preview, "shared": preview}
         if record["kind"] == "best":
-            previous = self.best
-            self.best = record
-            atomic_json(self.root / "best.json", record)
-            if previous and previous["path"] != record["path"]:
-                try:
-                    artifact_path(self.root, previous["path"]).unlink(missing_ok=True)
-                except OSError:
-                    pass  # A consumer may still hold the previous best on Windows.
+            self.retain_best(record)
         else:
             self.preview = record
             if "path" in record:
                 self.preview_history.append(record)
             self.cleanup_previews()
         return True
+
+    def retain_best(self, record):
+        previous = self.best
+        atomic_json(self.root / "best.json", record)
+        self.best = record
+        if previous and previous["path"] != record["path"]:
+            try:
+                artifact_path(self.root, previous["path"]).unlink(missing_ok=True)
+            except OSError:
+                pass  # A consumer may still hold the previous best on Windows.
 
     def write_candidate(self, arrays, iteration, kind, score=None):
         if kind == "preview":
@@ -197,6 +219,8 @@ class TrainingBridge:
         return arrays
 
     def cleanup_previews(self):
+        if not self.preview_history:
+            return
         ack = read_json(self.root / "ack.json", {})
         acknowledged = next((i for i, item in enumerate(self.preview_history)
                              if item["id"] == ack.get("id")), -1)
@@ -255,6 +279,10 @@ class TrainingBridge:
     def on_start(self, hook):
         try:
             self.check_hook_api(hook)
+            self.count = hook['num_gaussians']
+            # Consume queued controls before the first potentially long step.
+            self.commands()
+            self.publish('stopping' if self.stopped else 'training')
         except Exception as error:
             self.error = str(error)
             self.publish('failed')
@@ -278,9 +306,9 @@ class TrainingBridge:
                 self.supervision_checked = True
                 if self.job.get('use_depth_loss') and self.job.get('depth_loss_weight',2)>0:
                     dataset = Path(self.job.get('dataset_root',str(self.root/'dataset')))
-                    anchors = read_json(dataset/'depths/depth_anchors.json',{}).get('anchors',{})
+                    anchors = read_dataset_json(dataset/'depths/depth_anchors.json',{}).get('anchors',{})
                     active = sum(bool(item.get('depth',{}).get('valid')) for item in anchors.values())
-                    manifest = read_json(dataset/'manifest.json',{})
+                    manifest = read_dataset_json(dataset/'manifest.json',{})
                     expected = manifest.get('views',0)-len(manifest.get('validation',[]))
                     if not active or active < expected:
                         raise RuntimeError('Depth supervision could not be anchored for all training views. Check resolution, coverage and depth variation, or disable depth supervision.')
@@ -294,8 +322,10 @@ class TrainingBridge:
             self.count = hook["num_gaussians"]
             if self.finish_writer():
                 self.publish("stopping" if self.stopped else "training")
-            self.cleanup_previews()
-            self.commands()
+            if time.monotonic() >= self.next_control_check:
+                self.cleanup_previews()
+                self.commands()
+                self.next_control_check = time.monotonic() + 0.1
             # The stock trainer drains post-step callbacks before its next mutation.
             # Exact iteration matching is essential; never use the last unrelated row.
             score = metric_at(self.root / "output/metrics.csv", self.iteration) if self.iteration in self.eval_steps else None
@@ -347,11 +377,9 @@ class TrainingBridge:
             if score and better({**score, "count": model.num_points},
                                 {**self.best["score"], "count": self.best["count"]}
                                 if self.best and self.best.get("score") else None):
-                self.best = write_splat(self.root, self.capture(), self.iteration, "best", score)
-                atomic_json(self.root / "best.json", self.best)
+                self.retain_best(write_splat(self.root, self.capture(), self.iteration, "best", score))
             if self.best is None:
-                self.best = write_splat(self.root, self.capture(), self.iteration, "last")
-                atomic_json(self.root / "best.json", self.best)
+                self.retain_best(write_splat(self.root, self.capture(), self.iteration, "last"))
             self.publish("failed" if self.error else "finalizing")
         except Exception as error:
             self.error = str(error)
@@ -378,5 +406,6 @@ try:
     _bridge = TrainingBridge(_job)
 except Exception as error:
     atomic_json(Path(_job['root']) / 'runtime.json', {
-        'job_id': _job['id'], 'state': 'failed', 'error': str(error), 'updated': time.time()})
+        'job_id': _job['id'], 'state': 'stopped' if isinstance(error, InterruptedError) else 'failed',
+        'message': str(error), 'error': '' if isinstance(error, InterruptedError) else str(error), 'updated': time.time()})
     raise

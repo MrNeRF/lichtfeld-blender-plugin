@@ -48,6 +48,15 @@ preserves the source job's outputs. A single controller lease protects commands.
 Command records carry job identity and expiry; stale commands cannot silently
 control a replacement job.
 
+Before the first training step, the script bootstrap and supervisor arbitrate
+cancellation through one exclusive `startup.claim` file in the fresh job root.
+The supervisor can terminate its child during startup only if it wins that
+claim. Once the script wins, numerical dependencies use the package manager's
+existing cancellation callback and training controls stay cooperative. Queued
+commands are consumed at the training-start boundary before the first step.
+Large dataset documents, including depth anchors, use the existing bounded
+document reader rather than the smaller live-status message limit.
+
 ## Calibration and coordinate frames
 
 Blender camera transforms use `-Z` forward and `+Y` up. Exported OpenCV cameras

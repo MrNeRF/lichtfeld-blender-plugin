@@ -59,14 +59,17 @@ def signature(context):
   tuple(sorted(obj.as_pointer() for obj in selection_objects(context))) if s.scope=="SELECTION" else ())
 
 def environment(prefs,force=False,capture_only=False):
- key=(bpy.path.abspath(prefs.backend_path),jobs_folder(prefs),bpy.data.filepath,_save_generation,not capture_only)
+ key=(bpy.path.abspath(prefs.backend_path),jobs_folder(prefs),bpy.data.filepath,not capture_only)
  if force:_environment.pop(key,None)
- if key not in _environment and key not in _pending:
+ current=_environment.get(key,{})
+ if current.get('generation') != _save_generation and key not in _pending:
+  generation=_save_generation
   _pending[key]=True
-  def done(value):_environment[key]=value;_pending.pop(key,None)
+  def done(value):_environment[key]={**value,'generation':generation};_pending.pop(key,None)
   def fail(error):done({'ok':False,'message':str(error),'backend':False,'folder':False})
-  ui_runtime.submit(lambda:jobs.check_environment(*key),done,fail)
- return _environment.get(key,{'ok':False,'message':'Checking installation and job folder…','checking':True})
+  version=current.get('message') if current.get('backend') and current.get('ok') else None
+  ui_runtime.submit(lambda:jobs.check_environment(*key,backend_version=version),done,fail)
+ return current if current.get('generation') == _save_generation else {'ok':False,'message':'Checking installation and job folder…','checking':True}
 
 def collect(context,capture_only=False):
  initial=signature(context)
@@ -179,7 +182,7 @@ def saved():
  global _save_generation,_work,_next
  _save_generation+=1
  if _work:_work[1].close()
- _work=None;_next=0;_cache.clear();_environment.clear()
+ _work=None;_next=0;_cache.clear()
 
 
 def clear():

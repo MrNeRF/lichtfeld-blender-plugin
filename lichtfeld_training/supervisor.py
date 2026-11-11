@@ -12,7 +12,7 @@ import time
 import traceback
 
 from jobs import release_source, captured_dataset
-from job_control import validate_command
+from job_control import stop_requested, claim_training_start
 from bridge_core import atomic_json, read_json, read_job_json, training_config, training_command, verify_artifact, digest, verified_training_outcome
 from render_devices import arguments as render_arguments
 
@@ -87,14 +87,6 @@ def stop_child(child):
         except ProcessLookupError:
             pass
         child.wait(timeout=30)
-
-
-def stop_requested(root, job_id):
-    command = read_json(root / "command.json", {})
-    try:
-        return validate_command(root, job_id, command) == "stop"
-    except ValueError:
-        return False
 
 
 def supervise(job_path):
@@ -221,12 +213,25 @@ def supervise(job_path):
                 cwd=str(Path(job["backend"]).parent), env=environment,
                 stdout=log, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
                 **process_options())
-            state("training", backend_pid=child.pid)
+            state("starting", backend_pid=child.pid)
+            starting = True
             while child.poll() is None:
                 heartbeat()
+                if starting:
+                    if stop_requested(root, job["id"]) and claim_training_start(root):
+                        stop_child(child)
+                        child = None
+                        state("stopped", message="Stopped before training started; saved results are unchanged")
+                        return
+                    if read_json(root / 'runtime.json', {}).get('hook_api_checked') is True:
+                        starting = False
+                        state("training", backend_pid=child.pid)
                 time.sleep(0.5)
         runtime = read_json(root / "runtime.json", {})
         best = read_json(root / "best.json")
+        if runtime.get('state') == 'stopped' and runtime.get('job_id') == job['id']:
+            state('stopped', message=runtime.get('message', 'Stopped before training started'))
+            return
         if child.returncode or runtime.get("error"):
             raise RuntimeError(runtime.get("error") or
                                f"LichtFeld exited with code {child.returncode}. See training.log.")
