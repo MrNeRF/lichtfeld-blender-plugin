@@ -70,9 +70,10 @@ with tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parents[2]/"artifa
   arrays={k:v[:1].copy() for k,v in base.items()};arrays['opacity'][:]=20
   arrays['sh']=np.zeros((1,(degree+1)**2,3),np.float32)
   arrays['sh'][0,0]=(.35-.5)/.28209479177387814
-  values=np.arange(1,arrays['sh'].shape[1],dtype=np.float32)*.005
+  values=np.arange(1,(arrays['sh'].shape[1]-1)*3+1,dtype=np.float32).reshape(-1,3)*.002
   values[::2]*=-1
-  arrays['sh'][0,1:]=values[:,None]
+  values*=np.array([1,-2,3],np.float32)
+  arrays['sh'][0,1:]=values
   o.hide_render=True
   p=bpy.data.pointclouds.new('SH test');p.type='GAUSSIAN_SPLAT';p.resize(1)
   o=bpy.data.objects.new('SH test',p);s.collection.objects.link(o)
@@ -104,6 +105,20 @@ with tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parents[2]/"artifa
   actual=render('off-axis'+str(index))
   assert np.max(np.abs(actual-expected))<2/255,(actual,expected)
  print('OFF_AXIS_ROTATED_SH3_PASS',flush=True)
+ # Blender also compiles this material for mesh-based material previews.
+ # Exercise that path with the same coefficients and orientation as the splat.
+ o.hide_render=True
+ bpy.ops.mesh.primitive_plane_add(size=200)
+ mesh=bpy.context.object;mesh.rotation_euler=o.rotation_euler
+ for name,kind,prop,value in blender_fields(arrays):
+  if name.startswith(('radiance:', 'lichtfeld_rgb_tail_')):
+   attribute=mesh.data.attributes.new(name,kind,'POINT')
+   attribute.data.foreach_set(prop,np.tile(value,len(mesh.data.vertices)))
+ mesh.data.materials.append(exhaust(colors.material_steps(3)))
+ actual=render('SH3-mesh-preview')
+ assert np.max(np.abs(actual-expected))<2/255,(actual,expected)
+ mesh.hide_render=True;o.hide_render=False
+ print('SH3_MESH_MATERIAL_RENDER_PASS',flush=True)
  # Transport parity is exact for all trained attributes and every SH coefficient.
  pool=SnapshotPool(temp)
  try:
@@ -116,13 +131,18 @@ with tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parents[2]/"artifa
 # Source scene color settings and pointcloud material slots remain native.
 s.view_settings.view_transform='AgX';s.lichtfeld_training.result_object=o
 original_material=o.material_slots[0].material
+original_material['lichtfeld_encoded_material']=1  # Previous saved material layout.
 s.view_settings.use_curve_mapping=True
 s.view_settings.curve_mapping.curves[3].points.new(.4,.3)
 s.view_settings.curve_mapping.update()
 s.view_settings.use_white_balance=True;s.view_settings.white_balance_temperature=5000
-# Upgrade old saved SH3 pointclouds, which do not carry the packed tail yet.
+# Upgrade a saved SH3 result with the previous three-attribute packed tail.
 for a in list(p.attributes):
  if a.name.startswith('lichtfeld_rgb_tail_'):p.attributes.remove(a)
+old_tail=arrays['sh'][:,12:16].reshape(len(p.points),3,4)
+for i in range(3):
+ attribute=p.attributes.new(f'lichtfeld_rgb_tail_{i}','FLOAT4','POINT')
+ attribute.data.foreach_set('vector',old_tail[:,i].ravel())
 source_camera=s.camera
 source_camera.data.dof.use_dof=True
 exhaust(colors.open_steps(s,bpy.context.window,None));view=bpy.context.scene
@@ -131,9 +151,15 @@ assert view.camera.data != source_camera.data and not view.camera.data.dof.use_d
 assert source_camera.data.dof.use_dof
 assert max(abs(a-b) for row,other in zip(view.camera.matrix_world,source_camera.matrix_world) for a,b in zip(row,other))<1e-5
 print('ISOLATED_CAMERA_VIEW_PRESERVED_PASS',flush=True)
-assert all(p.attributes.get(f'lichtfeld_rgb_tail_{i}') for i in range(3))
+assert all(p.attributes.get(f'lichtfeld_rgb_tail_{i}') for i in range(reader.SH3_TAIL_ATTRIBUTES))
 assert view!=s and colors.source_scene(view)==s and s.view_settings.view_transform=='AgX'
 clone=next(x for x in view.objects if x.get(colors.RESULT));assert clone.data==o.data
+assert clone.material_slots[0].material != original_material
+assert exhaust(colors.material_steps(3)) == clone.material_slots[0].material
+for name,kind,prop,value in blender_fields(arrays):
+ if name.startswith('lichtfeld_rgb_tail_'):
+  actual=np.empty_like(value);p.attributes[name].data.foreach_get(prop,actual)
+  np.testing.assert_array_equal(actual,value)
 source_material=o.material_slots[0].material
 assert source_material == original_material
 # Continuous pointcloud replacement keeps the isolated view current and permits reuse.

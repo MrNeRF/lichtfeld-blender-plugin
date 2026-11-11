@@ -204,6 +204,12 @@ compositing with SH0–SH3. Ordinary native Blender shading follows Blender's ow
 lighting and color pipeline. There is no cross-process GPU-memory sharing in
 this implementation.
 
+SH3 materials pack the last eight RGB coefficients into six FLOAT4 attributes
+to fit EEVEE's mesh material-preview path as well as Gaussian rendering. The
+standard Gaussian attributes and all SH coefficients remain available for native
+rendering and export. Opening an older color view upgrades its packed fields and
+uses the current material layout without replacing the source scene's material.
+
 ## Compatibility and packaging
 
 The manifest targets Blender 5.3.x and keeps the development version at 0.1.0.
