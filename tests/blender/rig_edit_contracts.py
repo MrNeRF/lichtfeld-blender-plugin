@@ -3,6 +3,7 @@
 """Real Blender: managed identity, target tracking and transaction cancellation."""
 import bpy, sys, math, importlib, tempfile
 from types import SimpleNamespace
+from unittest.mock import patch
 from pathlib import Path
 from mathutils import Vector
 sys.path.insert(0,str(Path(__file__).resolve().parents[2]))
@@ -68,6 +69,67 @@ for cut in range(150):
         assert max(abs(a-b) for x,y in zip(obj.matrix_world,matrix) for a,b in zip(x,y))<1e-5,cut
 assert completed
 print("RIG_CANCEL_EVERY_PRECOMMIT_YIELD_PASS",cut)
+
+# Render pauses cover updates, post-commit deletion, rollback and curve finally.
+def datablocks():
+    return (tuple((o.as_pointer(),o.data.as_pointer() if o.data else 0,
+                   tuple(tuple(row) for row in o.matrix_world)) for o in bpy.data.objects),
+            tuple(item.as_pointer() for item in bpy.data.cameras),
+            tuple(item.as_pointer() for item in bpy.data.collections),
+            tuple(item.as_pointer() for item in bpy.data.curves))
+
+bpy.context.view_layer.update()
+with patch.object(ext.rig_edit,'render_busy',return_value=True):
+    before=datablocks()
+    assert not bpy.ops.lichtfeld.create_rig.poll()
+    try:bpy.ops.lichtfeld.create_rig()
+    except RuntimeError as error:assert 'poll' in str(error)
+    else:raise AssertionError('Rig started during render')
+    assert datablocks()==before
+
+for phase in ('update','committed','rollback','path'):
+    guide=None
+    s.views=8;s.rig_mode='SPHERE';s.rig_aim_mode='SOURCE'
+    if phase=='path':
+        curve=bpy.data.curves.new('Render pause path','CURVE');curve.dimensions='3D'
+        spline=curve.splines.new('POLY');spline.points.add(1)
+        spline.points[0].co=(-4,-4,2,1);spline.points[1].co=(4,-4,2,1)
+        guide=bpy.data.objects.new('Render pause path',curve);bpy.context.scene.collection.objects.link(guide)
+        s.rig_mode='PATH';s.rig_curve=guide
+    bpy.context.view_layer.update()
+    before=datablocks()
+    owner=SimpleNamespace(collection=None,rig_backup=[],committed=False,cancelled=False,
+        cancel_requested=False,render_waiting=False,scene=bpy.context.scene,report=lambda *args:None)
+    owner.cleanup=lambda:ext.LF_OT_rig.cleanup(owner)
+    owner.work=ext.LF_OT_rig.generate(owner,bpy.context)
+    owner.timer=bpy.context.window_manager.event_timer_add(.02,window=bpy.context.window)
+    s.operation_busy=True
+    while True:
+        next(owner.work)
+        if (phase=='path' and len(bpy.data.curves)>len(before[3]) or
+            phase=='committed' and owner.committed or
+            phase in {'update','rollback'} and owner.rig_backup):break
+    if phase=='rollback':
+        owner.work.close();owner.work=owner.cleanup();owner.cancelled=True
+    paused=datablocks()
+    with patch.object(ext.rig_edit,'render_busy',return_value=True):
+        for _ in range(3):
+            assert ext.LF_OT_rig.modal(owner,bpy.context,SimpleNamespace(type='TIMER'))=={'PASS_THROUGH'}
+        if phase in {'path','committed'}:
+            ext.LF_OT_rig.modal(owner,bpy.context,SimpleNamespace(type='ESC'))
+        assert datablocks()==paused,phase
+        assert s.operation_busy
+    result={'RUNNING_MODAL'}
+    for _ in range(1000):
+        result=ext.LF_OT_rig.modal(owner,bpy.context,SimpleNamespace(type='TIMER'))
+        if result!={'RUNNING_MODAL'}:break
+    assert result==({'CANCELLED'} if phase in {'rollback','path'} else {'FINISHED'}),(phase,result)
+    assert not s.operation_busy
+    if phase in {'rollback','path'}:assert datablocks()==before,phase
+    if guide:
+        data=guide.data;bpy.data.objects.remove(guide,do_unlink=True);bpy.data.curves.remove(data)
+s.rig_mode='SPHERE';s.rig_curve=None
+print('RIG_RENDER_PAUSE_CANCEL_ROLLBACK_AND_POSTCOMMIT_CLEANUP_PASS',flush=True)
 
 # Loaded recipes restore controls; invalid metadata must not partially edit them.
 assert bpy.ops.lichtfeld.read_rig()=={"FINISHED"}

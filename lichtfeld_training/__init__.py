@@ -475,6 +475,9 @@ class LF_OT_rig(bpy.types.Operator):
         s = context.scene.lichtfeld_training
         if s.running or s.operation_busy:
             return False
+        if rig_edit.render_busy(context):
+            cls.poll_message_set("Finish Blender's render or locked job before updating the rig")
+            return False
         if s.camera_collection and s.camera_collection.get('lichtfeld_generated') and s.rig_parameter_source != s.camera_collection:
             cls.poll_message_set("Load this rig's parameters before applying changes")
             return False
@@ -569,6 +572,8 @@ class LF_OT_rig(bpy.types.Operator):
         self.rig_backup = []
         self.scene = context.scene
         self.cancelled = False
+        self.cancel_requested = False
+        self.render_waiting = False
         self.committed = False
         self.work = self.generate(context)
         if bpy.app.background:
@@ -588,12 +593,20 @@ class LF_OT_rig(bpy.types.Operator):
         return {"RUNNING_MODAL"}
 
     def modal(self, context, event):
-        if not self.committed and not self.cancelled and (event.type == "ESC" or context.scene != self.scene):
+        if not self.committed and (event.type == "ESC" or context.scene != self.scene):
+            self.cancel_requested = True
+        if event.type != "TIMER":
+            return {"PASS_THROUGH"}
+        if rig_edit.render_busy(context):
+            if not self.render_waiting:
+                self.report({'INFO'}, 'Rig update waits for Blender to finish rendering or unlock the interface')
+                self.render_waiting = True
+            return {'PASS_THROUGH'}
+        self.render_waiting = False
+        if not self.committed and not self.cancelled and self.cancel_requested:
             self.cancelled = True
             self.work.close()
             self.work = self.cleanup()
-        if event.type != "TIMER":
-            return {"PASS_THROUGH"}
         deadline = time.perf_counter() + 0.003
         try:
             while time.perf_counter() < deadline:
