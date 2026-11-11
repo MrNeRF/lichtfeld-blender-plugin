@@ -18,9 +18,9 @@ MAX_JOB_CHARS = 32 * 1024 * 1024
 MAX_DATASET_CHARS = 32 * 1024 * 1024
 
 
-# Installed extensions use Blender's managed wheel environment. Standalone
-# workers have no extension environment and import the same bundled wheel.
-if not __package__:
+# Installed extensions use Blender's managed wheel environment. Source add-ons
+# and standalone workers import the same bundled wheel without that environment.
+if not (__package__ or "").startswith("bl_ext."):
     manifest = tomllib.loads(Path(__file__).with_name("blender_manifest.toml").read_text(encoding="utf-8"))
     sys.path.insert(0, str(Path(__file__).parent / manifest["wheels"][0]))
 from lichtfeld_sessions.transport import atomic_json, read_text_shared, process_alive, artifact_path, digest_stream, verified_artifact
