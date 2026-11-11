@@ -48,6 +48,13 @@ capture, initialization and saved-dataset validation. The supported range is
 4–10,000 views. Readiness, job creation and framing use name order, including
 cameras in nested collections.
 
+`capture_settings.camera_pose` owns evaluated camera-transform validation for
+readiness, job creation, framing copies and render calibration. It normalizes
+orthogonal axes using Blender's scale-free camera-frame convention, preserving
+world translation. Non-finite, degenerate, sheared and negative-determinant frames
+are rejected with the camera name. Copy normalization never edits camera sources
+or parent objects; the validation action only selects the named camera.
+
 `rig_edit.commit` validates generated indices and aim-helper uniqueness before
 mutating existing cameras, retaining the existing staged update/rollback path.
 `rig_parameter_source` records which collection last supplied or received the

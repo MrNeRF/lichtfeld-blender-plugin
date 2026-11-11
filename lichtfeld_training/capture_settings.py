@@ -116,16 +116,36 @@ def apply_camera(data, value):
     data.dof.use_dof = False
 
 
+def camera_pose(camera, graph):
+    """Match Blender's scale-free camera frame; reject non-rigid calibration."""
+    evaluated = camera.evaluated_get(graph)
+    if evaluated.data.type != 'PERSP':
+        raise ValueError(f'Camera {camera.name}: capture requires a Perspective camera')
+    matrix = evaluated.matrix_world.copy()
+    if any(not math.isfinite(value) for row in matrix for value in row):
+        raise ValueError(f'Camera {camera.name}: transform contains non-finite values')
+    axes = [matrix.to_3x3().col[index].copy() for index in range(3)]
+    if any(not math.isfinite(axis.length) or axis.length < 1e-8 for axis in axes):
+        raise ValueError(f'Camera {camera.name}: zero or near-zero scale; inspect the camera and its parents')
+    axes = [axis.normalized() for axis in axes]
+    if any(abs(axes[a].dot(axes[b])) > 1e-5 for a, b in ((0, 1), (0, 2), (1, 2))):
+        raise ValueError(f'Camera {camera.name}: sheared transform; inspect the camera and its parents')
+    if axes[0].cross(axes[1]).dot(axes[2]) < 0:
+        raise ValueError(f'Camera {camera.name}: mirrored transform; inspect the camera and its parents')
+    return matrix.normalized()
+
+
 def copy_camera(camera, graph, overrides):
     """Freeze evaluated pose/optics before unlinking rig parents or constraints."""
     import bpy
+    pose = camera_pose(camera, graph)
     evaluated = camera.evaluated_get(graph)
     data = evaluated.data.copy()
     data.animation_data_clear()
     try:
         apply_camera(data, overrides)
         copy = bpy.data.objects.new(camera.name + ' capture pose', data)
-        copy.matrix_world = evaluated.matrix_world.copy()
+        copy.matrix_world = pose
         return copy
     except Exception:
         if not data.users:
