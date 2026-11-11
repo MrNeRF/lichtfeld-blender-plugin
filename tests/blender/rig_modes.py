@@ -1,11 +1,12 @@
 # SPDX-FileCopyrightText: 2026 LichtFeld Studio Authors
 # SPDX-License-Identifier: GPL-3.0-or-later
 from pathlib import Path
-import sys
+import sys, importlib
 import bpy
 sys.path.insert(0,str(Path(__file__).resolve().parents[2]))
-bpy.ops.preferences.addon_enable(module='lichtfeld_training')
-import lichtfeld_training as ext
+module = 'bl_ext.user_default.lichtfeld_training' if '--installed' in sys.argv else 'lichtfeld_training'
+bpy.ops.preferences.addon_enable(module=module)
+ext = importlib.import_module(module)
 s=bpy.context.scene.lichtfeld_training
 source=bpy.context.active_object
 for mode in ('SPHERE','HEMISPHERE','RINGS'):

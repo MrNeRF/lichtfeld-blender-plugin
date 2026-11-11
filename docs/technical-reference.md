@@ -48,6 +48,13 @@ capture, initialization and saved-dataset validation. The supported range is
 4–10,000 views. Readiness, job creation and framing use name order, including
 cameras in nested collections.
 
+`rig_edit.commit` validates generated indices and aim-helper uniqueness before
+mutating existing cameras, retaining the existing staged update/rollback path.
+`rig_parameter_source` records which collection last supplied or received the
+scene's rig controls. Selection alone never changes those controls; Apply and
+viewport aim require the selected managed rig to match that source. Recipe
+decoding and object-reference checks finish before Load changes the controls.
+
 After a render-worker failure with complete image progress, the supervisor reaps
 the worker before attempting `--finalize-capture` once against `capture.blend`.
 The existing worker validates journal identity, count, camera calibration and
