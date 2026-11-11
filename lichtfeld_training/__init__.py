@@ -33,7 +33,8 @@ _ROOT = Path(__file__).resolve().parent
 _imported = {}
 _clients = {}
 _sessions = []
-_session_items = [("NONE", "Refresh to discover trainers", "Refresh the list to find compatible trainers that are currently running")]
+_SESSION_PLACEHOLDER = [("NONE", "Refresh to discover trainers", "Refresh the list to find compatible trainers that are currently running")]
+_session_items = _SESSION_PLACEHOLDER
 _session_scan_pending = False
 
 
@@ -1735,16 +1736,18 @@ def draw_capture_plan(setup, context, settings, ready, pending):
     box.label(text=scope, icon='SCENE_DATA')
     value = ready.get('format')
     box.label(text=f"{len(ready['cameras']):,} cameras · {value['width']} × {value['height']} px" if value else 'Cameras and output: checking…')
-    if pending:
-        box.label(text='Rig controls changed; cameras not updated', icon='INFO')
+    rig = settings.camera_collection
+    managed = rig and rig.get('lichtfeld_generated')
+    if managed and settings.rig_parameter_source != rig:
+        box.label(text='Load selected rig before editing', icon='IMPORT')
+    elif pending:
+        box.label(text='Rig changes not applied', icon='INFO')
     header, details = box.panel('lichtfeld_capture_plan', default_closed=True)
     header.label(text='Capture details', icon='INFO')
     if details is None:
         return
     box = details
     box.label(text='View Layer: ' + context.view_layer.name)
-    rig = settings.camera_collection
-    managed = rig and rig.get('lichtfeld_generated')
     reference = rig.lichtfeld_rig_reference if managed else settings.rig_reference
     if rig is None:
         subject = 'Create or choose cameras'
@@ -1978,10 +1981,14 @@ class LF_PT_training(bpy.types.Panel):
         if settings.mode == "CONNECT":
             layout.label(text="View an active trainer", icon='LOCKED')
             wrapped(layout, 'Read-only: view the model and cameras. Training stays under its owner’s control.')
-            layout.operator("lichtfeld.scan_sessions", icon="FILE_REFRESH")
-            layout.prop(settings, "discovered_session", text="")
-            row = layout.row()
-            row.enabled = settings.discovered_session != "NONE"
+            layout.label(text='Searching for trainers…' if _session_scan_pending else 'Refresh to update the list',
+                         icon='TIME' if _session_scan_pending else 'INFO')
+            column = layout.column()
+            column.enabled = not _session_scan_pending
+            column.operator("lichtfeld.scan_sessions", icon="FILE_REFRESH")
+            column.prop(settings, "discovered_session", text="")
+            row = column.row()
+            row.enabled = settings.discovered_session not in {'NONE', ''}
             row.operator("lichtfeld.attach_session", icon="LINKED")
             return
         setup = layout.column()
@@ -2052,8 +2059,12 @@ def saved(_):
 
 @persistent
 def unloading(_):
-    global _session_scan_pending
+    global _session_scan_pending, _sessions, _session_items
     _session_scan_pending = False
+    _sessions = []
+    _session_items = _SESSION_PLACEHOLDER
+    for scene in bpy.data.scenes:
+        scene.lichtfeld_training.discovered_session = 'NONE'
     preflight.clear()
     scene_render.clear()
     ui_runtime.clear()

@@ -254,6 +254,8 @@ owns its commands; another process can observe it read-only. **View trainer** se
 Disconnecting that view leaves the trainer running. A trainer owned by the
 LichtFeld Studio GUI still stops when its owning LichtFeld Studio window closes.
 
+The trainer list shows when a search is in progress. Switching project files clears the previous search results; use **Refresh trainers** to search in a project opened directly in this view.
+
 With an observer-enabled LichtFeld Studio build, open **External training** in an empty scene or a model scene, refresh the list and choose **View training**. A loaded training dataset must first be switched to Edit Mode or replaced with a new scene. The observer shows the step and quality actually installed, and groups the preview model and capture cameras under one scene entity. **Frame preview** uses normal navigation; **Disconnect** keeps the last read-only preview and **Remove preview** removes its group. The headless trainer continues independently.
 
 If a run fails, retain its job folder and read the reported error and process log

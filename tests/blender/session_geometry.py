@@ -109,5 +109,24 @@ with patch.object(ext.ui_runtime,'submit',side_effect=lambda fn,done,fail:callba
  assert s.discovered_session=='b'
  ext.refresh_sessions();callbacks.pop()( [] )
  assert s.discovered_session=='NONE'
+ ext.refresh_sessions();callbacks.pop()([a,b])
+ s.discovered_session='b'
+# File changes discard both cached entries and pending callbacks. A late worker
+# completion must not repopulate the next file's enum, including inactive scenes.
+from concurrent.futures import Future
+other=bpy.data.scenes.new('Inactive discovery selection')
+other.lichtfeld_training.discovered_session='b'
+future=Future()
+with patch.object(ext.ui_runtime._executor,'submit',return_value=future):
+ ext.refresh_sessions()
+ assert ext._session_scan_pending
+ ext.unloading(None)
+ assert not ext._session_scan_pending and not ext._sessions
+ assert ext._session_items==ext._SESSION_PLACEHOLDER
+ assert s.discovered_session==other.lichtfeld_training.discovered_session=='NONE'
+ future.set_result([a,b])
+ ext.ui_runtime.tick()
+ assert not ext._sessions and s.discovered_session=='NONE'
+bpy.data.scenes.remove(other)
 print('ASYMMETRIC_MODEL_CAMERA_COORDINATES_AND_LIVE_DISCOVERY_PASS',flush=True)
 ext.ui_runtime.clear()

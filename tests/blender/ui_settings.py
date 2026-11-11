@@ -68,6 +68,8 @@ def tick():
   if state['step']==8:
    snapshot('sidebar-open.png')
    assert bpy.ops.lichtfeld.setup_view(mode='CONNECT')=={'FINISHED'}
+   assert ext._session_scan_pending
+   snapshot('sidebar-searching.png')
    state['step']=9;return .5
   if state['step']==9:
    if ext._session_scan_pending:return .1
@@ -77,6 +79,14 @@ def tick():
    s.dataset_mode='CAPTURE';state['step']=10;return .5
   if state['step']==10:
    snapshot('sidebar-return.png')
+   state['rig_source']=s.rig_parameter_source
+   s.rig_parameter_source=None;state['step']=11;return .5
+  if state['step']==11:
+   snapshot('sidebar-load-rig.png')
+   s.rig_parameter_source=state['rig_source'];s.rig_distance+=.25
+   state['step']=12;return .5
+  if state['step']==12:
+   snapshot('sidebar-pending-rig.png')
    (area/'result.json').write_text(json.dumps({'ok':True,'framing_return':True,'navigation_return':True,'tasks':['CAPTURE','EXPORT','REUSE']}))
    print('SETTINGS_UI_TASKS_NATIVE_SECTIONS_AND_FRAMING_RETURN_PASS',flush=True)
    bpy.ops.wm.quit_blender();return None
