@@ -5,6 +5,7 @@ import argparse,bpy,importlib,sys,time,traceback
 parser=argparse.ArgumentParser(description='Installed extension workflow in a disposable GUI profile')
 parser.add_argument('area',type=Path)
 parser.add_argument('backend',type=Path)
+parser.add_argument('--installed',action='store_true')
 options=parser.parse_args(sys.argv[sys.argv.index('--')+1:])
 area=options.area.resolve();area.mkdir(parents=True,exist_ok=True)
 ext=importlib.import_module('bl_ext.user_default.lichtfeld_training')

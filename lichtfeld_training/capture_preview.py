@@ -249,11 +249,11 @@ class LF_OT_close_capture_framing(bpy.types.Operator):
         return {'FINISHED'}
 
 
-def draw(layout, context, source):
+def draw(layout, context, source, *, width=None):
     from . import draw_capture_format, draw_capture_overrides
     s = source.lichtfeld_training
     def wrapped(box, text):
-        draw_paragraph(box, text, context.region.width, context.preferences.system.ui_scale)
+        draw_paragraph(box, text, width if width is not None else context.region.width, context.preferences.system.ui_scale)
     layout.label(text='Capture framing', icon='VIEW_CAMERA')
     layout.operator('lichtfeld.close_capture_framing', icon='BACK')
     box = layout.box()

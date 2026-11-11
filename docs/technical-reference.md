@@ -1,5 +1,14 @@
 # Technical reference
 
+Setup uses native region-owned collapsible sections, without additional scene
+expansion properties or a separate workflow. Existing preflight results supply
+the plan's validated output format and render configuration; existing render
+readiness supplies effective device metadata. The plan keeps fixed rows during
+asynchronous checks and reports the selected rig's saved reference, not pending
+controls. Primary actions and validation details use the existing operators and
+checks. Framing remains the existing geometry/optics preview, not a second RGB
+render pipeline.
+
 ## Process boundaries
 
 The installed extension registers Blender properties, operators and panels.

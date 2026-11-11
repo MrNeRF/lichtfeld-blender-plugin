@@ -85,13 +85,16 @@ bundled dependency.
 2. In **New → Capture and train**, select the source: selected surface objects,
    a collection, or the entire scene.
 3. Select a collection containing at least four perspective cameras, or choose
-   **Create capture rig**. Inspect their coverage before starting.
+   **Create camera rig** in **Capture cameras**. Use **Check camera framing** before starting.
 4. Set the output dimensions. Use **Render settings**, **Output settings**, and
    **Render devices** to review Blender's official configuration.
 5. Review the training strategy, total steps, Gaussian budget, and any optional
    depth/normal supervision. Choose **Capture and start training**.
 6. Follow capture progress, then the live training preview. Pause/stop and preview
    controls appear when relevant. The displayed snapshot step can lag the trainer.
+
+The capture plan and start/export actions stay at the top. Expand the native
+setup sections to edit content, cameras, rendering/output, or training/preview.
 
 The capture uses the saved scene at the selected frame. Background Blender applies
 capture settings to an isolated copy; it does not animate your rig to render

@@ -1602,7 +1602,7 @@ class LF_OT_compare(bpy.types.Operator):
 
 def draw_training_controls(setup, settings, wrapped):
     box = setup.box()
-    box.label(text="4  Training", icon="MOD_PARTICLES")
+    box.label(text="Training", icon="MOD_PARTICLES")
 
     box.prop(settings, "strategy",text="Method")
     box.prop(settings, "iterations")
@@ -1636,7 +1636,7 @@ def draw_training_controls(setup, settings, wrapped):
         wrapped(box,"Expert JSON controls additional native parameters. Managed and visible fields must use the controls above.")
         wrapped(box, "Exposure correction combines PPISP and the bilateral grid. For consistent synthetic views these are off by default.")
     box = setup.box()
-    box.label(text="5  Viewport preview", icon="OUTLINER_DATA_POINTCLOUD")
+    box.label(text="Live splat preview", icon="OUTLINER_DATA_POINTCLOUD")
     box.prop(settings, "preview_mode", text="Updates")
     if settings.preview_mode == "PERIODIC":
         box.prop(settings, "preview_seconds", text="Minimum interval (s)")
@@ -1651,9 +1651,8 @@ def draw_training_controls(setup, settings, wrapped):
 
 
 def draw_capture_format(box, scene, settings, wrapped):
-    row = box.row(align=True)
-    row.prop(scene.render, 'resolution_x', text='Width')
-    row.prop(scene.render, 'resolution_y', text='Height')
+    box.prop(scene.render, 'resolution_x', text='Width (px)')
+    box.prop(scene.render, 'resolution_y', text='Height (px)')
     box.prop(scene.render, 'resolution_percentage', text='Scale %')
     row = box.row(align=True)
     row.operator('lichtfeld.render_settings', text='Output settings…', icon='OUTPUT').section = 'OUTPUT'
@@ -1696,21 +1695,210 @@ def draw_capture_overrides(box, settings, wrapped):
     wrapped(box, 'Applies to every capture camera. Unchecked settings keep each camera’s evaluated values. Original cameras and their positions stay unchanged.')
 
 
+def draw_setup_section(layout, settings, name, title, icon, *, closed=True):
+    header, content = layout.panel('lichtfeld_setup_' + name, default_closed=closed)
+    header.enabled = not settings.operation_busy
+    header.label(text=title, icon=icon)
+    if content is not None:
+        content.enabled = not settings.operation_busy
+    return content
+
+
+def draw_capture_plan(setup, context, settings, ready, pending):
+    """Read only the existing readiness snapshot and bounded RNA properties."""
+    box = setup.box()
+    box.label(text='Capture plan', icon='INFO')
+    scope = {'SCENE': 'Entire scene', 'COLLECTION': 'Isolated collection', 'SELECTION': 'Isolated objects'}[settings.scope]
+    box.label(text='Content: ' + scope)
+    box.label(text='View Layer: ' + context.view_layer.name)
+    rig = settings.camera_collection
+    managed = rig and rig.get('lichtfeld_generated')
+    reference = rig.lichtfeld_rig_reference if managed else settings.rig_reference
+    if rig is None:
+        subject = 'Create or choose cameras'
+    elif not managed or reference.mode == 'UNSET':
+        subject = 'Existing camera poses'
+    elif reference.mode == 'COLLECTION':
+        subject = reference.collection.name if reference.collection else 'Missing reference collection'
+    elif reference.mode == 'SCENE':
+        subject = 'Entire scene'
+    else:
+        entry = reference.objects[0] if reference.objects else None
+        subject = (entry.object.name if entry.object else 'Missing: ' + entry.name) if entry else 'No reference objects'
+        if len(reference.objects) > 1:
+            subject += f' (+{len(reference.objects)-1:,})'
+    box.label(text='Rig: ' + subject)
+    value = ready.get('format')
+    box.label(text=f"{len(ready['cameras']):,} views · {value['width']} × {value['height']} px" if value else 'Views and output: checking…')
+    render = ready.get('render')
+    render_lines = scene_render.summary_lines(render, ready.get('render_device'))
+    engine = render_lines[0] + f" · {render['samples']:,} samples" if render else 'Render settings: checking…'
+    box.label(text=engine)
+    box.label(text=f'Lens override: {settings.capture_lens:g} mm' if settings.override_optics else
+                   'Shift/clipping overrides active' if settings.override_shift or settings.override_clipping else 'Lens: each capture camera')
+    output = 'Dataset only' if settings.dataset_mode == 'EXPORT' else f'{settings.iterations:,} training steps'
+    box.label(text=f'Frame {context.scene.frame_current} · {output}')
+    box.label(text='Camera setup required' if rig is None else
+                   'Load this rig before editing' if managed and settings.rig_parameter_source != rig else
+                   'Rig changes need Apply' if pending else
+                   'Checking camera setup…' if ready.get('checking') else 'Capture uses existing camera poses')
+
+
+def draw_capture_sources(box, context, settings, wrapped):
+    box.prop(settings, "scope", text="")
+    if settings.scope == "COLLECTION":
+        box.prop(settings, "source_collection", text="")
+    elif settings.scope == "SELECTION":
+        box.operator("lichtfeld.pick_sources", icon="RESTRICT_SELECT_OFF").for_rig = False
+        box.label(text="Capture selection is remembered")
+    box.prop(settings, "quality")
+    wrapped(box, "Presets change image size, samples, rig camera count and training budget. Apply rig changes separately.")
+    box.label(text=f"Static capture at frame {context.scene.frame_current}")
+
+
+def draw_capture_cameras(box, context, settings, ready, rig_changed, wrapped):
+    box.prop(settings, "camera_collection", text="")
+    managed = settings.camera_collection and settings.camera_collection.get("lichtfeld_generated")
+    count = len(ready['cameras'])
+    generated_count = ready.get('generated_cameras', 0)
+    box.label(text="Checking capture cameras…" if ready.get("checking") else f"Capture views: {count:,}")
+    box.label(text="Uses all cameras in this collection" if ready.get("checking") or not managed else
+              f"Rig: {generated_count:,} · Additional: {count-generated_count:,}")
+    if settings.camera_collection:
+        box.prop(settings,"rig_generator",icon="TRIA_DOWN" if settings.rig_generator else "TRIA_RIGHT",emboss=False)
+    if managed:
+        box.operator("lichtfeld.read_rig", text="Load this rig's parameters", icon="IMPORT")
+        if settings.rig_parameter_source != settings.camera_collection:
+            wrapped(box, "Load this rig's parameters before editing. Choosing a collection keeps the current controls.")
+    if not settings.camera_collection or settings.rig_generator:
+        reference = settings.rig_reference
+        box.prop(reference, 'mode')
+        if reference.mode == 'COLLECTION':
+            box.prop(reference, 'collection', text='')
+        elif reference.mode == 'OBJECTS':
+            box.label(text=f'Remembered rig objects: {len(reference.objects):,}')
+            if reference.objects:
+                entry = reference.objects[0]
+                wrapped(box, ('First: ' if len(reference.objects) > 1 else '') + entry.object.name if entry.object else 'Missing: ' + entry.name)
+        elif reference.mode == 'UNSET':
+            wrapped(box, 'Choose a reference to edit this older rig. Its existing cameras can still be captured.' if managed else
+                    'The first rig uses the capture source once. You can choose a different reference here.')
+        box.operator('lichtfeld.pick_sources', text='Use selected for rig', icon='RESTRICT_SELECT_OFF').for_rig = True
+        wrapped(box, 'Rig reference controls camera placement only. Capture content is chosen above.')
+        box.prop(settings, "rig_mode")
+        if settings.rig_mode != "MESH" or settings.rig_mesh_distribution != "FACES":
+            box.prop(settings, "views", text="Rig camera count")
+        if settings.rig_mode not in {"PATH", "MESH"}:
+            box.operator("lichtfeld.tight_framing",icon="VIEW_CAMERA")
+            if settings.rig_mode != 'SPHERE':
+                box.prop(settings, "rig_min")
+                box.prop(settings, "rig_max")
+            if settings.rig_mode == 'RINGS':
+                box.prop(settings, "rig_rings")
+        if settings.rig_mode == 'PATH':
+            box.prop(settings, "rig_curve")
+            box.prop(settings, "rig_orientation")
+            wrapped(box, "The path curve is a helper and is excluded from captured images.")
+        if settings.rig_mode == 'MESH':
+            box.prop(settings, "rig_mesh")
+            box.prop(settings, "rig_mesh_distribution")
+            box.prop(settings, "rig_mesh_orientation")
+            box.prop(settings, "rig_mesh_offset")
+            wrapped(box, "Placement mesh is excluded from captured images. Edit it, then apply rig parameters.")
+        box.prop(settings, "rig_details", icon="TRIA_DOWN" if settings.rig_details else "TRIA_RIGHT", emboss=False)
+        if settings.rig_details:
+            if settings.rig_mode not in {'PATH', 'MESH'}:
+                box.prop(settings, "rig_auto_fit")
+                box.prop(settings, "rig_distance" if settings.rig_auto_fit else "rig_radius")
+                box.prop(settings, "rig_phase")
+            box.prop(settings, "rig_lens")
+        uses_aim = not (settings.rig_mode == 'PATH' and settings.rig_orientation == 'TANGENT' or
+                        settings.rig_mode == 'MESH' and settings.rig_mesh_orientation != 'TARGET')
+        if uses_aim:
+            box.prop(settings, "rig_aim_mode")
+            if settings.rig_aim_mode == "OBJECT":
+                box.prop(settings, "rig_target")
+            elif settings.rig_aim_mode == "POSITION":
+                box.prop(settings, "rig_aim_position")
+            box.prop(settings, "rig_aim_offset")
+            if settings.rig_aim:
+                row = box.row()
+                row.enabled = settings.rig_mode != "PATH" or settings.rig_orientation != "TANGENT"
+                row.operator("lichtfeld.select_aim", text="Move aim target in viewport", icon="EMPTY_AXIS")
+        wrapped(box,"Apply parameters to update camera placement. Move the aim target to change camera direction live.")
+        box.operator("lichtfeld.create_rig", text="Apply rig parameters" if managed else "Create camera rig", icon="ADD")
+    box.label(text="Load parameters to edit this rig" if managed and settings.rig_parameter_source != settings.camera_collection else
+              "Rig/framing changed: apply parameters" if rig_changed else
+              "Checking rig parameters…" if managed and ready.get('checking') else "Capture uses the existing cameras",
+              icon="INFO")
+
+
+def draw_capture_options(box, context, settings, capture_only, wrapped):
+    scene_render.draw(box, context.scene, wrapped)
+    draw_capture_format(box, context.scene, settings, wrapped)
+    draw_capture_overrides(box, settings, wrapped)
+    if capture_only:
+        row = box.row(align=True)
+        row.prop(settings, "use_depth_loss", text="Depth maps")
+        row.prop(settings, "use_normal_loss", text="Normal maps")
+        if settings.use_depth_loss or settings.use_normal_loss:
+            wrapped(box, "Float TIFF maps in LichtFeld camera coordinates, aligned with the RGB images.")
+    if settings.use_depth_loss and settings.depth_loss_weight > 0:
+        box.label(text="Points: rendered views (depth)")
+    else:
+        box.prop(settings, "seed_method", text="Points")
+    if settings.capture_advanced:
+        box.prop(settings, "seed_points")
+        wrapped(box, "Object captures include foreground alpha masks. Denoising and Persistent Data follow the saved Cycles settings.")
+
+
+def draw_capture_actions(setup, settings, ready, errors, capture_only):
+    rig = settings.camera_collection
+    managed = rig and rig.get('lichtfeld_generated')
+    if managed and settings.rig_parameter_source != rig:
+        setup.operator('lichtfeld.read_rig', text='Load selected rig', icon='IMPORT')
+    else:
+        setup.operator('lichtfeld.create_rig', text='Apply rig changes' if managed else 'Create camera rig', icon='CAMERA_DATA')
+    row = setup.row()
+    row.enabled = bool(settings.camera_collection)
+    row.operator('lichtfeld.capture_framing', text='Check camera framing', icon='VIEW_CAMERA')
+    checking = ready.get("checking") or ready.get("environment", {}).get("checking")
+    setup.label(text="Capture did not start: review the error" if settings.status == 'Failed' and settings.detail else
+                "Checking capture setup…" if checking else
+                errors[0] if errors else "Ready to capture",
+                icon="INFO" if checking or not errors else "ERROR")
+    row = setup.row()
+    row.enabled = not bpy.data.filepath or bpy.data.is_dirty
+    row.operator("wm.save_as_mainfile" if not bpy.data.filepath else "wm.save_mainfile",text="Save scene before capture",icon="FILE_TICK")
+    row = setup.row()
+    row.enabled = not errors and not checking
+    row.scale_y = 1.4
+    if capture_only:
+        row.operator("lichtfeld.export_dataset", text="Generate dataset…", icon="EXPORT")
+    else:
+        row.operator("lichtfeld.start_training", text="Capture and start training", icon="PLAY")
+
+
 class LF_PT_training(bpy.types.Panel):
     bl_label = "LichtFeld Training"
     bl_idname = "LF_PT_training"
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
     bl_category = "LichtFeld"
+    bl_ui_units_x = 20
 
     def draw(self, context):
         layout = self.layout
+        scale = bpy.context.preferences.system.ui_scale
+        width = context.region.width
+        if getattr(self, 'is_popover', False):
+            width = min(width, LF_PT_training.bl_ui_units_x * 20 * scale)
         def wrapped(container, text):
-            draw_paragraph(container, text, context.region.width, bpy.context.preferences.system.ui_scale)
+            draw_paragraph(container, text, width, scale)
         if capture_preview.is_preview(context.scene):
             capture_source = capture_preview.source_scene(context.scene)
             if capture_source:
-                capture_preview.draw(layout, context, capture_source)
+                capture_preview.draw(layout, context, capture_source, width=width)
             else:
                 capture_preview.draw_orphaned(layout, context)
             return
@@ -1733,12 +1921,6 @@ class LF_PT_training(bpy.types.Panel):
         prefs = preferences(context)
         current = ui_runtime.peek(context.scene)
         status = current.status if current else {}
-        flags = workflow.actions(status.get("state", settings.status),
-            external=bool(settings.attached_session), result=bool(settings.result_object),
-            best=bool(status.get("best") or status.get("result")),
-            checkpoint=bool(status.get("checkpoint_available")),
-            busy=False,
-            control=status.get("control_available", False))
         if settings.attached_session or settings.job_directory:
             from . import job_panel
             job_panel.draw(layout, context, settings, status, current.reader.error if current else "", wrapped)
@@ -1782,144 +1964,37 @@ class LF_PT_training(bpy.types.Panel):
             box.label(text=settings.dataset_coverage)
             wrapped(box, "Uses saved images and camera poses. Scene or rig edits require a new capture.")
             wrapped(box, "Review the settings below, then start training. No images will be rendered again.")
-            draw_training_controls(setup, settings, wrapped)
             row = setup.row()
             row.scale_y = 1.4
             row.operator("lichtfeld.restart_training", text="Train saved images from scratch", icon="PLAY")
+            box = draw_setup_section(layout, settings, 'training', 'Training and preview', 'MOD_PARTICLES')
+            if box is not None:
+                draw_training_controls(box, settings, wrapped)
             return
         capture_only = settings.dataset_mode == "EXPORT"
         wrapped(setup, "Generate a reusable dataset in a folder you choose. Training will not start." if capture_only else
                 "Generate images from this scene, then start training automatically.")
         ready = preflight.cached(context, prefs, capture_only=capture_only)
         errors = preflight.issues(ready)
-        box = setup.box()
-        box.label(text="1  Capture content and quality")
-        box.prop(settings, "scope", text="")
-        if settings.scope == "COLLECTION":
-            box.prop(settings, "source_collection", text="")
-        elif settings.scope == "SELECTION":
-            box.operator("lichtfeld.pick_sources", icon="RESTRICT_SELECT_OFF")
-            box.label(text="Source objects stay fixed while editing the rig")
-        box.prop(settings, "quality")
-        box.label(text=f"Static capture at frame {context.scene.frame_current}")
-        box = setup.box()
-        box.label(text="2  Capture cameras", icon="CAMERA_DATA")
-        box.prop(settings, "camera_collection", text="")
-        managed = settings.camera_collection and settings.camera_collection.get("lichtfeld_generated")
-        count = len(ready['cameras'])
-        generated_count = ready.get('generated_cameras', 0)
-        box.label(text="Checking capture cameras…" if ready.get("checking") else f"Capture views: {count:,}")
-        box.label(text="Uses all cameras in this collection" if ready.get("checking") or not managed else
-                  f"Rig: {generated_count:,} · Additional: {count-generated_count:,}")
-        if settings.camera_collection:
-            box.prop(settings,"rig_generator",icon="TRIA_DOWN" if settings.rig_generator else "TRIA_RIGHT",emboss=False)
-        if managed:
-            box.operator("lichtfeld.read_rig", text="Load this rig's parameters", icon="IMPORT")
-            if settings.rig_parameter_source != settings.camera_collection:
-                wrapped(box, "Load this rig's parameters before editing. Choosing a collection keeps the current controls.")
-        if not settings.camera_collection or settings.rig_generator:
-            reference = settings.rig_reference
-            box.prop(reference, 'mode')
-            if reference.mode == 'COLLECTION':
-                box.prop(reference, 'collection', text='')
-            elif reference.mode == 'OBJECTS':
-                box.label(text=f'Remembered rig objects: {len(reference.objects):,}')
-                if reference.objects:
-                    entry = reference.objects[0]
-                    wrapped(box, ('First: ' if len(reference.objects) > 1 else '') + entry.object.name if entry.object else 'Missing: ' + entry.name)
-            elif reference.mode == 'UNSET':
-                wrapped(box, 'Choose a reference to edit this older rig. Its existing cameras can still be captured.' if managed else
-                        'The first rig uses the capture source once. You can choose a different reference here.')
-            box.operator('lichtfeld.pick_sources', text='Use selected for rig', icon='RESTRICT_SELECT_OFF').for_rig = True
-            wrapped(box, 'Rig reference controls camera placement only. Capture content is chosen above.')
-            box.prop(settings, "rig_mode")
-            if settings.rig_mode != "MESH" or settings.rig_mesh_distribution != "FACES":
-                box.prop(settings, "views", text="Rig camera count")
-            if settings.rig_mode not in {"PATH", "MESH"}:
-                box.operator("lichtfeld.tight_framing",icon="VIEW_CAMERA")
-                if settings.rig_mode != 'SPHERE':
-                    box.prop(settings, "rig_min")
-                    box.prop(settings, "rig_max")
-                if settings.rig_mode == 'RINGS':
-                    box.prop(settings, "rig_rings")
-            if settings.rig_mode == 'PATH':
-                box.prop(settings, "rig_curve")
-                box.prop(settings, "rig_orientation")
-                wrapped(box, "The path curve is a helper and is excluded from captured images.")
-            if settings.rig_mode == 'MESH':
-                box.prop(settings, "rig_mesh")
-                box.prop(settings, "rig_mesh_distribution")
-                box.prop(settings, "rig_mesh_orientation")
-                box.prop(settings, "rig_mesh_offset")
-                wrapped(box, "Placement mesh is excluded from captured images. Edit it, then apply rig parameters.")
-            box.prop(settings, "rig_details", icon="TRIA_DOWN" if settings.rig_details else "TRIA_RIGHT", emboss=False)
-            if settings.rig_details:
-                if settings.rig_mode not in {'PATH', 'MESH'}:
-                    box.prop(settings, "rig_auto_fit")
-                    box.prop(settings, "rig_distance" if settings.rig_auto_fit else "rig_radius")
-                    box.prop(settings, "rig_phase")
-                box.prop(settings, "rig_lens")
-            uses_aim = not (settings.rig_mode == 'PATH' and settings.rig_orientation == 'TANGENT' or
-                            settings.rig_mode == 'MESH' and settings.rig_mesh_orientation != 'TARGET')
-            if uses_aim:
-                box.prop(settings, "rig_aim_mode")
-                if settings.rig_aim_mode == "OBJECT":
-                    box.prop(settings, "rig_target")
-                elif settings.rig_aim_mode == "POSITION":
-                    box.prop(settings, "rig_aim_position")
-                box.prop(settings, "rig_aim_offset")
-                if settings.rig_aim:
-                    row = box.row()
-                    row.enabled = settings.rig_mode != "PATH" or settings.rig_orientation != "TANGENT"
-                    row.operator("lichtfeld.select_aim", text="Move aim target in viewport", icon="EMPTY_AXIS")
-            wrapped(box,"Apply parameters to update camera placement. Move the aim target to change camera direction live.")
-            box.operator("lichtfeld.create_rig", text="Apply rig parameters" if managed else "Create camera rig", icon="ADD")
-        rig_changed = managed and (settings.camera_collection.get("lichtfeld_rig_recipe") != rig_recipe(settings) or ready.get('reference_changed', False))
-        box.label(text="Load parameters to edit this rig" if managed and settings.rig_parameter_source != settings.camera_collection else
-                  "Rig/framing changed: apply parameters" if rig_changed else
-                  "Checking rig parameters…" if managed and ready.get('checking') else "Capture uses the existing cameras",
-                  icon="INFO")
-        box = setup.box()
-        box.label(text="3  Capture", icon="RENDER_STILL")
-        scene_render.draw(box, context.scene, wrapped)
-        draw_capture_format(box, context.scene, settings, wrapped)
-        draw_capture_overrides(box, settings, wrapped)
-        row = box.row()
-        row.enabled = bool(settings.camera_collection)
-        row.operator('lichtfeld.capture_framing', icon='VIEW_CAMERA')
-        if capture_only:
-            row = box.row(align=True)
-            row.prop(settings, "use_depth_loss", text="Depth maps")
-            row.prop(settings, "use_normal_loss", text="Normal maps")
-            if settings.use_depth_loss or settings.use_normal_loss:
-                wrapped(box, "Float TIFF maps in LichtFeld camera coordinates, aligned with the RGB images.")
-        if settings.use_depth_loss and settings.depth_loss_weight > 0:
-            box.label(text="Points: rendered views (depth)")
-        else:
-            box.prop(settings, "seed_method", text="Points")
-        if settings.capture_advanced:
-            box.prop(settings, "seed_points")
-            wrapped(box, "Object captures include foreground alpha masks. Denoising and Persistent Data follow the saved Cycles settings.")
+        rig = settings.camera_collection
+        pending = rig and rig.get('lichtfeld_generated') and (rig.get('lichtfeld_rig_recipe') != rig_recipe(settings) or ready.get('reference_changed', False))
+        draw_capture_plan(setup, context, settings, ready, pending)
+        draw_capture_actions(setup, settings, ready, errors, capture_only)
+        box = draw_setup_section(layout, settings, 'content', 'Capture content and quality', 'SCENE_DATA', closed=False)
+        if box is not None:
+            draw_capture_sources(box, context, settings, wrapped)
+        box = draw_setup_section(layout, settings, 'cameras', 'Capture cameras', 'CAMERA_DATA', closed=bool(settings.camera_collection))
+        if box is not None:
+            draw_capture_cameras(box, context, settings, ready, pending, wrapped)
+        box = draw_setup_section(layout, settings, 'output', 'Render and output', 'RENDER_STILL')
+        if box is not None:
+            draw_capture_options(box, context, settings, capture_only, wrapped)
         if not capture_only:
-            draw_training_controls(setup, settings, wrapped)
-        # Keep a fixed footprint above editable controls. Asynchronous validation
-        # must never insert/remove wrapped rows and shift the field being edited.
-        checking = ready.get("checking") or ready.get("environment", {}).get("checking")
-        setup.label(text="Capture did not start: review the error" if settings.status == 'Failed' and settings.detail else
-                    "Checking capture setup…" if checking else
-                    "Review validation details below" if errors else "Ready to capture",
-                    icon="INFO" if checking or not errors else "ERROR")
-        row = setup.row()
-        row.enabled = not bpy.data.filepath or bpy.data.is_dirty
-        row.operator("wm.save_as_mainfile" if not bpy.data.filepath else "wm.save_mainfile",text="Save scene before capture",icon="FILE_TICK")
-        row = setup.row()
-        row.enabled = not errors and not checking
-        row.scale_y = 1.4
-        if capture_only:
-            row.operator("lichtfeld.export_dataset", text="Generate dataset…", icon="EXPORT")
-        else:
-            row.operator("lichtfeld.start_training", text="Capture and start training", icon="PLAY")
-        box = setup.box()
+            box = draw_setup_section(layout, settings, 'training', 'Training and preview', 'MOD_PARTICLES')
+            if box is not None:
+                draw_training_controls(box, settings, wrapped)
+        box = layout.box()
+        box.enabled = not settings.operation_busy
         box.prop(settings, "validation_details", icon="TRIA_DOWN" if settings.validation_details else "TRIA_RIGHT", emboss=False)
         if settings.validation_details:
             for error in errors[:5]:
