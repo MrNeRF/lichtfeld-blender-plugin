@@ -2,16 +2,17 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Real rendered appearance, hidden-surface exclusion and reusable point samples."""
 from pathlib import Path
-import sys,json,time,struct,subprocess
+import sys,json,time,struct,subprocess,importlib
 import numpy as np
 import bpy
 from mathutils import Matrix,Euler
 ROOT=Path(__file__).resolve().parents[2]
 sys.path.insert(0,str(ROOT))
-bpy.ops.preferences.addon_enable(module='lichtfeld_training')
-import lichtfeld_training as ext
-area=ROOT/'artifacts'/('rectangular-portrait' if '--portrait' in sys.argv else 'rectangular-capture' if '--rectangular' in sys.argv else 'visible-seed-shift' if '--shift' in sys.argv else 'visible-seed-cycles' if '--use-cycles' in sys.argv else 'visible-seed-mesh' if '--mesh' in sys.argv else 'visible-seed-depth' if '--depth' in sys.argv else 'visible-seed-capture')
-area.mkdir(exist_ok=True)
+module = 'bl_ext.user_default.lichtfeld_training' if '--installed' in sys.argv else 'lichtfeld_training'
+bpy.ops.preferences.addon_enable(module=module)
+ext = importlib.import_module(module)
+area=Path(sys.argv[sys.argv.index('--')+1]) if '--installed' in sys.argv else ROOT/'artifacts'/('rectangular-portrait' if '--portrait' in sys.argv else 'rectangular-capture' if '--rectangular' in sys.argv else 'visible-seed-shift' if '--shift' in sys.argv else 'visible-seed-cycles' if '--use-cycles' in sys.argv else 'visible-seed-mesh' if '--mesh' in sys.argv else 'visible-seed-depth' if '--depth' in sys.argv else 'visible-seed-capture')
+area.mkdir(parents=True,exist_ok=True)
 cube=bpy.data.objects['Cube']
 material=bpy.data.materials.new('Rendered red and blue; base color intentionally green')
 material.diffuse_color=(0,1,0,1);material.use_nodes=True
@@ -116,12 +117,16 @@ if '--depth' in sys.argv:
         assert length>=256
     assert offset==len(image_data)
     assert all(images[image][index]==point for point,tracks in point_tracks.items() for image,index in tracks)
-    before={p.name:(p.stat().st_mtime_ns,p.read_bytes()) for p in (root/'dataset/images').glob('*.png')}
+    captured = root/'dataset'
+    folders = ('images', 'masks', 'depths', 'normals')
+    before={str(p.relative_to(captured)):(p.stat().st_mtime_ns,p.read_bytes())
+            for folder in folders for p in (captured/folder).glob('*') if p.is_file()}
     geometry_before={name:(root/'dataset'/name).read_bytes() for name in ('pointcloud.ply','sparse/0/cameras.bin','sparse/0/images.bin','sparse/0/points3D.bin')}
     recovery=subprocess.run([bpy.app.binary_path,'-b','--disable-autoexec',str(root/'capture.blend'),
-        '--python-exit-code','1','--python',str(ROOT/'lichtfeld_training/render_worker.py'),'--',str(root/'job.json'),'--finalize-capture'],capture_output=True,timeout=120)
+        '--python-exit-code','1','--python',str(Path(ext.__file__).with_name('render_worker.py')),'--',str(root/'job.json'),'--finalize-capture'],capture_output=True,timeout=120)
     assert recovery.returncode==0,(recovery.stdout+recovery.stderr).decode(errors='replace')[-3000:]
-    after={p.name:(p.stat().st_mtime_ns,p.read_bytes()) for p in (root/'dataset/images').glob('*.png')}
+    after={str(p.relative_to(captured)):(p.stat().st_mtime_ns,p.read_bytes())
+           for folder in folders for p in (captured/folder).glob('*') if p.is_file()}
     assert before==after
     assert geometry_before=={name:(root/'dataset'/name).read_bytes() for name in geometry_before}
     print('DEPTH_SHARED_TRACKS_BUDGET_AND_NO_RENDER_RECOVERY_PASS',count,flush=True)

@@ -103,8 +103,9 @@ def collect(context,capture_only=False):
     if obj.data.type!='PERSP':errors.append('All capture cameras must be Perspective.')
     if any(abs(v-1)>1e-4 for v in obj.matrix_world.decompose()[2]):errors.append('Apply camera/parent scale before capture.')
    yield
- if len(cameras)<4:errors.append('Choose at least four Perspective cameras or create a rig.')
- if len(cameras)>10000:errors.append('Use at most 10,000 capture cameras per dataset.')
+ cameras.sort()
+ try:capture_settings.validate_view_count(len(cameras))
+ except ValueError as error:errors.append(str(error))
  if s.scope=='SCENE':
   for obj in context.scene.objects:
    if not obj.get('lichtfeld_result') and (obj.type in {'MESH','CURVE','SURFACE','FONT','META','VOLUME','POINTCLOUD'} or obj.type=='EMPTY' and obj.instance_type=='COLLECTION'):

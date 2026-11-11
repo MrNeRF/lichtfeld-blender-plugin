@@ -1,23 +1,26 @@
 # SPDX-FileCopyrightText: 2026 LichtFeld Studio Authors
 # SPDX-License-Identifier: GPL-3.0-or-later
 import sys, tempfile, unittest
+from unittest.mock import Mock, patch
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "lichtfeld_training"))
 import jobs
+import supervisor
+import job_control
 from bridge_core import atomic_json, digest, training_command
 
-def fixture(directory):
+def fixture(directory, views=4):
     root=Path(directory)/"original"
     dataset=root/"dataset"
     (dataset/"images").mkdir(parents=True)
     frames=[]
-    for i in range(4):
+    for i in range(views):
         name=f"images/view_{i:06d}.png"
         (dataset/name).write_bytes(b"image fixture")
         frames.append({"file_path":name})
     (dataset/"pointcloud.ply").write_bytes(b"pointcloud fixture")
     atomic_json(dataset/"transforms.json",{"frames":frames})
-    atomic_json(dataset/"manifest.json",{"views":4,"transforms_file":"transforms.json","transforms_sha256":digest(dataset/"transforms.json")})
+    atomic_json(dataset/"manifest.json",{"views":views,"transforms_file":"transforms.json","transforms_sha256":digest(dataset/"transforms.json")})
     atomic_json(root/"job.json",{"schema":1,"id":"original","root":str(root),"dataset_root":str(dataset),
         "source_file":"SOURCE_NO_LONGER_EXISTS.blend","backend":"UNTRUSTED","blender":"UNTRUSTED",
         "scope":"COLLECTION","test_every":4,"iterations":100,"eval_interval":50,"max_points":1000,"sh_degree":0,"resume":"OLD.licht","resume_iteration":50})
@@ -25,6 +28,65 @@ def fixture(directory):
     return root
 
 class DatasetReuse(unittest.TestCase):
+    def test_finalization_retries_only_complete_captures_and_honors_stop(self):
+        for case in ('recover', 'partial', 'cancel', 'retry_failed', 'missing_capture', 'first_ok', 'cancel_recovery'):
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as directory:
+                root = fixture(directory)
+                source = root/'source.blend'
+                source.write_bytes(b'frozen source')
+                if case != 'missing_capture':
+                    (root/'capture.blend').write_bytes(b'frozen capture')
+                job = jobs.read_job(root/'job.json')
+                job.pop('resume')
+                (Path(directory)/'exports').mkdir()
+                job.update(source_file=str(source), capture_only=True, export_parent=str(Path(directory)/'exports'),
+                           cameras=['A', 'B', 'C', 'D'])
+                atomic_json(root/'job.json', job)
+                atomic_json(root/'capture-progress.json', {'done': 3 if case == 'partial' else 4, 'total': 4})
+                owner = job_control.Controller(root)
+                launches = []
+                def launch(arguments, **kwargs):
+                    self.assertFalse(launches and launches[-1][1].poll() is None)
+                    recovery = '--finalize-capture' in arguments
+                    child = Mock(returncode=0 if case == 'first_ok' or recovery and case != 'retry_failed' else 1)
+                    child.poll.return_value = child.returncode
+                    child.wait.return_value = child.returncode
+                    launches.append((arguments, child))
+                    if case == 'cancel' or case == 'cancel_recovery' and recovery:
+                        self.assertTrue(owner.acquire())
+                        atomic_json(root/'command.json', owner.command('original', 'stop'))
+                    if case == 'cancel_recovery' and recovery:
+                        child.poll.return_value = None
+                        child.wait.side_effect = lambda **kwargs: setattr(child.poll, 'return_value', 0)
+                    return child
+                try:
+                    before = {p.name: p.read_bytes() for p in (root/'dataset/images').iterdir()}
+                    with patch.object(supervisor.subprocess, 'Popen', side_effect=launch), patch.object(supervisor.time, 'sleep'):
+                        supervisor.supervise(root/'job.json')
+                    state = jobs.read_json(root/'state.json')
+                    expected = 'completed' if case in {'recover', 'first_ok'} else 'stopped' if case in {'cancel', 'cancel_recovery'} else 'failed'
+                    self.assertEqual(state['state'], expected, state)
+                    self.assertEqual(len(launches), 2 if case in {'recover', 'retry_failed', 'cancel_recovery'} else 1)
+                    if len(launches) == 2:
+                        capture = Path(launches[1][0][launches[1][0].index('--python-exit-code')-1])
+                        self.assertTrue(capture.samefile(root/'capture.blend'))
+                        self.assertIn('--finalize-capture', launches[1][0])
+                    self.assertFalse((root/'supervisor.lock').exists())
+                    self.assertEqual(before, {p.name: p.read_bytes() for p in (root/'dataset/images').iterdir()})
+                finally:
+                    owner.close()
+
+    def test_capture_over_one_thousand_views_can_be_reused_and_exported(self):
+        with tempfile.TemporaryDirectory() as directory:
+            old = fixture(directory, views=1001)
+            job, _ = jobs.restart_data(old, {}, backend='TRUSTED', jobs_directory=Path(directory)/'jobs')
+            self.assertEqual(job['dataset_views'], 1001)
+            (Path(directory)/'exports').mkdir()
+            output = jobs.export_captured_dataset({'root': str(old), 'export_parent': str(Path(directory)/'exports')})
+            _, _, _, manifest = jobs.captured_dataset(output)
+            self.assertEqual(manifest['views'], 1001)
+            self.assertEqual(len(list((output/'images').glob('*.png'))), 1001)
+
     def test_standalone_export_is_reusable_and_preserves_existing_files(self):
         with tempfile.TemporaryDirectory() as directory:
             old=fixture(directory)

@@ -16,6 +16,13 @@ def settings(**kwargs):
 
 
 class CaptureSettings(unittest.TestCase):
+    def test_capture_view_count_has_one_bound_for_all_entry_points(self):
+        for count in (4, 1000, 1001, 10000):
+            capture.validate_view_count(count)
+        for count in (0, 3, 10001, True, 4.5, '4', None):
+            with self.subTest(count=count), self.assertRaises(ValueError):
+                capture.validate_view_count(count)
+
     def setUp(self):
         self.scene = NS(render=NS(resolution_x=1920, resolution_y=1080, resolution_percentage=50,
                                   pixel_aspect_x=1., pixel_aspect_y=1.3))

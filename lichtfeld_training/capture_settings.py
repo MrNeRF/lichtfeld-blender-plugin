@@ -3,6 +3,10 @@
 """One capture contract for rendering, calibration, rig fitting and framing."""
 import math
 
+MIN_VIEWS = 4
+MAX_VIEWS = 10000
+
+
 ASPECTS = {'SQUARE': (1, 1), 'FOUR_THREE': (4, 3), 'THREE_TWO': (3, 2),
            'WIDE': (16, 9), 'CINEMA': (21, 9)}
 FORMAT_FIELDS = ('capture_format', 'capture_aspect', 'capture_orientation', 'resolution',
@@ -10,6 +14,11 @@ FORMAT_FIELDS = ('capture_format', 'capture_aspect', 'capture_orientation', 'res
 CAMERA_FIELDS = ('override_optics', 'capture_lens', 'capture_sensor_width', 'capture_sensor_height',
                  'capture_sensor_fit', 'override_shift', 'capture_shift_x', 'capture_shift_y',
                  'override_clipping', 'capture_clip_start', 'capture_clip_end')
+
+
+def validate_view_count(count):
+    if type(count) is not int or not MIN_VIEWS <= count <= MAX_VIEWS:
+        raise ValueError(f'Capture needs {MIN_VIEWS}–{MAX_VIEWS:,} views')
 
 
 def validate_format(value):

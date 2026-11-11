@@ -123,10 +123,7 @@ def cameras_for(settings):
         raise ValueError("Create a camera rig or choose a camera collection")
     cameras = sorted((obj for obj in settings.camera_collection.all_objects if obj.type == "CAMERA"),
                      key=lambda obj: obj.name)
-    if len(cameras) < 4:
-        raise ValueError("At least four capture cameras are required")
-    if len(cameras) > 10000:
-        raise ValueError("Use at most 10,000 capture cameras per dataset")
+    capture_settings.validate_view_count(len(cameras))
     if any(any(abs(v-1)>1e-4 for v in obj.matrix_world.decompose()[2]) for obj in cameras):
         raise ValueError("Apply camera/parent scale before capture")
     if any(obj.data.type != "PERSP" for obj in cameras):
@@ -366,7 +363,7 @@ class LichtFeldSettings(bpy.types.PropertyGroup):
     override_clipping: BoolProperty(name="Common clipping", description="Set near/far clipping distances on capture copies only")
     capture_clip_start: FloatProperty(name="Near", default=.01, min=.00001, max=100000, subtype='DISTANCE', unit='LENGTH')
     capture_clip_end: FloatProperty(name="Far", default=1000, min=.00002, max=1000000, subtype='DISTANCE', unit='LENGTH')
-    capture_preview_index: IntProperty(name="Capture camera", default=1, min=1, max=10000,
+    capture_preview_index: IntProperty(name="Capture camera", default=1, min=1, max=capture_settings.MAX_VIEWS,
         description="Camera number in capture order; press Update framing to apply")
     samples: IntProperty(name="Render samples", min=1, max=2147483647, get=scene_render.sample_get, set=scene_render.sample_set, update=custom_changed)
     iterations: IntProperty(name="Training steps", default=2000, min=4, max=1000000, update=custom_changed)

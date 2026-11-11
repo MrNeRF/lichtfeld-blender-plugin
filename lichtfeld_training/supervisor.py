@@ -140,53 +140,58 @@ def supervise(job_path):
                 raise ValueError("The immutable capture source was modified")
             job["source_sha256"] = digest(source)
             atomic_json(job_path, job)
-            state("rendering")
             with (root / "render.log").open("wb") as log:
-                child = subprocess.Popen(
-                    [job["blender"], "--background", "--factory-startup", "--disable-autoexec",
-                     *(render_arguments(job['render_settings']['request']) if job.get('render_settings') else []), str(source),
-                     "--python-exit-code", "1",
-                     "--python", str(Path(__file__).with_name("render_worker.py")),
-                     "--", str(job_path)], stdout=log, stderr=subprocess.STDOUT,
-                    stdin=subprocess.DEVNULL, **process_options())
-                try:
-                    finalizing = False
-                    while child.poll() is None:
-                        heartbeat()
-                        capture_progress = read_json(root / "capture-progress.json", {})
-                        if not finalizing and capture_progress.get("stage") == "initializing points":
-                            state("finalizing capture", message="Images rendered; preparing initialization points and camera metadata")
-                            finalizing = True
-                        if stop_requested(root, job["id"]):
-                            child.terminate()
-                            child.wait(timeout=30)
-                            state("stopped", message="Dataset capture stopped")
-                            return
-                        time.sleep(0.2)
-                    if child.returncode:
+                for recovering in (False, True):
+                    if stop_requested(root, job['id']):
+                        state('stopped', message='Dataset capture stopped')
+                        return
+                    state('finalizing capture' if recovering else 'rendering',
+                          message='Recovering completed images; no views will be rendered again' if recovering else '')
+                    child = subprocess.Popen(
+                        [job["blender"], "--background", "--factory-startup", "--disable-autoexec",
+                         *(render_arguments(job['render_settings']['request']) if job.get('render_settings') else []),
+                         str(root / 'capture.blend' if recovering else source), "--python-exit-code", "1",
+                         "--python", str(Path(__file__).with_name("render_worker.py")),
+                         "--", str(job_path), *(['--finalize-capture'] if recovering else [])],
+                        stdout=log, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, **process_options())
+                    try:
+                        finalizing = recovering
+                        while child.poll() is None:
+                            heartbeat()
+                            capture_progress = read_json(root / "capture-progress.json", {})
+                            if not finalizing and capture_progress.get("stage") == "initializing points":
+                                state("finalizing capture", message="Images rendered; preparing initialization points and camera metadata")
+                                finalizing = True
+                            if stop_requested(root, job["id"]):
+                                raise InterruptedError('Dataset capture stopped')
+                            time.sleep(0.2)
+                        if not child.returncode:
+                            break
+                        progress = read_json(root / "capture-progress.json", {})
+                        complete = bool(job.get('cameras')) and progress.get('done') == len(job['cameras'])
+                        if not recovering and complete and (root / 'capture.blend').is_file():
+                            continue  # The worker owns journal/image validation, not the supervisor.
                         render_error = read_json(root / 'capture-render.json', {}).get('error')
                         if render_error:
                             raise RuntimeError(render_error)
-                        progress = read_json(root / "capture-progress.json", {})
-                        if progress.get("done") == len(job.get("cameras", [])):
+                        if complete:
                             raise RuntimeError("All images were rendered, but dataset finalization failed. Images are preserved; see render.log.")
                         raise RuntimeError("Dataset rendering failed. Completed images are preserved; see render.log.")
-                finally:
-                    render_child = child
-                    try:
-                        stop_child(child)
                     finally:
-                        child = None
+                        render_child = child
                         try:
-                            if render_child.poll() is not None:
-                                cleanup_capture_temporary_files(root)
-                        except Exception:
-                            # Never delete files while a renderer may still own them.
-                            pass
+                            stop_child(child)
+                        finally:
+                            child = None
+                            try:
+                                if render_child.poll() is not None:
+                                    cleanup_capture_temporary_files(root)
+                            except Exception:
+                                # Never delete files while a renderer may still own them.
+                                pass
             release_source(job)
-            dataset = read_json(root / "dataset/manifest.json")
-            if not dataset or dataset["views"] < 4:
-                raise RuntimeError("Dataset capture did not produce enough valid views")
+            captured_dataset(root, {name: job[name] for name in
+                                   ('use_depth_loss', 'depth_loss_weight', 'use_normal_loss') if name in job})
         if stop_requested(root, job["id"]):
             state("stopped", message="Stopped before training started")
             return

@@ -80,3 +80,30 @@ except ValueError:pass
 assert not s.operation_busy and bpy.context.scene==source
 assert (len(bpy.data.scenes),len(bpy.data.objects),len(bpy.data.cameras))==counts
 print('RECTANGULAR_FITTING_EVALUATED_OVERRIDES_AND_PREVIEW_LIFECYCLE_PASS',flush=True)
+
+# Nested custom collections use the same explicit order in readiness and framing.
+s.capture_clip_start = .05
+collection = bpy.data.collections.new('Capture order')
+nested = bpy.data.collections.new('Nested capture cameras')
+source.collection.children.link(collection)
+collection.children.link(nested)
+names = ['Order Z', 'Order A', 'Order M', 'Order B']
+for index, name in enumerate(names):
+    camera = bpy.data.objects.new(name, bpy.data.cameras.new(name))
+    (nested if index % 2 else collection).objects.link(camera)
+s.camera_collection = collection
+work = ext.preflight.collect(bpy.context)
+while True:
+    try:
+        next(work)
+    except StopIteration as complete:
+        ready = complete.value
+        break
+assert ready['cameras'] == sorted(names)
+assert [camera.name for camera in ext.cameras_for(s)] == ready['cameras']
+s.capture_preview_index = 1
+for _ in ext.capture_preview.open_steps(source, bpy.context.window, None):
+    pass
+assert bpy.context.scene['capture_camera_name'] == ready['cameras'][0]
+assert bpy.ops.lichtfeld.close_capture_framing() == {'FINISHED'}
+print('NESTED_CAPTURE_ORDER_MATCHES_READINESS_AND_FRAMING_PASS', flush=True)
