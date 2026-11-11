@@ -62,6 +62,17 @@ py-modules = ["_lfs_path_io"]
                         "--outdir", str(staging / "dist")], cwd=staging, check=True,
                        env={**os.environ, "SOURCE_DATE_EPOCH": "315532800"})
         wheel = staging / "dist" / Path(PROTOCOL_WHEEL).name
+        installed = destination / wheel.name
+        if installed.exists():
+            # Blender caches wheel distributions by name/version. Compare their
+            # payloads, not ZIP timestamps, ordering or compression settings.
+            with zipfile.ZipFile(installed) as previous, zipfile.ZipFile(wheel) as rebuilt:
+                names = set(previous.namelist())
+                if names != set(rebuilt.namelist()) or any(
+                        previous.read(name) != rebuilt.read(name) for name in names):
+                    raise ValueError("Protocol wheel contents changed under the same distribution version. "
+                                     "Update the protocol version in the manifest and reviewed wheel inventory.")
+            return
         destination.mkdir(parents=True, exist_ok=True)
         descriptor, filename = tempfile.mkstemp(prefix=wheel.name + "-", suffix=".tmp", dir=destination)
         temporary = Path(filename)

@@ -34,6 +34,10 @@ Path(area).mkdir(parents=True,exist_ok=True)
 if options.installed:
     extension = importlib.import_module("bl_ext.user_default.lichtfeld_training")
     assert "bl_ext.user_default.lichtfeld_training" in bpy.context.preferences.addons
+    import addon_utils
+    addon_utils._is_first_reset()
+    warnings = addon_utils._extensions_warnings_get().get(extension.__package__, [])
+    assert not warnings, warnings
 else:
     sys.path.insert(0, str(root))
     import lichtfeld_training as extension
@@ -162,6 +166,10 @@ while time.monotonic() < deadline:
         print("SMOKE_RESULT", len(result.data.points), result["lichtfeld_iteration"], flush=True)
         print("OBSERVED_TRANSPORTS", sorted(transports), flush=True)
         print("MAX_UI_OPERATION_MS", settings.ui_max_ms, flush=True)
+        if options.installed:
+            addon_utils._is_first_reset()
+            warnings = addon_utils._extensions_warnings_get().get(extension.__package__, [])
+            assert not warnings, warnings
         bpy.ops.wm.save_as_mainfile(filepath=str(Path(area) / "smoke-result.blend"))
         break
     time.sleep(0.02)

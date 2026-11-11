@@ -41,7 +41,13 @@ python tools/package_blender_training.py --lichtfeld-source /path/to/LichtFeld-S
 ```
 
 The packager uses the standard setuptools wheel generator in a temporary staging
-directory and replaces the wheel in `lichtfeld_training/wheels`. Review the
+directory and writes the wheel in `lichtfeld_training/wheels`. An unchanged
+wheel payload keeps the existing archive. Changed payloads under an existing
+distribution name and version are rejected: choose a new protocol wheel version
+in the manifest and reviewed inventory before regenerating. This applies to
+implementation changes as well as protocol contract changes; Blender can retain
+an installed dependency with the same name and version even after a restart.
+The extension's development version can remain unchanged. Review the
 canonical source changes and generated wheel contents. Do not edit the wheel or
 maintain another copy of its modules in this repository. Blender-specific capture
 and display conversions belong in the extension's `session_geometry.py`.
