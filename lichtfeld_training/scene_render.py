@@ -195,7 +195,7 @@ def draw(box, scene, wrapped):
     row.operator('lichtfeld.render_devices', text='Render devices', icon='SETTINGS')
     if scene.render.engine == 'CYCLES':
         box.prop(scene.cycles, 'device', text='Device')
-    box.prop(scene.lichtfeld_training, 'capture_advanced', text='Capture details',
+    box.prop(scene.lichtfeld_training, 'capture_advanced', text='Advanced capture settings',
              icon='TRIA_DOWN' if scene.lichtfeld_training.capture_advanced else 'TRIA_RIGHT', emboss=False)
     if scene.lichtfeld_training.capture_advanced:
         wrapped(box, 'Uses the saved scene render settings. Capture fixes PNG output, Standard sRGB, no scene compositing, no motion blur or depth of field, and no render border.')

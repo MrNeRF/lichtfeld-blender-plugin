@@ -17,15 +17,19 @@ the open scene after launch does not change that job's images.
 
 ## Choose an operation
 
-The capture plan, rig action, framing check, save action and primary capture/export action are
-at the top of setup. The plan shows the capture content, View Layer, applied rig
-reference, actual camera count, output dimensions, renderer/backend and static
-frame. Pending rig controls are flagged separately; they do not replace existing
-camera poses until Apply.
+Choose the **Activity** first: capture and train, generate a dataset only, or train saved images. **Open job** and **View trainer** open existing work without changing this setup; **Back to setup** returns to it. **Return to previous job** is available when a previous job was retained. The gear button opens configuration, and the question mark opens this guide.
 
-Expand **Capture content and quality**, **Capture cameras**, **Render and output**,
+Setup follows **1 · Content and quality → 2 · Cameras → 3 · Capture and train** (or **Generate dataset**). Choose what to render first, then select existing cameras or create a rig. Creating/updating has one action in the camera section. Distance is directly accessible; expand **Advanced rig settings** for elevation, lens and custom aiming. Choosing a center reference changes camera placement, not the captured content.
+
+When Cameras is collapsed, its header keeps the applicable Load/Create/Apply action and framing accessible. Pending rig settings can be reverted alongside Apply; this reloads the saved rig controls without moving cameras or restoring the capture format. The validation status uses one line so background checking does not move the start button; expand **Validation details** for full error text. **Advanced capture settings** contains render diagnostics and extra capture controls.
+
+During a setup operation, the Cameras header reads **Updating…**, including when collapsed. The capture summary also reports **Updating setup…** until the operation finishes; both replace existing lines without shifting the controls.
+
+Once a camera collection is chosen, the compact summary and capture/export action appear after the settings. Expand **Capture details** for the View Layer, applied rig reference, renderer, lens and static frame. Pending controls remain visible; they do not replace camera poses until Apply. Save is offered only when the scene needs saving, and framing is available after a camera collection has been chosen.
+
+Expand the content/camera sections, **Render and output**,
 or **Training and preview** to edit the corresponding controls. These are native
-Blender sections; closing them keeps the main actions available. Dataset-only
+Blender sections; closing them keeps the final capture/export action available. Dataset-only
 capture hides training controls. Training saved images hides scene capture controls
 and offers its own start action above the training settings.
 
@@ -83,16 +87,16 @@ are not retried automatically.
 
 ### Generate or edit a rig
 
-**Capture content and quality** chooses what is rendered. **Rig reference** chooses
+**Content and quality** chooses what is rendered. **Center** in the camera section chooses
 the surfaces used to position the cameras and calculate **Reference center**.
-These are independent: use **Use selected for rig** on a character, then capture
+These are independent: choose **Remembered objects** and **Use selected objects as center** on a character, then capture
 the **Entire scene** without changing the rig subject. Later viewport selections
 do not replace the remembered rig objects. A reference can also be a collection
 or the entire scene. Changing either choice does not move cameras until you apply
 rig parameters. The reference itself remains part of the capture when included
 in the chosen capture content; placement meshes and path curves remain helpers.
 
-A new rig with **Not set** adopts its current capture surfaces once and remembers
+A new rig with **Capture content (first rig)** adopts its current capture surfaces once and remembers
 them. Existing older rigs have no recorded reference: their cameras remain usable
 for capture, but choose a reference explicitly before applying rig changes. Loading
 a rig restores its saved reference without changing capture content. Renaming a
@@ -115,11 +119,12 @@ Curve paths support poly, Bézier and NURBS splines; a closed path avoids repeat
 the first endpoint. Mesh placement uses evaluated geometry and transformed normals;
 the offset and viewing direction control which side is observed.
 
-Select an existing generated rig and use **Load this rig's parameters** before
-editing. Choosing a collection leaves the controls unchanged; **Apply rig parameters**
+Select an existing generated rig and use **Load selected rig** before
+editing when its controls have not been loaded. Choosing a collection leaves the controls unchanged; **Apply rig changes**
 and the viewport aim action remain unavailable until that rig has been loaded.
 Loading changes the controls only. Applying updates the chosen rig. Previously
 saved scenes without a recorded parameter source also need one explicit Load.
+For an existing camera collection without generated-rig metadata, **Create a new rig** creates and selects a separate generated collection; it does not append cameras to the original collection.
 Updating it preserves generated camera identities where possible and retains
 additional custom cameras in the collection. Inspect coverage after changing
 placement, count, lens, aspect ratio or target.
@@ -252,10 +257,11 @@ project recovers monitoring automatically. **Open job** is available when that
 remembered reference is missing or another job must be inspected.
 
 Closing Blender leaves an extension-owned headless trainer running. One controller
-owns its commands; another process can observe it read-only. **Connect trainer**
-observes compatible independently launched trainers and their capture cameras.
+owns its commands; another process can observe it read-only. **View trainer** searches once when opened; **Refresh trainers** requests another search. Loading a project or leaving a scene in this view does not start periodic discovery. Monitoring an already connected trainer continues automatically. **Connect to trainer** observes compatible independently launched trainers and their capture cameras.
 Disconnecting that view leaves the trainer running. A trainer owned by the
 LichtFeld Studio GUI still stops when its owning LichtFeld Studio window closes.
+
+The trainer list shows when a search is in progress. Switching project files clears the previous search results; use **Refresh trainers** to search in a project opened directly in this view.
 
 With an observer-enabled LichtFeld Studio build, open **External training** in an empty scene or a model scene, refresh the list and choose **View training**. A loaded training dataset must first be switched to Edit Mode or replaced with a new scene. The observer shows the step and quality actually installed, and groups the preview model and capture cameras under one scene entity. **Frame preview** uses normal navigation; **Disconnect** keeps the last read-only preview and **Remove preview** removes its group. The headless trainer continues independently.
 
