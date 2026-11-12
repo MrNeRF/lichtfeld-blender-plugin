@@ -3,7 +3,7 @@
 """Portal I/O and materialization. This module must never import bpy."""
 from concurrent.futures import Future
 import atexit
-from lichtfeld_portal.path_io import Path
+from lichtfeld_portal.path_io import Path, TemporaryDirectory, native_path
 import hashlib
 import queue
 import shutil
@@ -152,7 +152,7 @@ class Runtime:
                 from lichtfeld_portal.private_directory import mkdir_private
                 mkdir_private(folder, parents=True, exist_ok=True)
                 path = folder / (str(uuid.UUID(arguments[0])) + ".png")
-                with tempfile.NamedTemporaryFile(dir=folder, delete=False) as stream:
+                with tempfile.NamedTemporaryFile(dir=native_path(folder, force_extended=True), delete=False) as stream:
                     temporary = Path(stream.name)
                     try:
                         stream.write(data)
@@ -238,7 +238,7 @@ class Runtime:
                 self.update(phase="checking" if checking else "import",
                     message="Checking downloaded project…" if checking else "Downloading project…",
                     progress=done / total if total else 0.0, total_bytes=total)
-            with tempfile.TemporaryDirectory(prefix="prepare-", dir=cache) as directory:
+            with TemporaryDirectory(prefix="prepare-", dir=native_path(cache, force_extended=True)) as directory:
                 root = Path(directory)
                 output = root / "asset.ply"
                 client.download(identifier, project, cancel=cancel,

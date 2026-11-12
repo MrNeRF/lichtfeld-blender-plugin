@@ -231,10 +231,13 @@ def tick_steps():
                 _pending = payload
         elif kind == "thumbnail":
             expected_identity, identifier, path = value
-            if expected_identity != identity or identifier in _icons:
+            if expected_identity != identity:
                 continue
             try:
-                _icons.load(identifier, path, "IMAGE")
+                if identifier in _icons:
+                    _icons[identifier].reload()
+                else:
+                    _icons.load(identifier, path, "IMAGE")
             except (OSError, RuntimeError):
                 pass  # A missing thumbnail must not prevent importing the asset.
         elif kind == "cache_cleared":
@@ -246,7 +249,6 @@ def tick_steps():
         _runtime.update(phase="canceled", message="Import canceled")
     if snapshot["generation"] != _generation:
         _generation = snapshot["generation"]
-        clear_thumbnails()
         bpy.context.window_manager.lichtfeld_portal.rows.clear()
         bpy.context.window_manager.lichtfeld_portal.page = 1
         _rows = iter(snapshot["rows"] if snapshot.get("rows_identity") == identity else ())
@@ -273,7 +275,7 @@ def tick_steps():
     if online and _popup_region is not None and snapshot["phase"] == "idle":
         for index in indices:
             identifier = settings.rows[index].identifier
-            if identifier not in _icons and identifier not in _thumbnail_attempted:
+            if identifier not in _thumbnail_attempted:
                 if _runtime.start("thumbnail", identifier):
                     _thumbnail_attempted.add(identifier)
                 break
@@ -322,7 +324,7 @@ def tick_steps():
                     area.tag_redraw()
         if _popup_region is not None:
             try:
-                _popup_region.tag_redraw()
+                _popup_region.tag_refresh_ui()
             except ReferenceError:
                 _popup_region = None
     return 0.02 if _stage is not None else (0.1 if _popup_region is not None else 0.5)
@@ -388,7 +390,8 @@ def gallery_controls(layout, context):
     refresh.enabled = not busy
     refresh.operator("lichtfeld.portal_action", text="", icon="FILE_REFRESH").action = "refresh"
     row = layout.row()
-    row.label(text=f"{total:,} project{'s' if total != 1 else ''} on your Portal")
+    row.label(text=(f"{total:,} of {len(settings.rows):,} projects match" if settings.search else
+                    f"{total:,} project{'s' if total != 1 else ''} on your Portal"))
     if pages > 1:
         row.prop(settings, "page", text=f"Page / {pages}")
     target = import_target(context.scene)
@@ -406,6 +409,9 @@ def gallery_controls(layout, context):
             action.enabled = target is not None and not busy
             button = action.operator("lichtfeld.portal_action", text="Queue import" if reason else "Import", icon="IMPORT")
             button.action, button.identifier = "import", item.identifier
+        # Keep partial rows at the same card width as a full gallery page.
+        for _ in range((-len(indices)) % 3):
+            grid.column().label(text="")
     else:
         layout.label(text="No matching projects" if settings.search else "Your Portal gallery is empty", icon="INFO")
     if target:
@@ -518,7 +524,7 @@ class LF_OT_portal_browser(bpy.types.Operator):
 
     def draw(self, context):
         global _popup_region
-        _popup_region = context.region
+        _popup_region = context.region_popup or context.region
         gallery_controls(self.layout, context)
 
     def execute(self, context):

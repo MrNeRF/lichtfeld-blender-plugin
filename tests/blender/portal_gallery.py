@@ -12,6 +12,7 @@ import bpy
 import numpy as np
 import ssl
 from lichtfeld_portal import http
+from lichtfeld_portal.path_io import Path as IOPath, TemporaryDirectory
 
 context = http._system_ssl_context()
 assert context.check_hostname and context.verify_mode == ssl.CERT_REQUIRED
@@ -58,8 +59,9 @@ worker.start()
 worker.join()  # Test setup; production only queues immutable worker results.
 
 # A malformed but valid JSON checkpoint must not bypass download/export/decode.
-with tempfile.TemporaryDirectory() as directory:
-    runtime = portal.Runtime(directory)
+with TemporaryDirectory() as directory:
+    # Exercise the installed Blender host's Windows MAX_PATH boundary as well.
+    runtime = portal.Runtime(directory, Path(directory).joinpath(*(["nested-cache-" + "x" * 38] * 5)))
     identifier = "ef4cb85d-b868-4e51-a0de-bac3bfa269ed"
     identity = ("owner@example.test", "session")
     account = SimpleNamespace(base_url="https://portal.lichtfeld.io",
@@ -82,7 +84,7 @@ with tempfile.TemporaryDirectory() as directory:
         if arguments[-1] == "--help":
             log.write(b"--export-ply")
         else:
-            shutil.copyfile(Path(directory) / record["path"], arguments[-1])
+            shutil.copyfile(Path(directory) / record["path"], IOPath(arguments[-1]))
         return 0
 
     try:
@@ -99,6 +101,19 @@ with tempfile.TemporaryDirectory() as directory:
     portal._runtime = portal.Runtime(directory)
     identifier = "ef4cb85d-b868-4e51-a0de-bac3bfa269ed"
     portal._runtime.update(rows=({"id": identifier, "title": "Portal test", "description": ""},))
+    identity = ("owner@example.test", "session")
+    portal._identity = identity
+    portal._refresh_wanted = False
+    portal._runtime.update(account=SimpleNamespace(email=identity[0], connected_since=identity[1],
+        signed_in=True), rows_identity=identity, bump_generation=True)
+    image = str(Path(extension.__file__).parent / "assets/lichtfeld-icon.png")
+    thumbnail = portal._icons.load(identifier, image, "IMAGE")
+    icon_id = thumbnail.icon_id
+    portal.tick_steps()
+    assert portal._icons[identifier] is thumbnail  # Refresh must not invalidate a drawn icon.
+    portal._runtime.events.put(("thumbnail", (identity, identifier, image)))
+    portal.tick_steps()
+    assert portal._icons[identifier].icon_id == icon_id
     clouds = len(bpy.data.pointclouds)
     incomplete = extension.ui_runtime.pointcloud_steps(frames[0], 2)
     next(incomplete)
