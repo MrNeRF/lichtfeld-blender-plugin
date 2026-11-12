@@ -67,11 +67,12 @@ def signature(context):
   tuple(sorted(obj.as_pointer() for obj in selection_objects(context))) if s.scope=="SELECTION" else (),
   s.rig_reference.mode,s.rig_reference.collection.as_pointer() if s.rig_reference.collection else 0,len(s.rig_reference.objects))
 
-def invalidate(scene):
+def invalidate(scene=None):
  global _work,_next
- pointer=scene.as_pointer()
- _cache.pop(pointer,None)
- if _work and _work[0]==pointer:
+ pointer=scene.as_pointer() if scene else None
+ if pointer is None:_cache.clear()
+ else:_cache.pop(pointer,None)
+ if _work and (pointer is None or _work[0]==pointer):
   _work[1].close();_work=None
  _next=0
 
@@ -177,7 +178,9 @@ def tick(context,prefs):
  if not context.scene:return
  if capture_preview.is_preview(context.scene):return
  s=context.scene.lichtfeld_training
- if s.running or s.operation_busy or s.attached_session or s.dataset_mode=="REUSE":return
+ if s.running or s.operation_busy or s.attached_session or s.dataset_mode=="REUSE":
+  invalidate(context.scene)
+  return
  scene_render.tick(context.scene)
  environment(prefs,capture_only=s.dataset_mode=="EXPORT")
  if _work and _work[0]!=context.scene.as_pointer():

@@ -443,6 +443,13 @@ def reconnect(scene):
     return binding(scene)
 
 
+def cancel_actions():
+    """Release suspended RNA iterators before native history replaces Main."""
+    for action, _ in _actions:
+        action.close()
+    _actions.clear()
+
+
 def clear():
     from .visibility import clear as clear_visibility
     clear_visibility()
@@ -455,9 +462,7 @@ def clear():
     _cloud_buffers.clear()
     _owners.clear()
     _tasks.clear()
-    for action, _ in _actions:
-        action.close()
-    _actions.clear()
+    cancel_actions()
 
 
 def fail(scene, error):

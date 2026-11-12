@@ -13,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 module = 'bl_ext.user_default.lichtfeld_training' if '--installed' in sys.argv else 'lichtfeld_training'
 bpy.ops.preferences.addon_enable(module=module)
 extension = importlib.import_module(module)
+bpy.context.preferences.view.show_splash = False
 output = Path(sys.argv[sys.argv.index("--") + 1])
 if '--installed' in sys.argv:
     output = output/'result.json'
@@ -159,4 +160,116 @@ def render_interleave():
     bpy.app.timers.register(tick,first_interval=.01)
 
 
-bpy.app.timers.register(render_interleave if '--render-interleave' in sys.argv else start, first_interval=1)
+def live_controls():
+    """Exercise native widget gestures and measure evaluated, calibrated poses."""
+    scene = bpy.context.scene
+    settings = scene.lichtfeld_training
+    settings.scope = 'SCENE'; settings.views = 1000 if '--large' in sys.argv else 48
+    settings.rig_auto_fit = False; settings.rig_radius = 3
+    settings.rig_generator = True
+    scene.tool_settings.use_keyframe_insert_auto = True
+    bpy.context.preferences.view.show_splash = False
+    area = next(a for a in bpy.context.window.screen.areas if a.type == 'VIEW_3D')
+    area.spaces.active.show_region_ui = True
+    proof = {'phase':'create', 'ticks':0}
+    deadline = time.perf_counter() + 120
+    assert bpy.ops.lichtfeld.create_rig() == {'RUNNING_MODAL'}
+
+    def shot(name):
+        for editor in bpy.context.screen.areas: editor.tag_redraw()
+        bpy.ops.wm.redraw_timer(type='DRAW_WIN_SWAP', iterations=1)
+        bpy.ops.screen.screenshot(filepath=str(output.parent / name))
+
+    def tick():
+        try:
+            proof['ticks'] += 1
+            assert time.perf_counter() < deadline, proof
+            settings = bpy.context.scene.lichtfeld_training
+            if settings.operation_busy: return .02
+            if proof['phase'] == 'create':
+                next(r for r in area.regions if r.type == 'UI').active_panel_category = 'LichtFeld'
+                assert bpy.ops.lichtfeld.live_rig() == {'RUNNING_MODAL'}
+                proof['phase'] = 'enter'
+                return .02
+            if proof['phase'] == 'enter':
+                assert extension.rig_edit.live_root(settings)
+                # Include evaluation and calibrated export, not just a heartbeat.
+                times = []
+                for i in range(12):
+                    before = time.perf_counter()
+                    settings.live_radius = 3 + .05*i
+                    settings.live_phase = .01*i
+                    bpy.context.view_layer.update()
+                    graph = bpy.context.evaluated_depsgraph_get()
+                    for camera in settings.camera_collection.objects:
+                        if camera.type == 'CAMERA': extension.capture_settings.camera_pose(camera, graph)
+                    times.append((time.perf_counter()-before)*1000)
+                proof['max_evaluated_edit_ms'] = max(times)
+                proof['mean_evaluated_edit_ms'] = sum(times)/len(times)
+                settings.live_radius = 3; settings.live_phase = 0
+                bpy.context.view_layer.update()
+                bpy.ops.ed.undo_push(message='Live gesture baseline')
+                shot('live-controls.png')
+                proof['phase'] = 'gesture'; proof['step'] = 0
+                return .5
+            if proof['phase'] == 'gesture':
+                if '--widget-y' not in sys.argv:
+                    proof['ok'] = True
+                    output.write_text(json.dumps(proof), encoding='utf-8')
+                    bpy.ops.wm.quit_blender(); return None
+                y = int(sys.argv[sys.argv.index('--widget-y')+1])
+                window = bpy.context.window
+                step = proof['step']
+                if step in {0, 4}:
+                    window.event_simulate(type='MOUSEMOVE', value='NOTHING', x=1050, y=y)
+                    window.event_simulate(type='LEFTMOUSE', value='PRESS', x=1050, y=y)
+                elif step in {1, 5}:
+                    window.event_simulate(type='MOUSEMOVE', value='NOTHING', x=1055, y=y)
+                    window.event_simulate(type='MOUSEMOVE', value='NOTHING', x=1120, y=y)
+                elif step == 2:
+                    proof['during'] = settings.live_radius
+                    assert abs(settings.live_radius-3) > .001, proof
+                    window.event_simulate(type='ESC', value='PRESS')
+                    window.event_simulate(type='ESC', value='RELEASE')
+                    window.event_simulate(type='LEFTMOUSE', value='RELEASE', x=1120, y=y)
+                elif step == 3:
+                    assert abs(settings.live_radius-3) < 1e-5, proof
+                elif step == 6:
+                    window.event_simulate(type='LEFTMOUSE', value='RELEASE', x=1120, y=y)
+                elif step == 7:
+                    proof['committed'] = settings.live_radius
+                    assert abs(settings.live_radius-3) > .001, proof
+                    # Reproduce the native crash boundary deterministically:
+                    # Undo must close a suspended all_objects RNA iterator.
+                    extension.preflight.invalidate()
+                    work = extension.preflight.collect(bpy.context)
+                    while len(work.gi_frame.f_locals.get('cameras', ())) < 2:
+                        next(work)
+                    extension.preflight._work = (bpy.context.scene.as_pointer(), work)
+                    with bpy.context.temp_override(area=area): bpy.ops.ed.undo()
+                    assert extension.preflight._work is None
+                elif step == 8:
+                    assert abs(bpy.context.scene.lichtfeld_training.live_radius-3) < 1e-5, proof
+                    with bpy.context.temp_override(area=area): bpy.ops.ed.redo()
+                elif step == 9:
+                    settings = bpy.context.scene.lichtfeld_training
+                    assert abs(settings.live_radius-proof['committed']) < 1e-5, proof
+                    root = extension.rig_edit.live_root(settings)
+                    assert root.animation_data.action is None
+                    assert bpy.context.scene.tool_settings.use_keyframe_insert_auto
+                    proof['ok'] = True
+                    output.write_text(json.dumps(proof), encoding='utf-8')
+                    shot('live-gesture-finished.png')
+                    bpy.ops.wm.quit_blender(); return None
+                proof['step'] += 1
+                return .3
+        except Exception:
+            proof['error'] = traceback.format_exc()
+            output.write_text(json.dumps(proof), encoding='utf-8')
+            bpy.ops.wm.quit_blender()
+            return None
+    bpy.app.timers.register(tick, first_interval=.02)
+
+
+bpy.app.timers.register(live_controls if '--live' in sys.argv else
+    render_interleave if '--render-interleave' in sys.argv else start, first_interval=1)

@@ -400,3 +400,133 @@ with tempfile.TemporaryDirectory() as directory:
 print('RIG_LINKED_OMONYMS_FOREIGN_REJECTION_AND_LOCAL_ACCEPTANCE_PASS',flush=True)
 
 bpy.ops.preferences.addon_disable(module=module)
+# Live radial controls preserve IDs and use native dependency-graph evaluation.
+bpy.ops.wm.read_factory_settings(use_empty=False)
+bpy.ops.preferences.addon_enable(module=module)
+s = bpy.context.scene.lichtfeld_training
+s.scope = 'SCENE'; s.views = 8; s.rig_mode = 'HEMISPHERE'
+s.rig_auto_fit = False; s.rig_radius = 3
+assert bpy.ops.lichtfeld.create_rig() == {'FINISHED'}
+rig = s.camera_collection
+cams = sorted((o for o in rig.objects if o.type == 'CAMERA'), key=lambda o: o['lichtfeld_camera_index'])
+bpy.context.view_layer.update()
+poses = [o.matrix_world.copy() for o in cams]
+ids = [(o.as_pointer(), o.data.as_pointer()) for o in cams]
+extra = bpy.data.objects.new('Additional camera', bpy.data.cameras.new('Additional camera'))
+rig.objects.link(extra)
+extra.location = (20, 30, 40)
+assert bpy.ops.lichtfeld.live_rig() == {'FINISHED'}
+root = ext.rig_edit.live_root(s)
+assert root
+bpy.context.view_layer.update()
+assert all(max(abs(a-b) for x,y in zip(o.matrix_world,m) for a,b in zip(x,y)) < 1e-5 for o,m in zip(cams,poses))
+assert not ext.LF_OT_rig.poll(bpy.context)
+s.live_radius = 6
+s.live_phase = math.pi / 2
+s.live_aim = (0, 0, .5)
+bpy.context.view_layer.update()
+from mathutils import Matrix
+rotation = Matrix.Rotation(math.pi / 2, 4, 'Z')
+for camera, before in zip(cams, poses):
+    assert (camera.matrix_world.translation - rotation @ (before.translation * 2)).length < 1e-4
+    assert all(abs(v-1) < 1e-5 for v in camera.matrix_world.to_scale())
+    ext.capture_settings.camera_pose(camera, bpy.context.evaluated_depsgraph_get())
+    forward = camera.matrix_world.to_quaternion() @ Vector((0, 0, -1))
+    assert forward.dot((s.rig_aim.matrix_world.translation - camera.matrix_world.translation).normalized()) > .99999
+assert tuple(extra.location) == (20, 30, 40) and extra.parent is None
+live_poses = [o.matrix_world.copy() for o in cams]
+clips = [(o.data.clip_start, o.data.clip_end) for o in cams]
+assert all(o.animation_data is None or o.animation_data.action is None for o in [root, *cams])
+# Save/reload uses simple native drivers, with no Python autoexecution.
+with tempfile.TemporaryDirectory() as directory:
+    path = str(Path(directory) / 'live-rig.blend')
+    bpy.ops.wm.save_as_mainfile(filepath=path)
+    bpy.ops.wm.open_mainfile(filepath=path, use_scripts=False)
+s = bpy.context.scene.lichtfeld_training
+rig = s.camera_collection
+cams = sorted((o for o in rig.objects if o.type == 'CAMERA' and o.get('lichtfeld_generated')), key=lambda o:o['lichtfeld_camera_index'])
+assert ext.rig_edit.live_root(s) and not bpy.app.autoexec_fail
+bpy.context.view_layer.update()
+assert all((o.matrix_world.translation-m.translation).length < 1e-4 for o,m in zip(cams, live_poses))
+# Every precommit yield in Finish can be cancelled without changing the live rig.
+for cut in range(40):
+    op = SimpleNamespace(live_backup=[], live_controller=None, live_finishing=True, committed=False)
+    work = ext.rig_edit.edit_live(op, bpy.context)
+    try:
+        for _ in range(cut): next(work)
+    except StopIteration:
+        break
+    if op.committed:
+        for _ in work: pass
+        break
+    work.close()
+    for _ in ext.rig_edit.rollback_live(op): pass
+    bpy.context.view_layer.update()
+    assert ext.rig_edit.live_root(s)
+    assert all((o.matrix_world.translation-m.translation).length < 1e-4 for o,m in zip(cams,live_poses)), cut
+else:
+    raise AssertionError('Finish never committed')
+assert not ext.rig_edit.live_root(s)
+bpy.context.view_layer.update()
+assert all(o.parent is None for o in cams)
+assert all((o.matrix_world.translation-m.translation).length < 1e-4 for o,m in zip(cams,live_poses))
+assert all(abs(o.data.clip_end-far) < 1e-3 for o,(near,far) in zip(cams,clips))
+assert s.rig_radius == 6 and not s.rig_auto_fit and abs(s.rig_phase-math.pi/2) < 1e-6
+assert bpy.ops.lichtfeld.create_rig() == {'FINISHED'}
+bpy.context.view_layer.update()
+assert all((o.matrix_world.translation-m.translation).length < 1e-4 for o,m in zip(cams,live_poses))
+print('LIVE_RIG_NATIVE_POSES_SAVE_RELOAD_CANCEL_FINISH_REAPPLY_PASS')
+# Cancellation during entry leaves no native controller, drivers or changed IDs.
+s = bpy.context.scene.lichtfeld_training
+baseline = [(o, o.matrix_world.copy(), o.data.clip_start, o.data.clip_end) for o in cams]
+counts = (len(bpy.data.objects), len(bpy.data.cameras))
+for cut in range(120):
+    op = SimpleNamespace(live_backup=[], live_controller=None, live_finishing=False, committed=False)
+    work = ext.rig_edit.edit_live(op, bpy.context)
+    try:
+        for _ in range(cut): next(work)
+    except StopIteration:
+        break
+    if op.committed:
+        for _ in work: pass
+        break
+    work.close()
+    for _ in ext.rig_edit.rollback_live(op): pass
+    bpy.context.view_layer.update()
+    assert counts == (len(bpy.data.objects), len(bpy.data.cameras)), cut
+    for camera, matrix, near, far in baseline:
+        assert camera.parent is None and not camera.animation_data and not camera.data.animation_data, cut
+        assert max(abs(a-b) for x,y in zip(camera.matrix_world,matrix) for a,b in zip(x,y)) < 1e-5, cut
+assert ext.rig_edit.live_root(s)
+assert bpy.ops.lichtfeld.live_rig() == {'FINISHED'}
+print('LIVE_RIG_ENTRY_CANCEL_EVERY_YIELD_PASS')
+
+# A translated center, nonzero initial orbit and following aim remain independent.
+for shape in ('SPHERE', 'RINGS'):
+    s.rig_mode = shape; s.rig_phase = .4; s.rig_radius = 4
+    cube = bpy.data.objects['Cube']; cube.location = (10, -7, 3)
+    s.rig_aim_mode = 'OBJECT'; s.rig_target = cube; s.rig_aim_offset = (0, 0, .3)
+    bpy.context.view_layer.update()
+    assert bpy.ops.lichtfeld.create_rig() == {'FINISHED'}
+    bpy.context.view_layer.update()
+    cameras = [o for o in s.camera_collection.objects if o.type=='CAMERA' and o.get('lichtfeld_generated')]
+    before = [o.matrix_world.copy() for o in cameras]
+    assert bpy.ops.lichtfeld.live_rig() == {'FINISHED'}
+    bpy.context.view_layer.update()
+    root = ext.rig_edit.live_root(s)
+    assert (root.location-cube.location).length < 1e-4
+    s.live_radius = 5; s.live_phase = .8; s.live_aim = (.2, -.1, .6)
+    bpy.context.view_layer.update()
+    poses = [o.matrix_world.copy() for o in cameras]
+    with patch.object(ext.rig_edit, 'render_busy', return_value=True):
+        s.live_radius = 15; s.live_aim = (20, 20, 20)
+        assert s.live_radius == 5 and abs(s.live_aim[0]-.2)<1e-6
+        assert not ext.LF_OT_live_rig.poll(bpy.context)
+    assert bpy.ops.lichtfeld.live_rig() == {'FINISHED'}
+    bpy.context.view_layer.update()
+    assert all(max(abs(a-b) for x,y in zip(o.matrix_world,m) for a,b in zip(x,y)) < 1e-4 for o,m in zip(cameras,poses))
+    assert s.rig_aim_mode == 'OBJECT' and (Vector(s.rig_aim_offset)-Vector((.2,-.1,.6))).length < 1e-5
+    assert bpy.ops.lichtfeld.create_rig() == {'FINISHED'}
+    bpy.context.view_layer.update()
+    assert all((o.matrix_world.translation-m.translation).length < 1e-4 for o,m in zip(cameras,poses))
+print('LIVE_RIG_TRANSLATED_CENTER_ALL_RADIAL_SHAPES_FOLLOW_RENDER_GUARDS_PASS')
