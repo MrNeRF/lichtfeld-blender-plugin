@@ -49,8 +49,8 @@ print("WHOLE_SETUP_LAYOUT_STABLE_PASS", len(orders[0][1]))
 
 s.rig_parameter_source=s.camera_collection
 s.camera_collection['lichtfeld_rig_recipe']=ext.rig_recipe(s)
-for checking,pending,expected in ((False,True,'Rig/framing changed: apply parameters'),
-    (True,False,'Checking rig parameters…'),(False,False,'Capture uses the existing cameras')):
+for checking,pending,expected in ((False,True,'Rig/framing changes need Apply'),
+    (True,False,'Checking camera setup…'),(False,False,'Capture uses current cameras')):
     ready={'checking':checking,'reference_changed':pending,'cameras':[],'environment':{}}
     layout=Layout()
     with patch.object(ext.preflight,'cached',return_value=ready),patch.object(ext.preflight,'issues',return_value=[]),patch.object(ext,'preferences',return_value=None):
@@ -69,11 +69,12 @@ for task,operator in (('CAPTURE','lichtfeld.start_training'),('EXPORT','lichtfel
     with patch.object(ext.preflight,'cached',return_value=ready),patch.object(ext.preflight,'issues',return_value=[]),patch.object(ext,'preferences',return_value=None):
         ext.LF_PT_training.draw(SimpleNamespace(layout=layout),context)
     operations=dict(layout.operations)
-    assert operator in operations and operations[operator]<dict(layout.fields).get('iterations',float('inf'))
+    assert operator in operations
+    assert sum(name==operator for name,row in layout.operations)==1
     if task!='REUSE':
-        assert 'Rig: Cube' in layout.labels and '4 views · 576 × 1024 px' in layout.labels
-        assert 'Rig changes need Apply' in layout.labels
-        assert operations['lichtfeld.capture_framing']<dict(layout.fields)['scope']
+        assert 'Rig reference: Cube' in layout.labels and '4 cameras · 576 × 1024 px' in layout.labels
+        assert 'Rig/framing changes need Apply' in layout.labels
+        assert dict(layout.fields)['scope']<operations['lichtfeld.capture_framing']<operations[operator]
     assert ('iterations' in dict(layout.fields))==(task!='EXPORT')
     assert ('scope' in dict(layout.fields))==(task!='REUSE')
 s.dataset_mode='CAPTURE'
@@ -83,6 +84,17 @@ with patch.object(ext.preflight,'cached',return_value=ready),patch.object(ext.pr
 assert 'lichtfeld.start_training' in dict(layout.operations) and 'lichtfeld.capture_framing' in dict(layout.operations)
 assert 'lichtfeld.create_rig' in dict(layout.operations)
 assert 'iterations' not in dict(layout.fields) and 'scope' not in dict(layout.fields)
+# Collapsing camera controls keeps the relevant action and framing accessible,
+# without recreating the duplicate action site removed from the old setup.
+for loaded,action in ((False,'lichtfeld.read_rig'),(True,'lichtfeld.create_rig')):
+    s.rig_parameter_source=s.camera_collection if loaded else None
+    layout=Layout(closed=True)
+    with patch.object(ext.preflight,'cached',return_value=ready),patch.object(ext.preflight,'issues',return_value=[]),patch.object(ext,'preferences',return_value=None):
+        ext.LF_PT_training.draw(SimpleNamespace(layout=layout),context)
+    assert sum(name==action for name,row in layout.operations)==1
+    assert sum(name=='lichtfeld.capture_framing' for name,row in layout.operations)==1
+    if not loaded:assert not any(name=='lichtfeld.create_rig' for name,row in layout.operations)
+    else:assert any(name=='lichtfeld.read_rig' for name,row in layout.operations),'Revert must remain accessible'
 print('CAPTURE_PLAN_APPLIED_REFERENCE_TASK_ACTIONS_AND_COLLAPSED_SECTIONS_PASS')
 
 pre = ext.preflight

@@ -21,6 +21,8 @@ Choose the **Activity** first: capture and train, generate a dataset only, or tr
 
 Setup follows **1 · Content and quality → 2 · Cameras → 3 · Capture and train** (or **Generate dataset**). Choose what to render first, then select existing cameras or create a rig. Creating/updating has one action in the camera section. Distance is directly accessible; expand **Advanced rig settings** for elevation, lens and custom aiming. Choosing a center reference changes camera placement, not the captured content.
 
+When Cameras is collapsed, its header keeps the applicable Load/Create/Apply action and framing accessible. Pending rig settings can be reverted alongside Apply; this reloads the saved rig controls without moving cameras or restoring the capture format. The validation status uses one line so background checking does not move the start button; expand **Validation details** for full error text. **Advanced capture settings** contains render diagnostics and extra capture controls.
+
 Once a camera collection is chosen, the compact summary and capture/export action appear after the settings. Expand **Capture details** for the View Layer, applied rig reference, renderer, lens and static frame. Pending controls remain visible; they do not replace camera poses until Apply. Save is offered only when the scene needs saving, and framing is available after a camera collection has been chosen.
 
 Expand the content/camera sections, **Render and output**,
