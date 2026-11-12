@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 import bpy
 from . import jobs,ui_runtime,training_options,capture_settings,capture_preview,scene_render
-from .visibility import is_hidden
+from .visibility import is_hidden,object_steps
 _cache={}
 _environment={}
 _pending={}
@@ -97,7 +97,7 @@ def collect(context,capture_only=False):
  helpers=capture_helpers(s)
  capture_format=None;render=None
  members={}
- for obj in context.view_layer.objects:
+ for obj in object_steps(context.view_layer.objects):
   if obj is not None:members[obj.name]=obj
   yield
  try:
@@ -105,13 +105,13 @@ def collect(context,capture_only=False):
   capture_settings.camera_for(s)
   render=scene_render.snapshot(context.scene)
  except (ValueError,KeyError) as error:errors.append(str(error))
- for obj in capture_objects(context):
+ for obj in object_steps(capture_objects(context)):
   if is_surface(obj, helpers):
    sources.append(obj.name);visibility[obj.name]=is_hidden(obj,context.view_layer,members=members)
   yield
  if not sources:errors.append('Choose at least one surface object.')
  if s.camera_collection:
-  for obj in s.camera_collection.all_objects:
+  for obj in object_steps(s.camera_collection.all_objects):
    if obj.type=='CAMERA':
     cameras.append(obj.name)
     generated_cameras+=bool(obj.get('lichtfeld_generated'))
@@ -127,7 +127,7 @@ def collect(context,capture_only=False):
  try:capture_settings.validate_view_count(len(cameras))
  except ValueError as error:errors.append(str(error))
  if s.scope=='SCENE':
-  for obj in context.scene.objects:
+  for obj in object_steps(context.scene.objects):
    if not obj.get('lichtfeld_result') and (obj.type in {'MESH','CURVE','SURFACE','FONT','META','VOLUME','POINTCLOUD'} or obj.type=='EMPTY' and obj.instance_type=='COLLECTION'):
     visibility_sources.append(obj.name)
     if obj.name not in visibility:visibility[obj.name]=is_hidden(obj,context.view_layer,members=members)

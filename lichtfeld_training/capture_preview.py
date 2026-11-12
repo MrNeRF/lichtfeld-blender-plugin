@@ -4,6 +4,7 @@
 import bpy
 from . import capture_settings, ui_runtime
 from .ui_text import draw_paragraph
+from .visibility import object_steps
 
 SOURCE = 'lichtfeld_capture_preview_source'
 CAMERA = 'lichtfeld_capture_preview_camera'
@@ -101,7 +102,7 @@ def prepare_camera(source, window):
     scene = window.scene
     cameras = []
     if settings.camera_collection:
-        for obj in settings.camera_collection.all_objects:
+        for obj in object_steps(settings.camera_collection.all_objects):
             if obj.type == 'CAMERA':
                 cameras.append(obj)
             yield
@@ -182,6 +183,11 @@ def camera_steps(source, preview, key, token):
                 work = prepare_camera(source, window)
             try:
                 next(work)
+            except ReferenceError:
+                work.close()
+                work = None
+                yield ui_runtime.DEFER
+                continue
             except StopIteration as result:
                 camera, name, count, index, value = result.value
                 break
@@ -280,7 +286,7 @@ def _open_steps(source, window, area):
             from types import SimpleNamespace
             sources = set(selection_objects(SimpleNamespace(scene=source, selected_objects=bpy.context.selected_objects)))
         helpers = set(capture_helpers(settings))
-        for obj in preview.objects:
+        for obj in object_steps(preview.objects):
             hidden = (obj in helpers or obj.get('lichtfeld_result') or obj.type == 'CAMERA' and obj != camera or
                       sources is not None and obj not in sources and obj.type != 'LIGHT' and obj != camera)
             if hidden and obj.name in preview.view_layers[0].objects:

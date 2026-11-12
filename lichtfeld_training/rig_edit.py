@@ -3,8 +3,10 @@
 """Staged managed-rig updates. All Blender work yields between object edits."""
 import json
 import math
+import struct
 import bpy
 from mathutils import Vector
+from .visibility import object_steps
 
 AIM = "LichtFeld Aim"
 FOLLOW = "LichtFeld Follow"
@@ -47,16 +49,16 @@ def reference_sources(context, reference):
     elif reference.mode == 'COLLECTION':
         if reference.collection is None:
             raise ValueError('Choose a rig reference collection; the previous collection may have been removed')
-        objects = reference.collection.all_objects
+        objects = object_steps(reference.collection.all_objects)
     elif reference.mode == 'SCENE':
-        objects = context.scene.objects
+        objects = object_steps(context.scene.objects)
     else:
         raise ValueError('Choose a rig reference before applying parameters to this older rig')
     # Scene collections allow local and linked IDs with identical names. Build
     # one transaction-local identity set cooperatively, not a name lookup/cache.
     members = set()
     if reference.mode != 'SCENE':
-        for obj in context.scene.objects:
+        for obj in object_steps(context.scene.objects):
             members.add(obj)
             yield
     sources = []
@@ -135,10 +137,13 @@ def track(camera, target):
 
 def rollback(owner):
     for obj, data, matrix, constraint_target, had_constraint in reversed(getattr(owner, "rig_backup", [])):
-        if obj.name in bpy.data.objects:
-            obj.data = data
-            obj.matrix_world = matrix
-            track(obj, constraint_target if had_constraint else None)
+        try:
+            if obj.name in bpy.data.objects:
+                obj.data = data
+                obj.matrix_world = matrix
+                track(obj, constraint_target if had_constraint else None)
+        except ReferenceError:
+            pass  # A native deletion by the user must not strand other backups.
         yield
     owner.rig_backup = []
 
@@ -147,7 +152,7 @@ def managed_members(collection):
     """One index/identity contract for manual and live generated-rig edits."""
     old = []
     targets = []
-    for obj in collection.objects:
+    for obj in object_steps(collection.objects):
         if obj.type == 'CAMERA' and obj.get('lichtfeld_generated'):
             old.append(obj)
         if obj.get('lichtfeld_aim'):
@@ -194,6 +199,7 @@ def commit(owner, settings, previous, staging, target, recipe):
                  key=lambda obj: obj["lichtfeld_camera_index"])
     if uses_aim and settings.rig_target and (settings.rig_target in old or settings.rig_target == old_target):
         raise ValueError("The aim object must be outside its own capture rig")
+    retired = {obj.get(LIVE) for obj in old if isinstance(obj.get(LIVE), bpy.types.Object)}
     owner.rig_backup = []
     for index, (original, prepared) in enumerate(zip(old, new)):
         constraint = original.constraints.get(AIM)
@@ -219,6 +225,9 @@ def commit(owner, settings, previous, staging, target, recipe):
         if index < len(old):
             original = old[index]
             original["lichtfeld_camera_index"] = index
+            if LIVE in original:
+                _remove_live_drivers(original)
+                original.matrix_world = prepared.matrix_basis
             track(original, final_target if prepared.constraints.get(AIM) else None)
             data = prepared.data
             bpy.data.objects.remove(prepared, do_unlink=True)
@@ -239,6 +248,9 @@ def commit(owner, settings, previous, staging, target, recipe):
             bpy.data.cameras.remove(data)
         yield
     owner.rig_backup = []
+    for root in retired:
+        _release_controller(root, previous)
+        yield
     if target != final_target:
         bpy.data.objects.remove(target, do_unlink=True)
     copy_reference(staging.lichtfeld_rig_reference, previous.lichtfeld_rig_reference)
@@ -297,7 +309,7 @@ def live_root(settings):
 
 def _live_writable(settings):
     root = live_root(settings)
-    if not root or settings.running or settings.operation_busy or render_busy(bpy.context):
+    if not root or root.get('finishing') or settings.running or settings.operation_busy or settings.importing or settings.job_directory or settings.attached_session or render_busy(bpy.context):
         return None
     return root
 
@@ -348,6 +360,7 @@ def _radius_driver(data, path, root, expression, index=None):
 
 
 def _remove_live_drivers(camera):
+    camera.pop(LIVE, None)
     for axis in range(3):
         camera.driver_remove('scale', axis)
     for path in ('clip_start', 'clip_end'):
@@ -358,6 +371,26 @@ def _remove_live_drivers(camera):
             data.animation_data_clear()
 
 
+def _release_controller(root, collection):
+    # Scene bases are weak membership references reported by user_map. Real
+    # Scene ID properties increase users; other weak users also retain the ID.
+    users = bpy.data.user_map(subset={root}).get(root, set()) - {root, collection, *root.users_scene}
+    if not users and root.users <= 1:
+        bpy.data.objects.remove(root, do_unlink=True)
+
+
+def _bake_live_camera(camera, matrix, near, far):
+    camera.parent = None
+    _remove_live_drivers(camera)
+    camera.matrix_world = matrix
+    camera.data.clip_start, camera.data.clip_end = near, far
+
+
+def _shared_outside_preview(obj, source):
+    from . import capture_preview
+    return any(scene != source and capture_preview.source_scene(scene) != source for scene in obj.users_scene)
+
+
 def _live_members(settings):
     """Qualify the actual applied rig, not today's possibly moved reference."""
     from . import rig_geometry
@@ -366,21 +399,21 @@ def _live_members(settings):
         raise ValueError('Make the rig local before editing it live')
     recipe = decode_recipe(collection.get('lichtfeld_rig_recipe'))
     radius = collection.get('lichtfeld_generated_radius')
-    if recipe.get('rig_mode') not in {'SPHERE', 'HEMISPHERE', 'RINGS'} or type(radius) not in (int, float) or not math.isfinite(radius) or radius < .01:
+    if recipe.get('rig_mode') not in {'SPHERE', 'HEMISPHERE', 'RINGS'} or type(radius) not in (int, float) or not math.isfinite(radius) or not .01 <= radius <= 1000000:
         raise ValueError('Apply a sphere, hemisphere or rings rig before editing it live')
     cameras, target = yield from managed_members(collection)
     if target is None or target != settings.rig_aim:
         raise ValueError('Load a rig with one generated aim target before editing it live')
     follow = target.constraints.get(FOLLOW)
     if (target.library or target.override_library or target.parent or target.animation_data or
-            len(target.users_scene) != 1 or any(c != follow for c in target.constraints) or
+            _shared_outside_preview(target, settings.id_data) or any(c != follow for c in target.constraints) or
             follow and (follow.type != 'COPY_LOCATION' or not follow.target)):
         raise ValueError('Live editing needs a local, unanimated aim helper with its original following constraint')
     for camera in cameras:
         aim = camera.constraints.get(AIM)
         if (camera.override_library or camera.parent or camera.animation_data or
                 camera.data.library or camera.data.override_library or camera.data.animation_data or camera.data.users != 1 or
-                len(camera.users_scene) != 1 or len(camera.constraints) != 1 or not aim or aim.type != 'TRACK_TO' or aim.target != target):
+                _shared_outside_preview(camera, settings.id_data) or len(camera.constraints) != 1 or not aim or aim.type != 'TRACK_TO' or aim.target != target):
             raise ValueError('Live editing needs the original local generated cameras; keep custom cameras as additional cameras')
         yield
     count = recipe.get('views', 0)
@@ -402,7 +435,7 @@ def _live_members(settings):
 
 def edit_live(owner, context):
     """Enter without moving cameras; finish by baking the same native poses."""
-    from . import rig_recipe
+    from . import rig_recipe, capture_settings
     settings = context.scene.lichtfeld_training
     collection = settings.camera_collection
     root = live_root(settings)
@@ -416,6 +449,7 @@ def edit_live(owner, context):
         root[LIVE] = True
         root['radius'] = radius
         root['phase'] = float(recipe.get('rig_phase', 0))
+        root['aim_at_entry'] = tuple(target.location)
         root.location = center
         root.hide_select = True
         root.lock_location = (True, True, True)
@@ -435,11 +469,12 @@ def edit_live(owner, context):
         for camera in cameras:
             matrix = camera.matrix_world.copy()
             owner.live_backup.append((camera, matrix, camera.data.clip_start, camera.data.clip_end))
+            camera[LIVE] = root
             camera.parent = root
             camera.matrix_parent_inverse = inverse
             camera.matrix_world = matrix
             for axis in range(3):
-                _radius_driver(camera, 'scale', root, f'{radius!r}/radius', axis)
+                _radius_driver(camera, 'scale', root, f'{radius!r}/max(radius,0.01)', axis)
             _radius_driver(camera.data, 'clip_start', root, f'max(0.000001,radius*{camera.data.clip_start / radius!r})')
             _radius_driver(camera.data, 'clip_end', root, f'max(0.001,radius*{camera.data.clip_end / radius!r})')
             yield
@@ -449,7 +484,7 @@ def edit_live(owner, context):
         owner.live_controller = root
         applied = decode_recipe(collection.get('lichtfeld_rig_recipe'))
         cameras = []
-        for obj in collection.objects:
+        for obj in object_steps(collection.objects):
             if obj.parent == root:
                 if obj.type != 'CAMERA' or not obj.get('lichtfeld_generated') or obj.library or obj.data.users != 1:
                     raise ValueError('Remove custom children or shared camera data from the live controller before finishing')
@@ -462,34 +497,37 @@ def edit_live(owner, context):
             yield
         # Snapshotting is cancellable. Once native relationships are removed,
         # finish cleanup cooperatively, just like the managed-rig commit owner.
+        root['finishing'] = True
         owner.committed = True
         for camera, matrix, near, far in owner.live_backup:
-            camera.parent = None
-            _remove_live_drivers(camera)
-            camera.matrix_world = matrix
-            camera.data.clip_start, camera.data.clip_end = near, far
+            _bake_live_camera(camera, matrix, near, far)
             yield
-        settings.rig_auto_fit = False
-        settings.rig_radius = root['radius']
+        # RNA Float controls round to float32, including Escape restoration.
+        distance_changed = struct.pack('=f', root['radius']) != struct.pack('=f', collection['lichtfeld_generated_radius'])
+        settings.rig_auto_fit = False if distance_changed else applied.get('rig_auto_fit', True)
+        settings.rig_radius = root['radius'] if distance_changed else applied.get('rig_radius', 3)
         settings.rig_phase = root['phase']
         target = settings.rig_aim
         if target:
             if target.constraints.get(FOLLOW):
+                settings.rig_aim_mode = 'OBJECT'
                 settings.rig_aim_offset = target.location
-            else:
+            elif tuple(target.location) != tuple(root['aim_at_entry']) or applied.get('aim_mode') == 'VIEWPORT':
                 settings.rig_aim_mode = 'VIEWPORT'
                 settings.rig_aim_offset = (0, 0, 0)
+            else:
+                settings.rig_aim_mode = applied.get('aim_mode', 'SOURCE')
+                settings.rig_aim_offset = applied.get('aim_offset', (0, 0, 0))
         collection['lichtfeld_generated_radius'] = root['radius']
-        collection['lichtfeld_fit_limited'] = False
-        applied.update(rig_auto_fit=False, rig_radius=root['radius'], rig_phase=root['phase'],
+        if distance_changed:
+            collection['lichtfeld_fit_limited'] = False
+        applied.update(rig_auto_fit=settings.rig_auto_fit, rig_radius=settings.rig_radius, rig_phase=settings.rig_phase,
                        aim_mode=settings.rig_aim_mode, aim_offset=list(settings.rig_aim_offset))
+        if not settings.rig_auto_fit:
+            applied['capture_framing'] = capture_settings.framing_signature(settings.id_data, settings)
         collection['lichtfeld_rig_recipe'] = rig_recipe(settings, applied)
         del collection[LIVE]
-        # A user may have referenced this native helper elsewhere while editing.
-        # Do not delete it or its drivers out from under those Blender users.
-        users = bpy.data.user_map(subset={root}).get(root, set()) - {root, collection}
-        if not users:
-            bpy.data.objects.remove(root, do_unlink=True)
+        _release_controller(root, collection)
     owner.live_backup = []
 
 
@@ -498,12 +536,15 @@ def rollback_live(owner):
     if not root or owner.live_finishing:
         return
     for camera, matrix, near, far in reversed(owner.live_backup):
-        camera.parent = None
-        _remove_live_drivers(camera)
-        camera.matrix_world = matrix
-        camera.data.clip_start, camera.data.clip_end = near, far
+        try:
+            _bake_live_camera(camera, matrix, near, far)
+        except ReferenceError:
+            pass
         yield
-    bpy.data.objects.remove(root, do_unlink=True)
+    try:
+        bpy.data.objects.remove(root, do_unlink=True)
+    except ReferenceError:
+        pass
     owner.live_backup = []
 
 class LF_GGT_live_rig(bpy.types.GizmoGroup):
@@ -530,6 +571,7 @@ class LF_GGT_live_rig(bpy.types.GizmoGroup):
             gizmo.alpha = .6
             gizmo.alpha_highlight = 1
             gizmo.use_draw_value = True
+            gizmo.use_undo = True
         self.aim.scale_basis = .2
         self.refresh(context)
 

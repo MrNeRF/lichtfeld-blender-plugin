@@ -489,6 +489,7 @@ class _RigOperation:
         self.rig_backup = []
         self.scene = context.scene
         preflight.invalidate(self.scene)
+        self.history_cancelled = False
         self.cancelled = False
         self.cancel_requested = False
         self.render_waiting = False
@@ -510,7 +511,48 @@ class _RigOperation:
         context.window_manager.modal_handler_add(self)
         return {"RUNNING_MODAL"}
 
+    def release(self, *, restore=False):
+        if self.history_cancelled:
+            return
+        if restore and rig_edit.render_busy(bpy.context):
+            # Native cancellation cannot keep its modal handler alive to wait.
+            # Keep the currently rendered datablocks; canonical Apply repairs
+            # interrupted preparation after rendering instead of deleting IDs.
+            self.report({'WARNING'}, 'Rig preparation interrupted during rendering. Apply rig settings after rendering finishes')
+            self.scene.lichtfeld_training.operation_busy = False
+            restore = False
+        if restore:
+            if self.committed:
+                for _ in self.work:
+                    pass
+            else:
+                self.work.close()
+                for _ in self.cleanup():
+                    pass
+            self.scene.lichtfeld_training.operation_busy = False
+        self.work.close()
+        self.work = None
+        self.rig_backup = []
+        self.live_backup = []
+        self.collection = None
+        self.scene = None
+        self.history_cancelled = True
+
+    def remove_timer(self, manager):
+        if self.timer is not None:
+            manager.event_timer_remove(self.timer)
+            self.timer = None
+
+    def cancel(self, context):
+        try:
+            self.release(restore=True)
+        finally:
+            self.remove_timer(context.window_manager)
+
     def modal(self, context, event):
+        if self.history_cancelled:
+            self.remove_timer(context.window_manager)
+            return {'CANCELLED'}
         if not self.committed and (event.type == "ESC" or context.scene != self.scene):
             self.cancel_requested = True
         if event.type != "TIMER":
@@ -530,7 +572,7 @@ class _RigOperation:
             while time.perf_counter() < deadline:
                 next(self.work)
         except StopIteration:
-            context.window_manager.event_timer_remove(self.timer)
+            self.remove_timer(context.window_manager)
             self.scene.lichtfeld_training.operation_busy = False
             return {"CANCELLED"} if self.cancelled else {"FINISHED"}
         except Exception as error:
@@ -540,7 +582,7 @@ class _RigOperation:
                 self.work.close()
                 self.work = self.cleanup()
                 return {"RUNNING_MODAL"}
-            context.window_manager.event_timer_remove(self.timer)
+            self.remove_timer(context.window_manager)
             self.scene.lichtfeld_training.operation_busy = False
             return {"CANCELLED"}
         return {"RUNNING_MODAL"}
@@ -694,7 +736,7 @@ class LF_OT_live_rig(_RigOperation, bpy.types.Operator):
     @classmethod
     def poll(cls, context):
         s = context.scene.lichtfeld_training
-        if s.running or s.operation_busy or rig_edit.render_busy(context):
+        if context.mode != 'OBJECT' or s.running or s.operation_busy or s.importing or s.job_directory or s.attached_session or rig_edit.render_busy(context):
             return False
         if not s.camera_collection or not s.camera_collection.get('lichtfeld_generated'):
             return False
@@ -1860,12 +1902,16 @@ def draw_capture_cameras(box, context, settings, ready, rig_changed, wrapped):
     managed = rig and rig.get('lichtfeld_generated')
     controller = rig_edit.live_root(settings)
     if controller:
-        box.label(text='Live rig · changes are immediate', icon='ORIENTATION_GIMBAL')
-        box.prop(settings, 'live_radius')
-        box.prop(settings, 'live_phase')
+        finishing = controller.get('finishing', False)
+        box.label(text='Finish interrupted rig edit' if finishing else 'Live rig · changes are immediate', icon='ORIENTATION_GIMBAL')
+        controls = box.column()
+        controls.enabled = not finishing
+        controls.prop(settings, 'live_radius')
+        controls.prop(settings, 'live_phase')
         target = settings.rig_aim
-        box.prop(settings, 'live_aim', text='Aim offset' if target and target.constraints.get(rig_edit.FOLLOW) else 'Aim position')
-        wrapped(box, 'Drag to adjust. Esc cancels a gesture; Undo restores it. Finish to edit shape or camera count.')
+        controls.prop(settings, 'live_aim', text='Aim offset' if target and target.constraints.get(rig_edit.FOLLOW) else 'Aim position')
+        wrapped(box, 'Finish to keep these camera poses and return to setup.' if finishing else
+                     'Drag to adjust. Esc cancels a gesture; Undo restores it. Finish to edit shape or camera count.')
         box.operator('lichtfeld.capture_framing', text='Check framing', icon='VIEW_CAMERA')
         box.operator('lichtfeld.live_rig', text='Finish live editing', icon='CHECKMARK')
         return
@@ -2135,14 +2181,21 @@ def history_changing(_):
     # RNA collection iterators cannot survive Blender replacing Main on Undo.
     # Close the cooperative scan while its datablocks are still valid.
     preflight.invalidate()
-    ui_runtime.cancel_actions()
+    ui_runtime.before_history()
+    for window in bpy.context.window_manager.windows:
+        for operator in window.modal_operators:
+            if isinstance(operator, _RigOperation):
+                operator.release()
 
 
 @persistent
 def history_changed(_):
     for scene in bpy.data.scenes:
-        if capture_preview.is_preview(scene):
-            capture_preview.camera_changed(scene.lichtfeld_training, None)
+        scene.lichtfeld_training.operation_busy = False
+        scene.lichtfeld_training.importing = False
+        source = capture_preview.source_scene(scene)
+        if source:
+            capture_preview.camera_changed(source.lichtfeld_training, None)
 
 
 @persistent
@@ -2156,6 +2209,10 @@ def unloading(_):
     _session_scan_pending = False
     _sessions = []
     _session_items = _SESSION_PLACEHOLDER
+    for window in bpy.context.window_manager.windows:
+        for operator in window.modal_operators:
+            if isinstance(operator, _RigOperation):
+                operator.release()
     for scene in bpy.data.scenes:
         scene.lichtfeld_training.discovered_session = 'NONE'
     preflight.clear()
@@ -2211,6 +2268,14 @@ def register():
 
 
 def unregister():
+    # Blender unregisters native modal handlers. Release their owned datablocks
+    # first, while the RNA settings and operator types still exist.
+    manager = bpy.context.window_manager
+    for window in manager.windows:
+        for operator in window.modal_operators:
+            if isinstance(operator, _RigOperation) and not operator.history_cancelled:
+                operator.release(restore=True)
+                operator.remove_timer(manager)
     unloading(None)
     _imported.clear()
     if bpy.app.timers.is_registered(poll_jobs):

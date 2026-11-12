@@ -112,8 +112,9 @@ for phase in ('update','committed','rollback','path'):
     bpy.context.view_layer.update()
     before=datablocks()
     owner=SimpleNamespace(collection=None,rig_backup=[],committed=False,cancelled=False,
-        cancel_requested=False,render_waiting=False,scene=bpy.context.scene,report=lambda *args:None)
+        cancel_requested=False,render_waiting=False,history_cancelled=False,scene=bpy.context.scene,report=lambda *args:None)
     owner.cleanup=lambda:ext.LF_OT_rig.cleanup(owner)
+    owner.remove_timer=lambda manager:ext._RigOperation.remove_timer(owner,manager)
     owner.work=ext.LF_OT_rig.generate(owner,bpy.context)
     owner.timer=bpy.context.window_manager.event_timer_add(.02,window=bpy.context.window)
     s.operation_busy=True
@@ -434,6 +435,7 @@ for camera, before in zip(cams, poses):
     forward = camera.matrix_world.to_quaternion() @ Vector((0, 0, -1))
     assert forward.dot((s.rig_aim.matrix_world.translation - camera.matrix_world.translation).normalized()) > .99999
 assert tuple(extra.location) == (20, 30, 40) and extra.parent is None
+assert ids == [(o.as_pointer(),o.data.as_pointer()) for o in cams]
 live_poses = [o.matrix_world.copy() for o in cams]
 clips = [(o.data.clip_start, o.data.clip_end) for o in cams]
 assert all(o.animation_data is None or o.animation_data.action is None for o in [root, *cams])
@@ -530,3 +532,79 @@ for shape in ('SPHERE', 'RINGS'):
     bpy.context.view_layer.update()
     assert all((o.matrix_world.translation-m.translation).length < 1e-4 for o,m in zip(cameras,poses))
 print('LIVE_RIG_TRANSLATED_CENTER_ALL_RADIAL_SHAPES_FOLLOW_RENDER_GUARDS_PASS')
+
+# Leaving untouched controls preserves their original automatic/reference modes.
+s.rig_aim_mode='SOURCE';s.rig_aim_offset=(0,0,0);s.rig_auto_fit=True
+assert bpy.ops.lichtfeld.create_rig()=={'FINISHED'}
+assert bpy.ops.lichtfeld.live_rig()=={'FINISHED'}
+s.live_radius = s.live_radius  # Native RNA/Escape round-trip at an automatic fitted radius.
+s.live_phase += .1
+assert bpy.ops.lichtfeld.live_rig()=={'FINISHED'}
+assert s.rig_auto_fit and s.rig_aim_mode=='SOURCE'
+# Native deletion of the owned controller can be repaired by the canonical Apply.
+assert bpy.ops.lichtfeld.live_rig()=={'FINISHED'}
+root=ext.rig_edit.live_root(s)
+bpy.data.objects.remove(root,do_unlink=True)
+assert ext.rig_edit.live_root(s) is None
+assert bpy.ops.lichtfeld.create_rig()=={'FINISHED'}
+assert bpy.ops.lichtfeld.live_rig()=={'FINISHED'}
+assert bpy.ops.lichtfeld.live_rig()=={'FINISHED'}
+print('LIVE_RIG_UNTOUCHED_MODES_AND_DELETED_CONTROLLER_REPAIR_PASS')
+# Object deletion/duplication while a camera scan is suspended is memory-safe.
+for action in ('DELETE','DUPLICATE'):
+    work=ext.preflight.collect(bpy.context)
+    while len(work.gi_frame.f_locals.get('cameras',()))<2:next(work)
+    victim=work.gi_frame.f_locals['obj']
+    for obj in bpy.context.selected_objects:obj.select_set(False)
+    victim.select_set(True);bpy.context.view_layer.objects.active=victim
+    if action=='DELETE':bpy.ops.object.delete()
+    else:bpy.ops.object.duplicate()
+    try:
+        for _ in work:pass
+    except ReferenceError:pass  # The canonical scan owner retries at the next tick.
+    fresh=ext.preflight.collect(bpy.context)
+    for _ in fresh:pass
+print('SUSPENDED_CAMERA_SCAN_NATIVE_DELETE_DUPLICATE_SAFE_PASS')
+# Repair deliberate duplicate metadata before exercising interruption cleanup.
+seen=set()
+for camera in list(s.camera_collection.objects):
+    if camera.type!='CAMERA' or not camera.get('lichtfeld_generated'):continue
+    index=camera['lichtfeld_camera_index']
+    if index in seen:bpy.data.objects.remove(camera,do_unlink=True)
+    else:seen.add(index)
+assert bpy.ops.lichtfeld.create_rig()=={'FINISHED'}
+op=SimpleNamespace(live_backup=[],live_controller=None,live_finishing=False,committed=False)
+work=ext.rig_edit.edit_live(op,bpy.context)
+while len(op.live_backup)<4:next(work)
+victim=op.live_backup[1][0]
+for obj in bpy.context.selected_objects:obj.select_set(False)
+victim.select_set(True);bpy.context.view_layer.objects.active=victim
+bpy.ops.object.delete()
+work.close()
+for _ in ext.rig_edit.rollback_live(op):pass
+assert ext.rig_edit.live_root(s) is None
+assert not any(o.get(ext.rig_edit.LIVE) is True for o in bpy.data.objects)
+assert bpy.ops.lichtfeld.create_rig()=={'FINISHED'}
+assert bpy.ops.lichtfeld.live_rig()=={'FINISHED'}
+s.live_radius *= 1.1;bpy.context.view_layer.update()
+cameras=[o for o in s.camera_collection.objects if o.type=='CAMERA' and o.get('lichtfeld_generated')]
+poses=[o.matrix_world.copy() for o in cameras]
+bpy.ops.preferences.addon_disable(module=module)
+bpy.context.view_layer.update()
+assert all((o.matrix_world.translation-m.translation).length<1e-4 for o,m in zip(cameras,poses))
+bpy.ops.preferences.addon_enable(module=module)
+s=bpy.context.scene.lichtfeld_training
+assert ext.rig_edit.live_root(s)
+assert bpy.ops.lichtfeld.live_rig()=={'FINISHED'}
+print('LIVE_RIG_DELETED_BACKUP_CLEANUP_DISABLE_REENABLE_NATIVE_POSES_PASS')
+
+# Explicit user references retain a finished helper; ordinary scene bases do not.
+assert bpy.ops.lichtfeld.live_rig()=={'FINISHED'}
+root=ext.rig_edit.live_root(s)
+bpy.context.scene['Retained controller']=root
+assert bpy.ops.lichtfeld.live_rig()=={'FINISHED'}
+assert bpy.context.scene['Retained controller']==root
+assert root.name in bpy.data.objects
+bpy.context.scene.pop('Retained controller')
+bpy.data.objects.remove(root,do_unlink=True)
+print('LIVE_CONTROLLER_USER_REFERENCE_RETAINED_PASS')

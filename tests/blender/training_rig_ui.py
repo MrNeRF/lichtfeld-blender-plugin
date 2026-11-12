@@ -274,12 +274,55 @@ def live_controls():
                     assert root.animation_data.action is None
                     assert settings.rig_aim.animation_data is None
                     assert bpy.context.scene.tool_settings.use_keyframe_insert_auto
-                    proof['ok'] = True
-                    output.write_text(json.dumps(proof), encoding='utf-8')
                     shot('live-gesture-finished.png')
-                    bpy.ops.wm.quit_blender(); return None
+                    assert bpy.ops.lichtfeld.live_rig() == {'RUNNING_MODAL'}
+                    proof['phase'] = 'finish'
+                    return .02
                 proof['step'] += 1
                 return .3
+            if proof['phase'] == 'finish':
+                assert extension.rig_edit.live_root(settings) is None
+                with bpy.context.temp_override(area=area): assert bpy.ops.ed.undo() == {'FINISHED'}
+                settings = bpy.context.scene.lichtfeld_training
+                assert extension.rig_edit.live_root(settings)
+                assert changed(control(settings), proof['committed']) < 1e-5
+                with bpy.context.temp_override(area=area): assert bpy.ops.ed.redo() == {'FINISHED'}
+                assert extension.rig_edit.live_root(bpy.context.scene.lichtfeld_training) is None
+                proof['finish_undo_redo'] = True
+                with bpy.context.temp_override(area=area):
+                    assert bpy.ops.lichtfeld.capture_framing() == {'FINISHED'}
+                proof['phase'] = 'framing_open'
+                return .02
+            if proof['phase'] == 'framing_open':
+                preview = bpy.context.scene
+                if not extension.capture_preview.is_preview(preview): return .02
+                source = extension.capture_preview.source_scene(preview)
+                if source.lichtfeld_training.operation_busy: return .02
+                bpy.ops.ed.undo_push(message='Framing baseline')
+                source.lichtfeld_training.capture_preview_index = 2
+                bpy.ops.ed.undo_push(message='Framing index')
+                # Keep the real framing iterator suspended across native Undo.
+                action = extension.ui_runtime._actions[-1][0]
+                for _ in range(8): next(action)
+                with bpy.context.temp_override(area=area): assert bpy.ops.ed.undo() == {'FINISHED'}
+                proof['phase'] = 'framing_undo'
+                return .02
+            if proof['phase'] in {'framing_undo', 'framing_redo'}:
+                preview = bpy.context.scene
+                if extension.capture_preview.camera_pending(preview): return .02
+                source = extension.capture_preview.source_scene(preview)
+                assert source
+                index = 1 if proof['phase'] == 'framing_undo' else 2
+                assert source.lichtfeld_training.capture_preview_index == index
+                assert preview['capture_camera_name'] == f'Capture {index:03d}'
+                if proof['phase'] == 'framing_undo':
+                    with bpy.context.temp_override(area=area): assert bpy.ops.ed.redo() == {'FINISHED'}
+                    proof['phase'] = 'framing_redo'
+                    return .02
+                proof['framing_undo_redo_resync'] = True
+                proof['ok'] = True
+                output.write_text(json.dumps(proof), encoding='utf-8')
+                bpy.ops.wm.quit_blender(); return None
         except Exception:
             proof['error'] = traceback.format_exc()
             output.write_text(json.dumps(proof), encoding='utf-8')
@@ -288,5 +331,79 @@ def live_controls():
     bpy.app.timers.register(tick, first_interval=.02)
 
 
-bpy.app.timers.register(live_controls if '--live' in sys.argv else
+def history_interleave():
+    """Undo during real modal entry/finish must not resume freed RNA."""
+    scene = bpy.context.scene
+    s = scene.lichtfeld_training
+    s.scope='SCENE';s.views=1000
+    owner=SimpleNamespace(collection=None,rig_backup=[],committed=False,report=lambda *args:None)
+    for _ in extension.LF_OT_rig.generate(owner,bpy.context):pass
+    bpy.ops.ed.undo_push(message='Applied rig baseline')
+    proof={'phase':'entry','ticks':0}
+    deadline=time.monotonic()+120
+    assert bpy.ops.lichtfeld.live_rig()=={'RUNNING_MODAL'}
+
+    def active():
+        return next((op for op in bpy.context.window.modal_operators if isinstance(op,extension._RigOperation)),None)
+
+    def tick():
+        try:
+            proof['ticks']+=1
+            assert time.monotonic()<deadline,proof
+            op=active();s=bpy.context.scene.lichtfeld_training
+            if proof['phase'] in {'entry','finish'}:
+                threshold = 500 if '--disable-interleave' in sys.argv else 5
+                if op and len(getattr(op,'live_backup',()))>threshold and not op.committed:
+                    if '--disable-interleave' in sys.argv:
+                        phase=proof['phase']
+                        started=time.perf_counter()
+                        bpy.ops.preferences.addon_disable(module=module)
+                        proof[phase+'_disable_ms']=(time.perf_counter()-started)*1000
+                        assert not any(isinstance(item,extension._RigOperation) for item in bpy.context.window.modal_operators)
+                        bpy.ops.preferences.addon_enable(module=module)
+                        s=bpy.context.scene.lichtfeld_training
+                        assert not s.operation_busy
+                        if phase=='entry':
+                            assert extension.rig_edit.live_root(s) is None
+                            assert not any(o.get(extension.rig_edit.LIVE) is True for o in bpy.data.objects)
+                            assert bpy.ops.lichtfeld.live_rig()=={'RUNNING_MODAL'}
+                            proof['phase']='wait-live'
+                        else:
+                            assert extension.rig_edit.live_root(s)
+                            proof['ok']=True
+                            output.write_text(json.dumps(proof),encoding='utf-8')
+                            bpy.ops.wm.quit_blender();return None
+                        return .02
+                    with bpy.context.temp_override(area=next(a for a in bpy.context.screen.areas if a.type=='VIEW_3D')):
+                        assert bpy.ops.ed.undo()=={'FINISHED'}
+                    assert op.history_cancelled
+                    proof['phase']+='-undone'
+            elif proof['phase'].endswith('-undone'):
+                if op:return .02
+                assert not s.operation_busy
+                assert not any(o.get(extension.rig_edit.LIVE) is True for o in bpy.data.objects)
+                with bpy.context.temp_override(area=next(a for a in bpy.context.screen.areas if a.type=='VIEW_3D')):
+                    assert bpy.ops.ed.redo()=={'FINISHED'}
+                if proof['phase']=='entry-undone':
+                    assert bpy.ops.lichtfeld.live_rig()=={'RUNNING_MODAL'}
+                    proof['phase']='wait-live'
+                else:
+                    assert extension.rig_edit.live_root(bpy.context.scene.lichtfeld_training)
+                    proof['ok']=True
+                    output.write_text(json.dumps(proof),encoding='utf-8')
+                    bpy.ops.wm.quit_blender();return None
+            elif proof['phase']=='wait-live' and op is None and not s.operation_busy:
+                assert extension.rig_edit.live_root(s)
+                assert bpy.ops.lichtfeld.live_rig()=={'RUNNING_MODAL'}
+                proof['phase']='finish'
+            return .02
+        except Exception:
+            proof['error']=traceback.format_exc()
+            output.write_text(json.dumps(proof),encoding='utf-8')
+            bpy.ops.wm.quit_blender();return None
+    bpy.app.timers.register(tick,first_interval=.02)
+
+
+bpy.app.timers.register(history_interleave if '--history-interleave' in sys.argv else
+    live_controls if '--live' in sys.argv else
     render_interleave if '--render-interleave' in sys.argv else start, first_interval=1)

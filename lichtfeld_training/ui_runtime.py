@@ -9,7 +9,7 @@ import uuid
 import bpy
 from mathutils import Matrix
 from .session_reader import Observer, blender_fields
-from .visibility import set_hidden, source_steps
+from .visibility import set_hidden, source_steps, object_steps
 from .session_geometry import source_model_transform
 
 _executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="lichtfeld-io")
@@ -120,7 +120,7 @@ def build(scene, frame, key):
         if previous_result:
             existing = None
         if existing is None:
-            for index, obj in enumerate(scene.objects):
+            for index, obj in enumerate(object_steps(scene.objects)):
                 if obj.get("lichtfeld_job_id") == job["id"] and len(obj.users_scene) == 1:
                     existing = obj
                     break
@@ -198,7 +198,7 @@ class Binding:
         self.max_ms = 0
         self.status = {}
 
-    def close(self):
+    def cancel_stage(self):
         if self.stage:
             try:
                 self.stage.close()
@@ -206,6 +206,9 @@ class Binding:
                 report_failure(None, error)
             finally:
                 self.stage = None
+
+    def close(self):
+        self.cancel_stage()
         self.frame = None
         self.reader.close()
         buffered = _cloud_buffers.pop(self.key, None)
@@ -281,7 +284,7 @@ class Binding:
         if settings.operation_busy:
             return
         if self.stage is None:
-            frame = self.reader.take()
+            frame = self.frame or self.reader.take()
             if frame:
                 self.frame = frame
                 self.stage = build(scene, frame, self.key)
@@ -450,16 +453,27 @@ def cancel_actions():
     _actions.clear()
 
 
+def before_history():
+    cancel_actions()
+    for value in _bindings.values():
+        value.cancel_stage()  # Retain the CPU frame and the live reader to retry.
+    clear_cloud_buffers()
+
+
+def clear_cloud_buffers():
+    for _, cloud in _cloud_buffers.values():
+        if cloud.users == 0:
+            bpy.data.pointclouds.remove(cloud)
+    _cloud_buffers.clear()
+
+
 def clear():
     from .visibility import clear as clear_visibility
     clear_visibility()
     for value in _bindings.values():
         value.close()
     _bindings.clear()
-    for _, cloud in _cloud_buffers.values():
-        if cloud.users == 0:
-            bpy.data.pointclouds.remove(cloud)
-    _cloud_buffers.clear()
+    clear_cloud_buffers()
     _owners.clear()
     _tasks.clear()
     cancel_actions()
