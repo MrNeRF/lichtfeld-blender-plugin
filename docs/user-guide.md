@@ -23,6 +23,8 @@ Setup follows **1 · Content and quality → 2 · Cameras → 3 · Capture and t
 
 When Cameras is collapsed, its header keeps the applicable Load/Create/Apply action and framing accessible. Pending rig settings can be reverted alongside Apply; this reloads the saved rig controls without moving cameras or restoring the capture format. The validation status uses one line so background checking does not move the start button; expand **Validation details** for full error text. **Advanced capture settings** contains render diagnostics and extra capture controls.
 
+During a setup operation, the Cameras header reads **Updating…**, including when collapsed. The capture summary also reports **Updating setup…** until the operation finishes; both replace existing lines without shifting the controls.
+
 Once a camera collection is chosen, the compact summary and capture/export action appear after the settings. Expand **Capture details** for the View Layer, applied rig reference, renderer, lens and static frame. Pending controls remain visible; they do not replace camera poses until Apply. Save is offered only when the scene needs saving, and framing is available after a camera collection has been chosen.
 
 Expand the content/camera sections, **Render and output**,

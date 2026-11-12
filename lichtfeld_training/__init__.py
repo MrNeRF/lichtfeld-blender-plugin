@@ -1738,7 +1738,8 @@ def draw_capture_plan(setup, context, settings, ready, pending):
     box.label(text=f"{len(ready['cameras']):,} cameras · {value['width']} × {value['height']} px" if value else 'Cameras and output: checking…')
     rig = settings.camera_collection
     managed = rig and rig.get('lichtfeld_generated')
-    box.label(text='Load selected rig before editing' if managed and settings.rig_parameter_source != rig else
+    box.label(text='Updating setup…' if settings.operation_busy else
+                   'Load selected rig before editing' if managed and settings.rig_parameter_source != rig else
                    'Rig/framing changes need Apply' if pending else
                    'Checking camera setup…' if ready.get('checking') else 'Capture uses current cameras',
               icon='INFO')
@@ -2011,7 +2012,8 @@ class LF_PT_training(bpy.types.Panel):
             draw_capture_sources(box, context, settings)
         header, box = layout.panel('lichtfeld_setup_cameras', default_closed=False)
         header.enabled = not settings.operation_busy
-        header.label(text='2 · Cameras', icon='CAMERA_DATA')
+        header.label(text='Updating…' if settings.operation_busy else '2 · Cameras',
+                     icon='TIME' if settings.operation_busy else 'CAMERA_DATA')
         if box is not None:
             box.enabled = not settings.operation_busy
             draw_capture_cameras(box, context, settings, ready, pending, wrapped)

@@ -49,15 +49,28 @@ print("WHOLE_SETUP_LAYOUT_STABLE_PASS", len(orders[0][1]))
 
 # Modal Apply/source preparation changes enabled state, not panel geometry.
 # The old conditional Preparing scene box shifted every editable field.
-busy_orders=[]
-for busy in (False,True,False):
-    s.operation_busy=busy
-    layout=Layout()
-    with patch.object(ext.preflight,'cached',return_value=ready),patch.object(ext.preflight,'issues',return_value=[]),patch.object(ext,'preferences',return_value=None):
-        ext.LF_PT_training.draw(SimpleNamespace(layout=layout),context)
-    busy_orders.append((layout.fields,layout.rows,layout.operations))
-    if busy:assert 'Updating setup…' in layout.labels
-assert all(order==busy_orders[0] for order in busy_orders)
+rig=s.camera_collection
+for source in ('UNLOADED','LOADED','NEW'):
+    s.camera_collection=None if source=='NEW' else rig
+    s.rig_parameter_source=rig if source=='LOADED' else None
+    for closed in (False,True):
+        for edit in ((False,True) if source=='LOADED' else (False,)):
+            s.rig_generator=edit
+            busy_orders=[]
+            for busy in (False,True,False):
+                s.operation_busy=busy
+                layout=Layout(closed=closed)
+                with patch.object(ext.preflight,'cached',return_value=ready),patch.object(ext.preflight,'issues',return_value=[]),patch.object(ext,'preferences',return_value=None):
+                    ext.LF_PT_training.draw(SimpleNamespace(layout=layout),context)
+                busy_orders.append((layout.fields,layout.rows,layout.operations))
+                if busy:
+                    assert 'Updating…' in layout.labels
+                    if source!='NEW':
+                        assert 'Updating setup…' in layout.labels
+                        assert 'Rig/framing changes need Apply' not in layout.labels
+                        assert 'Capture uses current cameras' not in layout.labels
+            assert all(order==busy_orders[0] for order in busy_orders),(source,closed,edit)
+s.camera_collection=rig;s.rig_generator=False
 print('MODAL_APPLY_LAYOUT_STABLE_PASS')
 
 s.rig_parameter_source=s.camera_collection
