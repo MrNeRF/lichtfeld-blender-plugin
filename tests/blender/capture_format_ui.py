@@ -22,6 +22,8 @@ area.spaces.active.show_region_ui=True
 step=0
 def tick():
     global step
+    if s.operation_busy or (ext.capture_preview.is_preview(bpy.context.scene) and ext.capture_preview.camera_pending(bpy.context.scene)):
+        return .05
     if step==0:
         for region in area.regions:
             if region.type=='UI':
@@ -29,12 +31,14 @@ def tick():
                     region.active_panel_category='LichtFeld'
     elif step==1:
         bpy.ops.screen.screenshot(filepath=str(destination/'01-setup.png'))
-        for _ in ext.capture_preview.open_steps(source,bpy.context.window,area):pass
+        with bpy.context.temp_override(area=area):
+            assert bpy.ops.lichtfeld.capture_framing()=={'FINISHED'}
     elif step==2:
         bpy.ops.screen.screenshot(filepath=str(destination/'02-landscape.png'))
         s.capture_orientation='PORTRAIT'
         ext.capture_settings.apply_format(source, ext.capture_settings.preset_format(s))
-        for _ in ext.capture_preview.open_steps(source,bpy.context.window,area):pass
+        with bpy.context.temp_override(area=area):
+            assert bpy.ops.lichtfeld.capture_framing()=={'FINISHED'}
     elif step==3:
         bpy.ops.screen.screenshot(filepath=str(destination/'03-portrait.png'))
         with bpy.context.temp_override(area=area):

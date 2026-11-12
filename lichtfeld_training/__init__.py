@@ -277,9 +277,11 @@ class LichtFeldSettings(bpy.types.PropertyGroup):
     rig_max: FloatProperty(name="Maximum elevation", default=85, min=-90, max=90)
     rig_rings: IntProperty(name="Rings", default=1, min=1, max=250)
     rig_auto_fit: BoolProperty(name="Automatic framing", default=True,
-        description="Fit the rig reference at the chosen lens and output aspect; the minimum distance factor can be increased by fitting")
-    rig_radius: FloatProperty(name="Camera radius", default=3, min=.01, max=1000000, subtype="DISTANCE", unit="LENGTH")
-    rig_distance: FloatProperty(name="Minimum distance multiplier", default=2.8, min=1.05, max=100)
+        description="Fit the rig reference at the chosen lens and output aspect; disable to choose an exact distance from the center")
+    rig_radius: FloatProperty(name="Camera radius", default=3, min=.01, max=1000000, subtype="DISTANCE", unit="LENGTH",
+        description="Exact distance from the rig reference center; apply to update camera positions")
+    rig_distance: FloatProperty(name="Minimum distance multiplier", default=2.8, min=1.05, max=100,
+        description="Multiply the reference bounding-sphere radius; automatic framing may move cameras farther away to fit the subject")
     rig_phase: FloatProperty(name="Azimuth offset", subtype="ANGLE", default=0)
     rig_lens: FloatProperty(name="Focal length (mm)", default=35, min=1, max=500)
     rig_target: PointerProperty(name="Target object", type=bpy.types.Object)
@@ -368,7 +370,8 @@ class LichtFeldSettings(bpy.types.PropertyGroup):
     capture_clip_start: FloatProperty(name="Near", default=.01, min=.00001, max=100000, subtype='DISTANCE', unit='LENGTH')
     capture_clip_end: FloatProperty(name="Far", default=1000, min=.00002, max=1000000, subtype='DISTANCE', unit='LENGTH')
     capture_preview_index: IntProperty(name="Capture camera", default=1, min=1, max=capture_settings.MAX_VIEWS,
-        description="Camera number in capture order; press Update framing to apply")
+        description="Camera number in name order; the framing view updates automatically",
+        update=capture_preview.camera_changed)
     samples: IntProperty(name="Render samples", min=1, max=2147483647, get=scene_render.sample_get, set=scene_render.sample_set, update=custom_changed)
     iterations: IntProperty(name="Training steps", default=2000, min=4, max=1000000, update=custom_changed)
     eval_interval: IntProperty(name="Evaluate every", default=500, min=1, max=100000, update=custom_changed,
@@ -544,6 +547,9 @@ class LF_OT_rig(bpy.types.Operator):
         collection = bpy.data.collections.new("LichtFeld Capture Cameras")
         context.scene.collection.children.link(collection)
         self.collection = collection
+        if settings.rig_mode not in {'PATH', 'MESH'}:
+            collection['lichtfeld_generated_radius'] = radius
+            collection['lichtfeld_fit_limited'] = bool(settings.rig_auto_fit and fit > settings.rig_distance)
         prepared_reference = collection.lichtfeld_rig_reference
         if reference.mode == 'UNSET':
             prepared_reference.mode = 'OBJECTS'
@@ -1839,6 +1845,15 @@ def draw_capture_cameras(box, context, settings, ready, rig_changed, wrapped):
         box.prop(settings, 'rig_auto_fit', text='Fit subject automatically')
         box.prop(settings, 'rig_distance' if settings.rig_auto_fit else 'rig_radius',
                  text='Minimum distance factor' if settings.rig_auto_fit else 'Distance from center')
+        if managed:
+            radius = rig.get('lichtfeld_generated_radius')
+            if type(radius) in (int, float) and math.isfinite(radius) and radius > 0:
+                units = context.scene.unit_settings
+                distance = bpy.utils.units.to_string(units.system, 'LENGTH', radius * (units.scale_length if units.system != 'NONE' else 1),
+                                                     precision=4)
+                box.label(text=f'Last distance: {distance.rstrip()}')
+                if rig.get('lichtfeld_fit_limited'):
+                    wrapped(box, 'Last distance was increased by automatic fitting.')
     elif settings.rig_mode == 'PATH':
         box.prop(settings, 'rig_curve')
         box.prop(settings, 'rig_orientation')
@@ -1847,6 +1862,16 @@ def draw_capture_cameras(box, context, settings, ready, rig_changed, wrapped):
         box.prop(settings, 'rig_mesh_distribution')
         box.prop(settings, 'rig_mesh_orientation')
         box.prop(settings, 'rig_mesh_offset')
+    uses_aim = not (settings.rig_mode == 'PATH' and settings.rig_orientation == 'TANGENT' or
+                    settings.rig_mode == 'MESH' and settings.rig_mesh_orientation != 'TARGET')
+    if uses_aim:
+        box.prop(settings, 'rig_aim_mode', text='Look at')
+        if settings.rig_aim_mode == 'OBJECT':
+            box.prop(settings, 'rig_target')
+        elif settings.rig_aim_mode == 'POSITION':
+            box.prop(settings, 'rig_aim_position')
+        if settings.rig_aim:
+            box.operator('lichtfeld.select_aim', text='Move aim target in viewport', icon='EMPTY_AXIS')
     box.prop(settings, 'rig_details', icon='TRIA_DOWN' if settings.rig_details else 'TRIA_RIGHT', emboss=False)
     if settings.rig_details:
         if settings.rig_mode not in {'PATH', 'MESH'}:
@@ -1858,17 +1883,8 @@ def draw_capture_cameras(box, context, settings, ready, rig_changed, wrapped):
             box.prop(settings, 'rig_phase')
             box.operator('lichtfeld.tight_framing', icon='VIEW_CAMERA')
         box.prop(settings, 'rig_lens')
-        uses_aim = not (settings.rig_mode == 'PATH' and settings.rig_orientation == 'TANGENT' or
-                        settings.rig_mode == 'MESH' and settings.rig_mesh_orientation != 'TARGET')
         if uses_aim:
-            box.prop(settings, 'rig_aim_mode')
-            if settings.rig_aim_mode == 'OBJECT':
-                box.prop(settings, 'rig_target')
-            elif settings.rig_aim_mode == 'POSITION':
-                box.prop(settings, 'rig_aim_position')
             box.prop(settings, 'rig_aim_offset')
-            if settings.rig_aim:
-                box.operator('lichtfeld.select_aim', text='Move aim target in viewport', icon='EMPTY_AXIS')
         wrapped(box, 'Updating replaces generated camera placement and preserves additional cameras. Undo restores the previous rig.')
     draw_rig_actions(box, settings, rig_changed, edit=True)
 
@@ -2078,12 +2094,11 @@ def loaded(_):
     ui_runtime.clear()
     _imported.clear()
     source = bpy.data.filepath
-    if not source:
-        return
-    directory = preflight.connection_folder(preferences())
+    directory = preflight.connection_folder(preferences()) if source else None
     for scene in bpy.data.scenes:
         settings = scene.lichtfeld_training
-        if settings.job_directory or settings.attached_session:
+        capture_preview.camera_changed(settings, None)
+        if not source or settings.job_directory or settings.attached_session:
             continue
         name = scene.name
         def done(root, scene=scene, source=source):

@@ -105,6 +105,14 @@ The capture uses the saved scene at the selected frame. Background Blender appli
 capture settings to an isolated copy; it does not animate your rig to render
 different views. Changes made after a job starts apply to a subsequent capture.
 
+### Camera distance and aiming
+
+The rig **Center** determines camera placement; **Look at** determines camera direction independently. Automatic fitting can increase the minimum distance factor to fit the reference at the selected lens and output aspect. For an exact radius, switch off **Fit subject automatically** and set **Distance from center**, then apply the rig changes. **Last distance** records the radius at the last successful generation; moving cameras manually does not update this historical value. Older rigs acquire this feedback when next regenerated.
+
+Use **Move aim target in viewport** to adjust the generated tracking target directly. Elevation, rotation, lens and aim offset remain under the rig details. These controls do not change which objects are captured.
+
+In **Check framing**, changing **Camera number** updates the view automatically without rebuilding the temporary scene. Use **Update framing** after changing output dimensions or camera overrides. This checks framing without rendering or modifying the source cameras. To include changes to scene content or a different camera collection, return to capture setup and reopen framing.
+
 ## Choose the right operation
 
 | Operation | Renders images? | Training behavior |

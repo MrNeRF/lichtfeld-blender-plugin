@@ -19,9 +19,12 @@ _owners = {}
 _actions = []
 _rotation = 0
 _cloud_buffers = {}
+WAIT = object()
+DEFER = object()
 
 
 def schedule(generator, failure=None):
+    """Yield WAIT to pause a tick, or DEFER to let queued dependencies run first."""
     _actions.append((generator, failure))
 
 
@@ -336,7 +339,12 @@ def tick():
     deadline = time.perf_counter() + 0.003
     while _actions and time.perf_counter() < deadline:
         try:
-            next(_actions[0][0])
+            step = next(_actions[0][0])
+            if step is WAIT:
+                break
+            if step is DEFER:
+                _actions.append(_actions.pop(0))
+                break
         except StopIteration:
             _actions.pop(0)
         except Exception as error:
