@@ -89,7 +89,7 @@ are not retried automatically.
 
 ### Generate or edit a rig
 
-For generated spheres, hemispheres and rings, **Edit live** opens immediate distance, orbit rotation and aim controls. Entry preserves the current applied rig; apply or revert pending parameters first. Drag a value or type it, use Esc to cancel that gesture, and use Blender Undo/Redo for confirmed gestures. **Move aim in viewport** selects the native aiming helper, so Blender's move tool/gizmo can be used. When following an object, the numerical aim controls edit its offset.
+For generated spheres, hemispheres and rings, **Edit live** opens immediate distance, orbit rotation and aim controls. Entry preserves the current applied rig; apply or revert pending parameters first. Drag a value or type it, use Esc to cancel that gesture, and use Blender Undo/Redo for confirmed gestures. Native viewport gizmos adjust distance, orbit rotation and aim when viewport gizmos are enabled. When following an object, the numerical aim controls edit its offset.
 
 **Finish live editing** preserves the current camera poses, uses their exact radius instead of automatic fitting, and returns to the existing shape/count controls. Path and mesh rigs retain explicit Apply. Custom additional cameras are unaffected. Manually reparented, animated, linked or shared generated cameras must be made suitable or regenerated before live editing. Saving a live rig preserves native controller/driver evaluation without enabling Python autoexecution; Auto Key is unchanged and the extension does not insert keyframes.
 

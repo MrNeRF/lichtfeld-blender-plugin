@@ -505,3 +505,48 @@ def rollback_live(owner):
         yield
     bpy.data.objects.remove(root, do_unlink=True)
     owner.live_backup = []
+
+class LF_GGT_live_rig(bpy.types.GizmoGroup):
+    bl_idname = 'LICHTFELD_GGT_live_rig'
+    bl_label = 'Live camera rig'
+    bl_space_type = 'VIEW_3D'
+    bl_region_type = 'WINDOW'
+    bl_options = {'3D', 'PERSISTENT'}
+
+    @classmethod
+    def poll(cls, context):
+        s = context.scene.lichtfeld_training
+        return context.mode == 'OBJECT' and bool(_live_writable(s))
+
+    def setup(self, context):
+        self.distance = self.gizmos.new('GIZMO_GT_arrow_3d')
+        self.orbit = self.gizmos.new('GIZMO_GT_dial_3d')
+        self.aim = self.gizmos.new('GIZMO_GT_move_3d')
+        theme = context.preferences.themes[0].user_interface
+        for gizmo, color in ((self.distance, theme.gizmo_primary),
+                             (self.orbit, theme.gizmo_secondary), (self.aim, theme.gizmo_a)):
+            gizmo.color = color[:3]
+            gizmo.color_highlight = theme.gizmo_hi[:3]
+            gizmo.alpha = .6
+            gizmo.alpha_highlight = 1
+            gizmo.use_draw_value = True
+        self.aim.scale_basis = .2
+        self.refresh(context)
+
+    def refresh(self, context):
+        from mathutils import Matrix
+        settings = context.scene.lichtfeld_training
+        root = live_root(settings)
+        if not root:
+            return
+        # Native RNA targets retain Blender's own gesture cancellation and Undo.
+        # These non-animatable adapters do not insert keys with Auto Key enabled.
+        self.distance.target_set_prop('offset', settings, 'live_radius')
+        self.orbit.target_set_prop('offset', settings, 'live_phase')
+        self.aim.target_set_prop('offset', settings, 'live_aim')
+        self.distance.matrix_basis = Vector((1, 0, 0)).to_track_quat('Z', 'Y').to_matrix().to_4x4()
+        self.distance.matrix_basis.translation = root.location
+        self.orbit.matrix_basis = Matrix.Translation(root.location)
+        target = settings.rig_aim
+        follow = target.constraints.get(FOLLOW) if target else None
+        self.aim.matrix_basis = Matrix.Translation(follow.target.matrix_world.translation) if follow and follow.target else Matrix.Identity(4)

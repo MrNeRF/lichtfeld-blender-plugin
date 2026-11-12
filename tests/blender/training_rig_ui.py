@@ -175,6 +175,14 @@ def live_controls():
     deadline = time.perf_counter() + 120
     assert bpy.ops.lichtfeld.create_rig() == {'RUNNING_MODAL'}
 
+    def control(settings):
+        return tuple(settings.live_aim) if '--aim-gizmo' in sys.argv else settings.live_radius
+
+    def changed(value, baseline):
+        if isinstance(value, tuple):
+            return sum((a-b)**2 for a,b in zip(value, baseline))**.5
+        return abs(value-baseline)
+
     def shot(name):
         for editor in bpy.context.screen.areas: editor.tag_redraw()
         bpy.ops.wm.redraw_timer(type='DRAW_WIN_SWAP', iterations=1)
@@ -208,37 +216,45 @@ def live_controls():
                 proof['mean_evaluated_edit_ms'] = sum(times)/len(times)
                 settings.live_radius = 3; settings.live_phase = 0
                 bpy.context.view_layer.update()
+                if '--aim-gizmo' in sys.argv:
+                    from bpy_extras.view3d_utils import location_3d_to_region_2d
+                    from mathutils import Vector
+                    settings.live_aim = (0, 0, 2)
+                    region = next(r for r in area.regions if r.type == 'WINDOW')
+                    point = location_3d_to_region_2d(region, area.spaces.active.region_3d, Vector(settings.live_aim))
+                    proof['gizmo_xy'] = (round(region.x+point.x), round(region.y+point.y))
+                proof['baseline'] = control(settings)
                 bpy.ops.ed.undo_push(message='Live gesture baseline')
                 shot('live-controls.png')
                 proof['phase'] = 'gesture'; proof['step'] = 0
                 return .5
             if proof['phase'] == 'gesture':
-                if '--widget-y' not in sys.argv:
+                if '--widget-y' not in sys.argv and '--aim-gizmo' not in sys.argv:
                     proof['ok'] = True
                     output.write_text(json.dumps(proof), encoding='utf-8')
                     bpy.ops.wm.quit_blender(); return None
-                y = int(sys.argv[sys.argv.index('--widget-y')+1])
+                x, y = proof['gizmo_xy'] if '--aim-gizmo' in sys.argv else (1050, int(sys.argv[sys.argv.index('--widget-y')+1]))
                 window = bpy.context.window
                 step = proof['step']
                 if step in {0, 4}:
-                    window.event_simulate(type='MOUSEMOVE', value='NOTHING', x=1050, y=y)
-                    window.event_simulate(type='LEFTMOUSE', value='PRESS', x=1050, y=y)
+                    window.event_simulate(type='MOUSEMOVE', value='NOTHING', x=x, y=y)
+                    window.event_simulate(type='LEFTMOUSE', value='PRESS', x=x, y=y)
                 elif step in {1, 5}:
-                    window.event_simulate(type='MOUSEMOVE', value='NOTHING', x=1055, y=y)
-                    window.event_simulate(type='MOUSEMOVE', value='NOTHING', x=1120, y=y)
+                    window.event_simulate(type='MOUSEMOVE', value='NOTHING', x=x+5, y=y)
+                    window.event_simulate(type='MOUSEMOVE', value='NOTHING', x=x+70, y=y)
                 elif step == 2:
-                    proof['during'] = settings.live_radius
-                    assert abs(settings.live_radius-3) > .001, proof
+                    proof['during'] = control(settings)
+                    assert changed(control(settings), proof['baseline']) > .001, proof
                     window.event_simulate(type='ESC', value='PRESS')
                     window.event_simulate(type='ESC', value='RELEASE')
-                    window.event_simulate(type='LEFTMOUSE', value='RELEASE', x=1120, y=y)
+                    window.event_simulate(type='LEFTMOUSE', value='RELEASE', x=x+70, y=y)
                 elif step == 3:
-                    assert abs(settings.live_radius-3) < 1e-5, proof
+                    assert changed(control(settings), proof['baseline']) < 1e-5, proof
                 elif step == 6:
-                    window.event_simulate(type='LEFTMOUSE', value='RELEASE', x=1120, y=y)
+                    window.event_simulate(type='LEFTMOUSE', value='RELEASE', x=x+70, y=y)
                 elif step == 7:
-                    proof['committed'] = settings.live_radius
-                    assert abs(settings.live_radius-3) > .001, proof
+                    proof['committed'] = control(settings)
+                    assert changed(control(settings), proof['baseline']) > .001, proof
                     # Reproduce the native crash boundary deterministically:
                     # Undo must close a suspended all_objects RNA iterator.
                     extension.preflight.invalidate()
@@ -249,13 +265,14 @@ def live_controls():
                     with bpy.context.temp_override(area=area): bpy.ops.ed.undo()
                     assert extension.preflight._work is None
                 elif step == 8:
-                    assert abs(bpy.context.scene.lichtfeld_training.live_radius-3) < 1e-5, proof
+                    assert changed(control(bpy.context.scene.lichtfeld_training), proof['baseline']) < 1e-5, proof
                     with bpy.context.temp_override(area=area): bpy.ops.ed.redo()
                 elif step == 9:
                     settings = bpy.context.scene.lichtfeld_training
-                    assert abs(settings.live_radius-proof['committed']) < 1e-5, proof
+                    assert changed(control(settings), proof['committed']) < 1e-5, proof
                     root = extension.rig_edit.live_root(settings)
                     assert root.animation_data.action is None
+                    assert settings.rig_aim.animation_data is None
                     assert bpy.context.scene.tool_settings.use_keyframe_insert_auto
                     proof['ok'] = True
                     output.write_text(json.dumps(proof), encoding='utf-8')

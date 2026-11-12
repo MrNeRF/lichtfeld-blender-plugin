@@ -1865,7 +1865,6 @@ def draw_capture_cameras(box, context, settings, ready, rig_changed, wrapped):
         box.prop(settings, 'live_phase')
         target = settings.rig_aim
         box.prop(settings, 'live_aim', text='Aim offset' if target and target.constraints.get(rig_edit.FOLLOW) else 'Aim position')
-        box.operator('lichtfeld.select_aim', text='Move aim in viewport', icon='EMPTY_AXIS')
         wrapped(box, 'Drag to adjust. Esc cancels a gesture; Undo restores it. Finish to edit shape or camera count.')
         box.operator('lichtfeld.capture_framing', text='Check framing', icon='VIEW_CAMERA')
         box.operator('lichtfeld.live_rig', text='Finish live editing', icon='CHECKMARK')
@@ -2188,7 +2187,7 @@ def loaded(_):
         ui_runtime.submit(lambda name=name: jobs.remembered_job(directory, source, name), done)
 
 
-_CLASSES = (LichtFeldPreferences, LichtFeldSourceRef, LichtFeldRigReference, LichtFeldSettings, LF_OT_notice, LF_OT_verify, LF_OT_setup, LF_OT_tight_framing, LF_OT_rig, LF_OT_live_rig,
+_CLASSES = (LichtFeldPreferences, LichtFeldSourceRef, LichtFeldRigReference, LichtFeldSettings, LF_OT_notice, LF_OT_verify, LF_OT_setup, LF_OT_tight_framing, LF_OT_rig, LF_OT_live_rig, rig_edit.LF_GGT_live_rig,
             LF_OT_start, LF_OT_export_dataset, LF_OT_pick_sources, LF_OT_select_aim, LF_OT_inspect_camera, LF_OT_read_rig, LF_OT_command, LF_OT_import, LF_OT_resume, LF_OT_dataset, LF_OT_new_capture, LF_OT_inspect_dataset, LF_OT_restart, LF_OT_folder, LF_OT_reconnect, LF_OT_load_job, LF_OT_compare,
             LF_OT_setup_view, LF_OT_scan_sessions, LF_OT_attach_session, LF_OT_detach_session, LF_OT_previous_job, LF_OT_color_look, LF_OT_color_command, LF_OT_model_view, LF_OT_color_view, LF_OT_capture_lighting,
             *capture_preview.CLASSES, *scene_render.CLASSES, LF_PT_training)
