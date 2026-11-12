@@ -22,7 +22,7 @@ area.spaces.active.show_region_ui=True
 step=0
 def tick():
     global step
-    if ext.capture_preview.is_preview(bpy.context.scene) and ext.capture_preview.camera_pending(bpy.context.scene):
+    if s.operation_busy or (ext.capture_preview.is_preview(bpy.context.scene) and ext.capture_preview.camera_pending(bpy.context.scene)):
         return .05
     if step==0:
         for region in area.regions:

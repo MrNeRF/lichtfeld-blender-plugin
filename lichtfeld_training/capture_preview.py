@@ -153,17 +153,18 @@ def camera_steps(source, preview, key, token):
     camera = None
     try:
         # The preview can be closed, replaced or deleted before its queued turn.
-        window = next((item for item in bpy.context.window_manager.windows if item.scene == preview), None)
-        if window is None or source_scene(preview) != source:
+        if source_scene(preview) != source:
             return
         settings = source.lichtfeld_training
         if settings.running or settings.job_directory:
             return
-        work = prepare_camera(source, window)
+        work = None
         while True:
-            if (not any(item.scene == preview for item in bpy.context.window_manager.windows) or
+            window = next((item for item in bpy.context.window_manager.windows if item.scene == preview), None)
+            if (window is None or
                     source_scene(preview) != source or settings.running or settings.job_directory):
-                work.close()
+                if work is not None:
+                    work.close()
                 return
             if rig_edit.render_busy(bpy.context):
                 yield ui_runtime.WAIT
@@ -171,8 +172,14 @@ def camera_steps(source, preview, key, token):
             if settings.operation_busy:
                 # A setup operation can be queued behind us. Let it finish on
                 # the same queue instead of blocking it or dropping this input.
+                # Its edits can invalidate a partially scanned camera list.
+                if work is not None:
+                    work.close()
+                    work = None
                 yield ui_runtime.DEFER
                 continue
+            if work is None:
+                work = prepare_camera(source, window)
             try:
                 next(work)
             except StopIteration as result:

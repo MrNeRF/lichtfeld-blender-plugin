@@ -139,14 +139,25 @@ def step():
    previews=(state['preview'],state['second_preview'])
    assert state['camera_ids']==[preview.camera.as_pointer() for preview in previews]
    assert not any(ext.capture_preview.camera_pending(preview) for preview in previews)
-   # Close one physical main window while both preview updates are queued.
-   s.capture_preview_index=4
+   # Join the first preview, defer its update while the source is busy, then
+   # close the initially chosen window. The surviving window must be resolved
+   # again after setup; wmWindow references do not have ID invalidation.
    second=state['second']
    with bpy.context.temp_override(window=second):
     other=next(current for current in second.screen.areas if current.type=='VIEW_3D')
     with bpy.context.temp_override(area=other):
      assert bpy.ops.lichtfeld.close_capture_framing()=={'FINISHED'}
+   second.scene=state['preview'];state['window'].scene=state['source']
+   s.operation_busy=True;s.capture_preview_index=4
+   ext.ui_runtime.tick()
+   assert ext.capture_preview.camera_pending(state['preview'])
+   state['window'].scene=state['preview']
+   with bpy.context.temp_override(window=second):
     assert bpy.ops.wm.window_close()=={'FINISHED'}
+   def finish_setup():
+    s.operation_busy=False
+    yield
+   ext.ui_runtime.schedule(finish_setup())
    state['step']=6.6;return .1
   if state['step']==6.6:
    if ext.capture_preview.camera_pending(state['preview']):return .02
@@ -187,7 +198,7 @@ def step():
    state['step']=12;return .5
   if state['step']==12:
    snapshot('sidebar-pending-rig.png')
-   (area/'result.json').write_text(json.dumps({'ok':True,'framing_return':True,'native_render_ticks':state['render_ticks'],'two_main_windows':True,'queued_window_close':True,'navigation_return':True,'tasks':['CAPTURE','EXPORT','REUSE']}))
+   (area/'result.json').write_text(json.dumps({'ok':True,'framing_return':True,'native_render_ticks':state['render_ticks'],'two_main_windows':True,'deferred_shared_window_close':True,'navigation_return':True,'tasks':['CAPTURE','EXPORT','REUSE']}))
    print('SETTINGS_UI_TASKS_NATIVE_SECTIONS_AND_FRAMING_RETURN_PASS',flush=True)
    bpy.ops.wm.quit_blender();return None
  except Exception:

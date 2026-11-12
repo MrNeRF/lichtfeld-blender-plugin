@@ -183,18 +183,6 @@ while ext.capture_preview.camera_pending(preview):ext.ui_runtime.tick()
 assert (preview.render.resolution_x,preview.render.resolution_y)==(800,600)
 assert preview.camera.data.lens==50 and preview['capture_camera_name']==cameras[0].name
 
-# A queued setup dependency behind the request must run: no dropped input and no
-# FIFO deadlock while waiting for the source to become editable again.
-s.operation_busy=True;s.capture_preview_index=3
-def finish_setup():
-    yield
-    s.operation_busy=False
-ext.ui_runtime.schedule(finish_setup())
-for _ in range(100):
-    ext.ui_runtime.tick()
-    if not ext.capture_preview.camera_pending(preview):break
-assert not s.operation_busy and not ext.capture_preview.camera_pending(preview)
-assert preview['capture_camera_name']==cameras[2].name
 assert bpy.ops.lichtfeld.close_capture_framing()=={'FINISHED'}
 source.render.resolution_x,source.render.resolution_y,source.render.pixel_aspect_y=before_render
 s.capture_lens=40
@@ -215,7 +203,7 @@ for replacement in (None,object()):
     else:
         assert ext.capture_preview._pending[key] is replacement
         ext.capture_preview._pending.pop(key)
-print('FRAMING_FRAME_LATEST_SETTINGS_BUSY_DEPENDENCY_AND_DELETED_PREVIEW_PASS',flush=True)
+print('FRAMING_FRAME_LATEST_SETTINGS_AND_DELETED_PREVIEW_PASS',flush=True)
 
 # Nested custom collections use the same explicit order in readiness and framing.
 s.capture_clip_start = .05
@@ -407,3 +395,36 @@ assert ext.capture_preview.source_scene(preview) is None
 assert bpy.ops.lichtfeld.close_capture_framing()=={'FINISHED'}
 assert not ext.capture_preview.is_preview(bpy.context.scene)
 print('QUEUED_FRAMING_SOURCE_DELETION_CLOSES_SAFELY_PASS',flush=True)
+
+# A real rig update behind a partially scanned request deletes cameras. Resume
+# from a fresh scan after setup, not from an invalid RNA iterator/list, and let
+# that queued dependency run instead of deadlocking the single FIFO.
+from types import SimpleNamespace
+source=bpy.context.scene;s=source.lichtfeld_training
+bpy.ops.mesh.primitive_cube_add()
+s.scope='SCENE';s.views=8
+assert bpy.ops.lichtfeld.create_rig()=={'FINISHED'}
+assert bpy.ops.lichtfeld.capture_framing()=={'FINISHED'}
+preview=bpy.context.scene;s.capture_preview_index=7
+for _ in range(len(s.camera_collection.all_objects)):next(ext.ui_runtime._actions[0][0])
+s.operation_busy=True
+ext.ui_runtime.tick()
+def update_rig():
+    yield
+    bpy.context.window.scene=source
+    try:
+        s.views=4
+        owner=SimpleNamespace(collection=None,rig_backup=[],committed=False,report=lambda *args:None)
+        for _ in ext.LF_OT_rig.generate(owner,bpy.context):pass
+    finally:
+        bpy.context.window.scene=preview
+        s.operation_busy=False
+ext.ui_runtime.schedule(update_rig())
+for _ in range(100):
+    ext.ui_runtime.tick()
+    if not ext.capture_preview.camera_pending(preview):break
+assert not s.operation_busy and not ext.capture_preview.camera_pending(preview)
+assert s.capture_preview_index==4 and preview['capture_camera_name']==ext.cameras_for(s)[-1].name
+assert preview['capture_camera_count']==4
+assert bpy.ops.lichtfeld.close_capture_framing()=={'FINISHED'}
+print('FRAMING_BUSY_RIG_RESCAN_AND_QUEUED_DEPENDENCY_PASS',flush=True)
