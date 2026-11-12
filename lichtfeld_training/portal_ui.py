@@ -413,7 +413,7 @@ def gallery_controls(layout, context):
     if reason:
         draw_paragraph(layout, reason, 850, context.preferences.system.ui_scale)
     if busy:
-        phase = {"import": "Downloading", "converting": "Preparing asset", "decoding": "Preparing Blender data", "importing": "Adding to scene", "refresh": "Refreshing gallery", "ready": "Waiting to import"}.get(snapshot["phase"], "Working")
+        phase = {"import": "Downloading", "checking": "Checking download", "converting": "Preparing asset", "decoding": "Preparing Blender data", "importing": "Adding to scene", "refresh": "Refreshing gallery", "ready": "Waiting to import"}.get(snapshot["phase"], "Working")
         layout.progress(factor=snapshot["progress"], type="BAR", text=phase)
         if snapshot["phase"] != "sign_out":
             layout.operator("lichtfeld.portal_action", text="Cancel", icon="CANCEL").action = "cancel"

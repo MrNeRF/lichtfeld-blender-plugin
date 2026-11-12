@@ -233,13 +233,18 @@ class Runtime:
                 checkpoint = None
             if not isinstance(checkpoint, dict):
                 checkpoint = None
+            def progress(done, total):
+                checking = bool(total and done >= total)
+                self.update(phase="checking" if checking else "import",
+                    message="Checking downloaded project…" if checking else "Downloading project…",
+                    progress=done / total if total else 0.0, total_bytes=total)
             with tempfile.TemporaryDirectory(prefix="prepare-", dir=cache) as directory:
                 root = Path(directory)
                 output = root / "asset.ply"
                 client.download(identifier, project, cancel=cancel,
                     checkpoint=checkpoint, on_checkpoint=lambda value: atomic_json(checkpoint_path, value),
                     reuse_completed=True,
-                    on_progress=lambda done, total: self.update(progress=done / total if total else 0.0, total_bytes=total),
+                    on_progress=progress,
                     on_processing=lambda state: self.update(message="The Portal is preparing this asset…"),
                     on_message=lambda message: self.update(message=str(message)))
                 if cancel.is_set():
