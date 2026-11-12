@@ -47,6 +47,19 @@ assert all(order == orders[0] for order in orders), orders
 assert any(name == "iterations" for name, row in orders[0][0])
 print("WHOLE_SETUP_LAYOUT_STABLE_PASS", len(orders[0][1]))
 
+# Modal Apply/source preparation changes enabled state, not panel geometry.
+# The old conditional Preparing scene box shifted every editable field.
+busy_orders=[]
+for busy in (False,True,False):
+    s.operation_busy=busy
+    layout=Layout()
+    with patch.object(ext.preflight,'cached',return_value=ready),patch.object(ext.preflight,'issues',return_value=[]),patch.object(ext,'preferences',return_value=None):
+        ext.LF_PT_training.draw(SimpleNamespace(layout=layout),context)
+    busy_orders.append((layout.fields,layout.rows,layout.operations))
+    if busy:assert 'Updating setup…' in layout.labels
+assert all(order==busy_orders[0] for order in busy_orders)
+print('MODAL_APPLY_LAYOUT_STABLE_PASS')
+
 s.rig_parameter_source=s.camera_collection
 s.camera_collection['lichtfeld_rig_recipe']=ext.rig_recipe(s)
 for checking,pending,expected in ((False,True,'Rig/framing changes need Apply'),

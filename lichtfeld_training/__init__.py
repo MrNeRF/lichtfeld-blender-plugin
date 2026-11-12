@@ -1803,7 +1803,8 @@ def draw_capture_cameras(box, context, settings, ready, rig_changed, wrapped):
     managed = rig and rig.get('lichtfeld_generated')
     box.prop(settings, 'camera_collection', text='Existing' if not rig else 'Cameras')
     if rig:
-        box.label(text='Checking cameras…' if ready.get('checking') else f"{len(ready['cameras']):,} capture cameras")
+        box.label(text='Updating setup…' if settings.operation_busy else
+                       'Checking cameras…' if ready.get('checking') else f"{len(ready['cameras']):,} capture cameras")
         additional = len(ready['cameras']) - ready.get('generated_cameras', 0)
         if managed and additional > 0:
             box.label(text=f"{ready.get('generated_cameras', 0):,} generated · {additional:,} additional")
@@ -1816,7 +1817,8 @@ def draw_capture_cameras(box, context, settings, ready, rig_changed, wrapped):
             draw_rig_actions(box, settings, rig_changed)
             return
     else:
-        box.label(text='Or create a rig', icon='CAMERA_DATA')
+        box.label(text='Updating setup…' if settings.operation_busy else 'Or create a rig',
+                  icon='TIME' if settings.operation_busy else 'CAMERA_DATA')
     reference = settings.rig_reference
     box.prop(reference, 'mode', text='Center')
     if reference.mode == 'COLLECTION':
@@ -1890,8 +1892,9 @@ def draw_capture_options(box, context, settings, capture_only, wrapped):
 
 
 def draw_capture_actions(setup, settings, ready, errors, capture_only, wrapped):
-    checking = ready.get('checking') or ready.get('environment', {}).get('checking')
-    setup.label(text='Checking capture setup…' if checking else errors[0] if errors else 'Ready to capture',
+    checking = settings.operation_busy or ready.get('checking') or ready.get('environment', {}).get('checking')
+    setup.label(text='Updating setup…' if settings.operation_busy else
+                     'Checking capture setup…' if checking else errors[0] if errors else 'Ready to capture',
                 icon='TIME' if checking else 'ERROR' if errors else 'CHECKMARK')
     if not bpy.data.filepath or bpy.data.is_dirty:
         setup.operator('wm.save_as_mainfile' if not bpy.data.filepath else 'wm.save_mainfile',
@@ -1950,10 +1953,6 @@ class LF_PT_training(bpy.types.Panel):
             from . import job_panel
             job_panel.draw(layout, context, settings, status, current.reader.error if current else "", wrapped)
             return
-        if settings.operation_busy:
-            box = layout.box()
-            box.label(text="Preparing scene…", icon="TIME")
-            wrapped(box, "Updating scene visibility and capture setup. Controls will become available automatically.")
         if settings.detail:
             wrapped(layout.box(), settings.detail)
         row = layout.row(align=True)
