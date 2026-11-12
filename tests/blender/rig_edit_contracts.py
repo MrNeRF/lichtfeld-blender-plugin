@@ -661,3 +661,16 @@ assert counts==(len(bpy.data.objects),len(bpy.data.cameras))
 assert ext.rig_edit.live_root(s) is None
 camera.data.type='PERSP'
 print('LIVE_ENTRY_REUSES_NAMED_CAPTURE_CALIBRATION_CONTRACT_PASS')
+
+# A removed native aim reference is a tombstone, not a name-based legacy lookup.
+cube=bpy.data.objects['Cube']
+s.rig_aim_mode='OBJECT';s.rig_target=cube
+assert bpy.ops.lichtfeld.create_rig()=={'FINISHED'}
+old_name=cube.name
+bpy.data.objects.remove(cube,do_unlink=True)
+replacement=bpy.data.objects.new(old_name,None)
+bpy.context.scene.collection.objects.link(replacement)
+assert 'lichtfeld_rig_target' in s.camera_collection
+assert bpy.ops.lichtfeld.read_rig()=={'FINISHED'}
+assert s.rig_target is None
+print('REMOVED_AIM_ID_NEVER_REBINDS_TO_REUSED_NAME_PASS')

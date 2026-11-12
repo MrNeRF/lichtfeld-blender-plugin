@@ -741,6 +741,12 @@ class LF_OT_live_rig(_RigOperation, bpy.types.Operator):
     bl_options = {'REGISTER', 'UNDO'}
 
     @classmethod
+    def description(cls, context, _properties):
+        if context and context.scene and rig_edit.live_root(context.scene.lichtfeld_training):
+            return 'Keep current camera poses and return to rig settings; Blender Undo restores live editing'
+        return cls.bl_description
+
+    @classmethod
     def poll(cls, context):
         s = context.scene.lichtfeld_training
         if context.mode != 'OBJECT' or s.running or s.operation_busy or s.importing or s.job_directory or s.attached_session or rig_edit.render_busy(context):
@@ -863,7 +869,7 @@ class LF_OT_read_rig(bpy.types.Operator):
             objects = {}
             for name, key in (('target', 'lichtfeld_rig_target'), ('curve', 'lichtfeld_rig_curve'),
                               ('mesh', 'lichtfeld_placement_mesh')):
-                obj = collection.get(key) or bpy.data.objects.get(values.get(name, ''))
+                obj = collection.get(key) if key in collection else bpy.data.objects.get(values.get(name, ''))
                 if obj is not None and (not isinstance(obj, bpy.types.Object) or
                                         name == 'curve' and obj.type != 'CURVE' or
                                         name == 'mesh' and obj.type != 'MESH'):
@@ -1916,7 +1922,10 @@ def draw_capture_cameras(box, context, settings, ready, rig_changed, wrapped):
         controls.prop(settings, 'live_radius')
         controls.prop(settings, 'live_phase')
         target = settings.rig_aim
-        controls.prop(settings, 'live_aim', text='Aim offset' if target and target.constraints.get(rig_edit.FOLLOW) else 'Aim position')
+        follow = target.constraints.get(rig_edit.FOLLOW) if target else None
+        controls.prop(settings, 'live_aim', text='Aim offset' if follow and follow.target else 'Aim position')
+        if follow and not follow.target:
+            wrapped(box, 'The aim object was removed. Finish editing to choose a new target.')
         wrapped(box, 'Finish to keep these camera poses and return to setup.' if finishing else
                      'Drag to adjust. Esc cancels a gesture; Undo restores it. Finish to edit shape or camera count.')
         box.operator('lichtfeld.capture_framing', text='Check framing', icon='VIEW_CAMERA')
