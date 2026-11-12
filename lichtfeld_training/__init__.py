@@ -167,15 +167,18 @@ def strategy_changed(settings, context):
     custom_changed(settings, context)
 
 
-def rig_recipe(settings):
-    return json.dumps({**{name:getattr(settings,name) for name in (
+def rig_recipe(settings, applied=None):
+    values = {**{name:getattr(settings,name) for name in (
         'rig_mode','views','rig_min','rig_max','rig_rings','rig_distance','rig_phase','rig_lens','rig_orientation','rig_auto_fit','rig_radius','rig_mesh_distribution','rig_mesh_orientation','rig_mesh_offset')},
         'aim_mode':settings.rig_aim_mode, 'aim_position':list(settings.rig_aim_position),
         'aim_offset':list(settings.rig_aim_offset),
         'target':settings.rig_target.name_full if settings.rig_target else '',
         'curve':settings.rig_curve.name_full if settings.rig_curve else '',
         'mesh':settings.rig_mesh.name_full if settings.rig_mesh else '',
-        'capture_framing': capture_settings.framing_signature(settings.id_data, settings)},sort_keys=True)
+        'capture_framing': capture_settings.framing_signature(settings.id_data, settings)}
+    if applied is not None:
+        values.update(applied)
+    return json.dumps(values, sort_keys=True)
 
 
 def appearance_update(name):
@@ -283,6 +286,15 @@ class LichtFeldSettings(bpy.types.PropertyGroup):
     rig_distance: FloatProperty(name="Minimum distance multiplier", default=2.8, min=1.05, max=100,
         description="Multiply the reference bounding-sphere radius; automatic framing may move cameras farther away to fit the subject")
     rig_phase: FloatProperty(name="Azimuth offset", subtype="ANGLE", default=0)
+    live_radius: FloatProperty(name="Distance from center", min=.01, max=1000000,
+        subtype='DISTANCE', unit='LENGTH', options=set(), get=rig_edit.live_radius_get,
+        set=rig_edit.live_radius_set, description="Move generated cameras radially now; drag to adjust, Escape cancels the gesture")
+    live_phase: FloatProperty(name="Orbit rotation", subtype='ANGLE', options=set(),
+        get=rig_edit.live_phase_get, set=rig_edit.live_phase_set,
+        description="Rotate generated cameras around the rig's original vertical axis now; Escape cancels the gesture")
+    live_aim: FloatVectorProperty(name="Aim", subtype='TRANSLATION', options=set(),
+        get=rig_edit.live_aim_get, set=rig_edit.live_aim_set,
+        description="Move the aiming point now, or its offset when following an object; Escape cancels the gesture")
     rig_lens: FloatProperty(name="Focal length (mm)", default=35, min=1, max=500)
     rig_target: PointerProperty(name="Target object", type=bpy.types.Object)
     rig_aim: PointerProperty(name="Viewport aim target", type=bpy.types.Object)
@@ -470,7 +482,120 @@ class LF_OT_tight_framing(bpy.types.Operator):
         return {"FINISHED"}
 
 
-class LF_OT_rig(bpy.types.Operator):
+class _RigOperation:
+    """One cooperative, render-safe transaction for managed-rig edits."""
+    def execute(self, context):
+        self.collection = None
+        self.rig_backup = []
+        self.scene = context.scene
+        preflight.invalidate(self.scene)
+        self.history_cancelled = False
+        self.cancelled = False
+        self.cancel_requested = False
+        self.render_waiting = False
+        self.committed = False
+        self.work = self.generate(context)
+        if bpy.app.background:
+            try:
+                for _ in self.work:
+                    pass
+                return {"FINISHED"}
+            except Exception as error:
+                if not self.committed:
+                    for _ in self.cleanup():
+                        pass
+                self.report({"ERROR"}, str(error))
+                return {"CANCELLED"}
+        context.scene.lichtfeld_training.operation_busy = True
+        self.timer = context.window_manager.event_timer_add(0.02, window=context.window)
+        context.window_manager.modal_handler_add(self)
+        return {"RUNNING_MODAL"}
+
+    def release(self, *, restore=False):
+        if self.history_cancelled:
+            return
+        if restore and rig_edit.render_busy(bpy.context):
+            # Native cancellation cannot keep its modal handler alive to wait.
+            # Keep the currently rendered datablocks; canonical Apply repairs
+            # interrupted preparation after rendering instead of deleting IDs.
+            self.report({'WARNING'}, 'Rig preparation interrupted during rendering. Apply rig settings after rendering finishes')
+            self.scene.lichtfeld_training.operation_busy = False
+            restore = False
+        if restore:
+            try:
+                if self.committed:
+                    for _ in self.work:
+                        pass
+                else:
+                    self.work.close()
+                    for _ in self.cleanup():
+                        pass
+            except Exception as error:
+                self.report({'WARNING'}, 'Rig cleanup interrupted: ' + str(error))
+            finally:
+                try:
+                    self.scene.lichtfeld_training.operation_busy = False
+                except ReferenceError:
+                    pass
+        self.work.close()
+        self.work = None
+        self.rig_backup = []
+        self.live_backup = []
+        self.collection = None
+        self.scene = None
+        self.history_cancelled = True
+
+    def remove_timer(self, manager):
+        if self.timer is not None:
+            manager.event_timer_remove(self.timer)
+            self.timer = None
+
+    def cancel(self, context):
+        try:
+            self.release(restore=True)
+        finally:
+            self.remove_timer(context.window_manager)
+
+    def modal(self, context, event):
+        if self.history_cancelled:
+            self.remove_timer(context.window_manager)
+            return {'CANCELLED'}
+        if not self.committed and (event.type == "ESC" or context.scene != self.scene):
+            self.cancel_requested = True
+        if event.type != "TIMER":
+            return {"PASS_THROUGH"}
+        if rig_edit.render_busy(context):
+            if not self.render_waiting:
+                self.report({'INFO'}, 'Rig update waits for Blender to finish rendering or unlock the interface')
+                self.render_waiting = True
+            return {'PASS_THROUGH'}
+        self.render_waiting = False
+        if not self.committed and not self.cancelled and self.cancel_requested:
+            self.cancelled = True
+            self.work.close()
+            self.work = self.cleanup()
+        deadline = time.perf_counter() + 0.003
+        try:
+            while time.perf_counter() < deadline:
+                next(self.work)
+        except StopIteration:
+            self.remove_timer(context.window_manager)
+            self.scene.lichtfeld_training.operation_busy = False
+            return {"CANCELLED"} if self.cancelled else {"FINISHED"}
+        except Exception as error:
+            self.report({"ERROR"}, str(error))
+            if not self.committed and not self.cancelled:
+                self.cancelled = True
+                self.work.close()
+                self.work = self.cleanup()
+                return {"RUNNING_MODAL"}
+            self.remove_timer(context.window_manager)
+            self.scene.lichtfeld_training.operation_busy = False
+            return {"CANCELLED"}
+        return {"RUNNING_MODAL"}
+
+
+class LF_OT_rig(_RigOperation, bpy.types.Operator):
     bl_idname = "lichtfeld.create_rig"
     bl_label = "Create capture rig"
     bl_description = "Create or update cameras around the rig reference without changing the content to capture"
@@ -479,7 +604,7 @@ class LF_OT_rig(bpy.types.Operator):
     @classmethod
     def poll(cls, context):
         s = context.scene.lichtfeld_training
-        if s.running or s.operation_busy:
+        if s.running or s.operation_busy or rig_edit.live_root(s):
             return False
         if rig_edit.render_busy(context):
             cls.poll_message_set("Finish Blender's render or locked job before updating the rig")
@@ -596,66 +721,6 @@ class LF_OT_rig(bpy.types.Operator):
                 yield
         self.report({"INFO"}, f"Applied {len(points)} cameras. Review coverage before training.")
 
-    def execute(self, context):
-        self.collection = None
-        self.rig_backup = []
-        self.scene = context.scene
-        self.cancelled = False
-        self.cancel_requested = False
-        self.render_waiting = False
-        self.committed = False
-        self.work = self.generate(context)
-        if bpy.app.background:
-            try:
-                for _ in self.work:
-                    pass
-                return {"FINISHED"}
-            except Exception as error:
-                if not self.committed:
-                    for _ in self.cleanup():
-                        pass
-                self.report({"ERROR"}, str(error))
-                return {"CANCELLED"}
-        context.scene.lichtfeld_training.operation_busy = True
-        self.timer = context.window_manager.event_timer_add(0.02, window=context.window)
-        context.window_manager.modal_handler_add(self)
-        return {"RUNNING_MODAL"}
-
-    def modal(self, context, event):
-        if not self.committed and (event.type == "ESC" or context.scene != self.scene):
-            self.cancel_requested = True
-        if event.type != "TIMER":
-            return {"PASS_THROUGH"}
-        if rig_edit.render_busy(context):
-            if not self.render_waiting:
-                self.report({'INFO'}, 'Rig update waits for Blender to finish rendering or unlock the interface')
-                self.render_waiting = True
-            return {'PASS_THROUGH'}
-        self.render_waiting = False
-        if not self.committed and not self.cancelled and self.cancel_requested:
-            self.cancelled = True
-            self.work.close()
-            self.work = self.cleanup()
-        deadline = time.perf_counter() + 0.003
-        try:
-            while time.perf_counter() < deadline:
-                next(self.work)
-        except StopIteration:
-            context.window_manager.event_timer_remove(self.timer)
-            self.scene.lichtfeld_training.operation_busy = False
-            return {"CANCELLED"} if self.cancelled else {"FINISHED"}
-        except Exception as error:
-            self.report({"ERROR"}, str(error))
-            if not self.committed and not self.cancelled:
-                self.cancelled = True
-                self.work.close()
-                self.work = self.cleanup()
-                return {"RUNNING_MODAL"}
-            context.window_manager.event_timer_remove(self.timer)
-            self.scene.lichtfeld_training.operation_busy = False
-            return {"CANCELLED"}
-        return {"RUNNING_MODAL"}
-
     def cleanup(self):
         for _ in rig_edit.rollback(self):
             yield
@@ -667,6 +732,40 @@ class LF_OT_rig(bpy.types.Operator):
                     bpy.data.cameras.remove(camera)
                 yield
             bpy.data.collections.remove(self.collection)
+
+
+class LF_OT_live_rig(_RigOperation, bpy.types.Operator):
+    bl_idname = "lichtfeld.live_rig"
+    bl_label = "Edit rig live"
+    bl_description = "Edit distance, orbit rotation and aim directly; each gesture supports Escape and Blender Undo"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    @classmethod
+    def description(cls, context, _properties):
+        if context and context.scene and rig_edit.live_root(context.scene.lichtfeld_training):
+            return 'Keep current camera poses and return to rig settings; Blender Undo restores live editing'
+        return cls.bl_description
+
+    @classmethod
+    def poll(cls, context):
+        s = context.scene.lichtfeld_training
+        if context.mode != 'OBJECT' or s.running or s.operation_busy or s.importing or s.job_directory or s.attached_session or rig_edit.render_busy(context):
+            return False
+        if not s.camera_collection or not s.camera_collection.get('lichtfeld_generated'):
+            return False
+        if not rig_edit.live_root(s) and s.rig_parameter_source != s.camera_collection:
+            cls.poll_message_set('Load the selected rig first')
+            return False
+        return True
+
+    def generate(self, context):
+        self.live_backup = []
+        self.live_controller = None
+        self.live_finishing = bool(rig_edit.live_root(context.scene.lichtfeld_training))
+        yield from rig_edit.edit_live(self, context)
+
+    def cleanup(self):
+        yield from rig_edit.rollback_live(self)
 
 
 def launch_supervisor(job):
@@ -770,7 +869,7 @@ class LF_OT_read_rig(bpy.types.Operator):
             objects = {}
             for name, key in (('target', 'lichtfeld_rig_target'), ('curve', 'lichtfeld_rig_curve'),
                               ('mesh', 'lichtfeld_placement_mesh')):
-                obj = collection.get(key) or bpy.data.objects.get(values.get(name, ''))
+                obj = collection.get(key) if key in collection else bpy.data.objects.get(values.get(name, ''))
                 if obj is not None and (not isinstance(obj, bpy.types.Object) or
                                         name == 'curve' and obj.type != 'CURVE' or
                                         name == 'mesh' and obj.type != 'MESH'):
@@ -816,8 +915,9 @@ class LF_OT_select_aim(bpy.types.Operator):
             return {"CANCELLED"}
         for obj in context.selected_objects:
             obj.select_set(False)
-        settings.rig_aim_mode = "VIEWPORT"
-        settings.rig_aim_offset = (0, 0, 0)
+        if not rig_edit.live_root(settings):
+            settings.rig_aim_mode = "VIEWPORT"
+            settings.rig_aim_offset = (0, 0, 0)
         target.hide_set(False)
         target.select_set(True)
         context.view_layer.objects.active = target
@@ -1793,6 +1893,9 @@ def draw_rig_actions(layout, settings, pending, *, edit=False, compact=False):
     """One action site, in the camera body or its collapsed header."""
     rig = settings.camera_collection
     managed = rig and rig.get('lichtfeld_generated')
+    if rig_edit.live_root(settings):
+        layout.operator('lichtfeld.live_rig', text='Finish live editing', icon='CHECKMARK')
+        return
     row = layout.row(align=True)
     if managed and settings.rig_parameter_source != rig:
         row.operator('lichtfeld.read_rig', text='Load' if compact else 'Load selected rig', icon='IMPORT')
@@ -1801,6 +1904,8 @@ def draw_rig_actions(layout, settings, pending, *, edit=False, compact=False):
                      ('Apply rig changes' if managed else 'Create camera rig'), icon='CAMERA_DATA')
         if managed and pending:
             row.operator('lichtfeld.read_rig', text='' if compact else 'Revert', icon='LOOP_BACK')
+    if managed and not pending and settings.rig_parameter_source == rig and settings.rig_mode in {'SPHERE', 'HEMISPHERE', 'RINGS'}:
+        row.operator('lichtfeld.live_rig', text='Edit live', icon='ORIENTATION_GIMBAL')
     if rig:
         (row if compact else layout).operator('lichtfeld.capture_framing', text='' if compact else 'Check framing', icon='VIEW_CAMERA')
 
@@ -1808,6 +1913,24 @@ def draw_rig_actions(layout, settings, pending, *, edit=False, compact=False):
 def draw_capture_cameras(box, context, settings, ready, rig_changed, wrapped):
     rig = settings.camera_collection
     managed = rig and rig.get('lichtfeld_generated')
+    controller = rig_edit.live_root(settings)
+    if controller:
+        finishing = controller.get('finishing', False)
+        box.label(text='Finish interrupted rig edit' if finishing else 'Live rig · changes are immediate', icon='ORIENTATION_GIMBAL')
+        controls = box.column()
+        controls.enabled = not finishing
+        controls.prop(settings, 'live_radius')
+        controls.prop(settings, 'live_phase')
+        target = settings.rig_aim
+        follow = target.constraints.get(rig_edit.FOLLOW) if target else None
+        controls.prop(settings, 'live_aim', text='Aim offset' if follow and follow.target else 'Aim position')
+        if follow and not follow.target:
+            wrapped(box, 'The aim object was removed. Finish editing to choose a new target.')
+        wrapped(box, 'Finish to keep these camera poses and return to setup.' if finishing else
+                     'Drag to adjust. Esc cancels a gesture; Undo restores it. Finish to edit shape or camera count.')
+        box.operator('lichtfeld.capture_framing', text='Check framing', icon='VIEW_CAMERA')
+        box.operator('lichtfeld.live_rig', text='Finish live editing', icon='CHECKMARK')
+        return
     box.prop(settings, 'camera_collection', text='Existing' if not rig else 'Cameras')
     if rig:
         box.label(text='Updating setup…' if settings.operation_busy else
@@ -2070,6 +2193,28 @@ def poll_jobs():
 
 
 @persistent
+def history_changing(_):
+    # RNA collection iterators cannot survive Blender replacing Main on Undo.
+    # Close the cooperative scan while its datablocks are still valid.
+    preflight.invalidate()
+    ui_runtime.before_history()
+    for window in bpy.context.window_manager.windows:
+        for operator in window.modal_operators:
+            if isinstance(operator, _RigOperation):
+                operator.release()
+
+
+@persistent
+def history_changed(_):
+    for scene in bpy.data.scenes:
+        scene.lichtfeld_training.operation_busy = False
+        scene.lichtfeld_training.importing = False
+        source = capture_preview.source_scene(scene)
+        if source:
+            capture_preview.camera_changed(source.lichtfeld_training, None)
+
+
+@persistent
 def saved(_):
     preflight.saved()
 
@@ -2080,6 +2225,10 @@ def unloading(_):
     _session_scan_pending = False
     _sessions = []
     _session_items = _SESSION_PLACEHOLDER
+    for window in bpy.context.window_manager.windows:
+        for operator in window.modal_operators:
+            if isinstance(operator, _RigOperation):
+                operator.release()
     for scene in bpy.data.scenes:
         scene.lichtfeld_training.discovered_session = 'NONE'
     preflight.clear()
@@ -2111,7 +2260,7 @@ def loaded(_):
         ui_runtime.submit(lambda name=name: jobs.remembered_job(directory, source, name), done)
 
 
-_CLASSES = (LichtFeldPreferences, LichtFeldSourceRef, LichtFeldRigReference, LichtFeldSettings, LF_OT_notice, LF_OT_verify, LF_OT_setup, LF_OT_tight_framing, LF_OT_rig,
+_CLASSES = (LichtFeldPreferences, LichtFeldSourceRef, LichtFeldRigReference, LichtFeldSettings, LF_OT_notice, LF_OT_verify, LF_OT_setup, LF_OT_tight_framing, LF_OT_rig, LF_OT_live_rig, rig_edit.LF_GGT_live_rig,
             LF_OT_start, LF_OT_export_dataset, LF_OT_pick_sources, LF_OT_select_aim, LF_OT_inspect_camera, LF_OT_read_rig, LF_OT_command, LF_OT_import, LF_OT_resume, LF_OT_dataset, LF_OT_new_capture, LF_OT_inspect_dataset, LF_OT_restart, LF_OT_folder, LF_OT_reconnect, LF_OT_load_job, LF_OT_compare,
             LF_OT_setup_view, LF_OT_scan_sessions, LF_OT_attach_session, LF_OT_detach_session, LF_OT_previous_job, LF_OT_color_look, LF_OT_color_command, LF_OT_model_view, LF_OT_color_view, LF_OT_capture_lighting,
             *capture_preview.CLASSES, *scene_render.CLASSES, LF_PT_training)
@@ -2124,6 +2273,10 @@ def register():
         bpy.utils.register_class(cls)
     bpy.types.Scene.lichtfeld_training = PointerProperty(type=LichtFeldSettings)
     bpy.types.Collection.lichtfeld_rig_reference = PointerProperty(type=LichtFeldRigReference)
+    bpy.app.handlers.undo_pre.append(history_changing)
+    bpy.app.handlers.redo_pre.append(history_changing)
+    bpy.app.handlers.undo_post.append(history_changed)
+    bpy.app.handlers.redo_post.append(history_changed)
     bpy.app.handlers.save_post.append(saved)
     bpy.app.handlers.load_post.append(loaded)
     bpy.app.handlers.load_pre.append(unloading)
@@ -2131,10 +2284,24 @@ def register():
 
 
 def unregister():
+    # Blender unregisters native modal handlers. Release their owned datablocks
+    # first, while the RNA settings and operator types still exist.
+    manager = bpy.context.window_manager
+    for window in manager.windows:
+        for operator in window.modal_operators:
+            if isinstance(operator, _RigOperation) and not operator.history_cancelled:
+                operator.release(restore=True)
+                operator.remove_timer(manager)
     unloading(None)
     _imported.clear()
     if bpy.app.timers.is_registered(poll_jobs):
         bpy.app.timers.unregister(poll_jobs)
+    for handlers in (bpy.app.handlers.undo_pre, bpy.app.handlers.redo_pre):
+        if history_changing in handlers:
+            handlers.remove(history_changing)
+    for handlers in (bpy.app.handlers.undo_post, bpy.app.handlers.redo_post):
+        if history_changed in handlers:
+            handlers.remove(history_changed)
     if saved in bpy.app.handlers.save_post:
         bpy.app.handlers.save_post.remove(saved)
     if loaded in bpy.app.handlers.load_post:

@@ -1,6 +1,24 @@
 # SPDX-FileCopyrightText: 2026 LichtFeld Studio Authors
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Visibility operations are restricted to objects with a base in that layer."""
+def resolve_object(identity):
+    import bpy
+    name, library, uid = identity
+    obj = bpy.data.objects.get((name, library))
+    if obj is None or obj.session_uid != uid:
+        raise ReferenceError('Scene objects changed during preparation; retrying the scan')
+    return obj
+
+
+def object_steps(objects):
+    """Never suspend a native collection iterator across the event loop."""
+    identities = [(obj.name, obj.library.filepath if obj.library else None, obj.session_uid)
+                  for obj in objects if obj is not None]
+    for identity in identities:
+        yield resolve_object(identity)
+        resolve_object(identity)  # Detect deletion/rename while the caller yielded.
+
+
 def set_hidden(obj, hidden, layer, *, members=None):
     if obj is None or (layer.objects if members is None else members).get(obj.name) != obj:
         return False
@@ -33,12 +51,12 @@ def source_steps(scene, job, show_splat, *, restore_only=False):
     # ViewLayer RNA name lookups may scan its bases. Build one bounded index
     # instead of repeating that scan for every source in a large scene.
     members = {}
-    for obj in layer.objects:
+    for obj in object_steps(layer.objects):
         if obj is not None:
             members[obj.name] = obj
         yield
     captured = job.get("source_visibility", {})
-    for obj in scene.objects:
+    for obj in object_steps(scene.objects):
         renderable = obj.type in {"MESH", "CURVE", "SURFACE", "FONT", "META", "VOLUME", "POINTCLOUD"} or (obj.type == "EMPTY" and obj.instance_type == "COLLECTION")
         if not obj.get("lichtfeld_result") and (obj.name in names or entire_scene and renderable):
             if members.get(obj.name) == obj:
