@@ -608,3 +608,43 @@ assert root.name in bpy.data.objects
 bpy.context.scene.pop('Retained controller')
 bpy.data.objects.remove(root,do_unlink=True)
 print('LIVE_CONTROLLER_USER_REFERENCE_RETAINED_PASS')
+# Native cancellation while rendering retains IDs and resumes the same Finish.
+assert bpy.ops.lichtfeld.live_rig()=={'FINISHED'}
+s.live_radius += .15
+bpy.context.view_layer.update()
+cameras=[o for o in s.camera_collection.objects if o.type=='CAMERA' and o.get('lichtfeld_generated')]
+poses=[o.matrix_world.copy() for o in cameras]
+op=SimpleNamespace(live_backup=[],live_controller=None,live_finishing=True,committed=False,
+    history_cancelled=False,rig_backup=[],collection=None,scene=bpy.context.scene,report=lambda *args:None)
+op.work=ext.rig_edit.edit_live(op,bpy.context)
+while not op.committed:next(op.work)
+with patch.object(ext.rig_edit,'render_busy',return_value=True):
+    ext._RigOperation.release(op,restore=True)
+root=ext.rig_edit.live_root(s)
+assert root and root['finishing']
+old=s.live_radius;s.live_radius=100
+assert s.live_radius==old
+assert bpy.ops.lichtfeld.live_rig()=={'FINISHED'}
+bpy.context.view_layer.update()
+assert all((o.matrix_world.translation-m.translation).length<1e-4 for o,m in zip(cameras,poses))
+assert ext.rig_edit.live_root(s) is None
+print('INTERRUPTED_FINISH_RENDER_GUARD_RESUMES_CANONICAL_BAKE_PASS')
+
+# An incomplete entry persisted by Save/Undo is repaired by the existing Apply.
+assert bpy.ops.lichtfeld.live_rig()=={'FINISHED'}
+assert bpy.ops.lichtfeld.live_rig()=={'FINISHED'}
+op=SimpleNamespace(live_backup=[],live_controller=None,live_finishing=False,committed=False)
+work=ext.rig_edit.edit_live(op,bpy.context)
+while len(op.live_backup)<2:next(work)
+work.close()  # Deliberately retain the same state a native save/undo step captures.
+with tempfile.TemporaryDirectory() as directory:
+    path=str(Path(directory)/'interrupted-entry.blend')
+    bpy.ops.wm.save_as_mainfile(filepath=path)
+    bpy.ops.wm.open_mainfile(filepath=path,use_scripts=False)
+s=bpy.context.scene.lichtfeld_training
+assert bpy.ops.lichtfeld.create_rig()=={'FINISHED'}
+assert all(o.parent is None for o in s.camera_collection.objects if o.type=='CAMERA')
+assert not any(o.get(ext.rig_edit.LIVE) is True for o in bpy.data.objects)
+assert bpy.ops.lichtfeld.live_rig()=={'FINISHED'}
+assert bpy.ops.lichtfeld.live_rig()=={'FINISHED'}
+print('PERSISTED_PARTIAL_ENTRY_APPLY_REPAIRS_CANONICAL_PARENT_AND_DRIVERS_PASS')

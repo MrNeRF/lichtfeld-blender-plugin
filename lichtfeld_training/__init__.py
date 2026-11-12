@@ -522,14 +522,21 @@ class _RigOperation:
             self.scene.lichtfeld_training.operation_busy = False
             restore = False
         if restore:
-            if self.committed:
-                for _ in self.work:
+            try:
+                if self.committed:
+                    for _ in self.work:
+                        pass
+                else:
+                    self.work.close()
+                    for _ in self.cleanup():
+                        pass
+            except Exception as error:
+                self.report({'WARNING'}, 'Rig cleanup interrupted: ' + str(error))
+            finally:
+                try:
+                    self.scene.lichtfeld_training.operation_busy = False
+                except ReferenceError:
                     pass
-            else:
-                self.work.close()
-                for _ in self.cleanup():
-                    pass
-            self.scene.lichtfeld_training.operation_busy = False
         self.work.close()
         self.work = None
         self.rig_backup = []

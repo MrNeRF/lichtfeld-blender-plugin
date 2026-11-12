@@ -83,7 +83,8 @@ class LargeJobs(unittest.TestCase):
     def test_many_sources_use_one_layer_index_and_restore_only_changed_visibility(self):
         class Object:
             type='MESH'
-            def __init__(self,index): self.name=str(index);self.hidden=False
+            library=None
+            def __init__(self,index): self.name=str(index);self.hidden=False;self.session_uid=index+1
             def get(self,key): return False
             def hide_get(self,**kw): return self.hidden
             def hide_set(self,value,**kw): self.hidden=value
@@ -94,10 +95,13 @@ class LargeJobs(unittest.TestCase):
         scene=types.SimpleNamespace(as_pointer=lambda:2,view_layers=types.SimpleNamespace(get=lambda _:layer),objects=objects)
         job={'id':'visible','scope':'SCENE','source_visibility':{obj.name:False for obj in objects}}
         visibility.clear()
-        list(visibility.source_steps(scene,job,True))
-        self.assertTrue(all(obj.hidden for obj in objects))
-        list(visibility.source_steps(scene,job,False,restore_only=True))
-        self.assertFalse(any(obj.hidden for obj in objects))
+        native_objects={(obj.name,None):obj for obj in objects}
+        fake_bpy=types.SimpleNamespace(data=types.SimpleNamespace(objects=native_objects))
+        with patch.dict(sys.modules,{'bpy':fake_bpy}):
+            list(visibility.source_steps(scene,job,True))
+            self.assertTrue(all(obj.hidden for obj in objects))
+            list(visibility.source_steps(scene,job,False,restore_only=True))
+            self.assertFalse(any(obj.hidden for obj in objects))
 
     def test_scene_job_can_exceed_status_limit_without_weakening_status_reads(self):
         with tempfile.TemporaryDirectory() as directory:

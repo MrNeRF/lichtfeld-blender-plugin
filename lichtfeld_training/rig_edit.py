@@ -226,8 +226,8 @@ def commit(owner, settings, previous, staging, target, recipe):
             original = old[index]
             original["lichtfeld_camera_index"] = index
             if LIVE in original:
-                _remove_live_drivers(original)
-                original.matrix_world = prepared.matrix_basis
+                _bake_live_camera(original, prepared.matrix_basis,
+                                  original.data.clip_start, original.data.clip_end)
             track(original, final_target if prepared.constraints.get(AIM) else None)
             data = prepared.data
             bpy.data.objects.remove(prepared, do_unlink=True)
