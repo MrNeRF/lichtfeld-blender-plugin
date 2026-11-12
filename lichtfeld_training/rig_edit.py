@@ -231,6 +231,11 @@ def commit(owner, settings, previous, staging, target, recipe):
     if target != final_target:
         bpy.data.objects.remove(target, do_unlink=True)
     copy_reference(staging.lichtfeld_rig_reference, previous.lichtfeld_rig_reference)
+    for key in ('lichtfeld_generated_radius', 'lichtfeld_fit_limited'):
+        if key in staging:
+            previous[key] = staging[key]
+        elif key in previous:
+            del previous[key]
     bpy.data.collections.remove(staging)
     owner.collection = None
     previous["lichtfeld_rig_recipe"] = recipe

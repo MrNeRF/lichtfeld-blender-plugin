@@ -19,9 +19,11 @@ _owners = {}
 _actions = []
 _rotation = 0
 _cloud_buffers = {}
+WAIT = object()
 
 
 def schedule(generator, failure=None):
+    """Queue bounded RNA work; yield WAIT to pause until the next UI tick."""
     _actions.append((generator, failure))
 
 
@@ -336,7 +338,8 @@ def tick():
     deadline = time.perf_counter() + 0.003
     while _actions and time.perf_counter() < deadline:
         try:
-            next(_actions[0][0])
+            if next(_actions[0][0]) is WAIT:
+                break
         except StopIteration:
             _actions.pop(0)
         except Exception as error:

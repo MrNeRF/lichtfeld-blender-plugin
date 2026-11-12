@@ -59,14 +59,41 @@ def tick():
   if state['step']==5:
    snapshot('sidebar-export.png')
    state['source']=bpy.context.scene
+   state['perspective']=view.spaces.active.region_3d.view_perspective
    with bpy.context.temp_override(area=view,region=next(r for r in view.regions if r.type=='WINDOW')):
     assert bpy.ops.lichtfeld.capture_framing()=={'FINISHED'}
    state['step']=6;return .1
   if state['step']==6:
    assert ext.capture_preview.source_scene(bpy.context.scene)==state['source']
+   assert view.spaces.active.region_3d.view_perspective=='CAMERA'
    snapshot('sidebar-framing.png')
-   assert bpy.ops.lichtfeld.close_capture_framing()=={'FINISHED'}
+   state['preview']=bpy.context.scene
+   state['counts']=(len(bpy.data.scenes),len(bpy.data.objects),len(bpy.data.cameras))
+   s.capture_preview_index=48;s.capture_preview_index=7;s.capture_preview_index=2
+   state['step']=6.1;return .1
+  if state['step']==6.1:
+   if ext.capture_preview.camera_pending(bpy.context.scene):return .02
+   assert bpy.context.scene==state['preview']
+   assert bpy.context.scene['capture_camera_name']=='Capture 002'
+   assert state['counts']==(len(bpy.data.scenes),len(bpy.data.objects),len(bpy.data.cameras))
+   assert not s.operation_busy
+   assert view.spaces.active.region_3d.view_perspective=='CAMERA'
+   snapshot('sidebar-framing-camera-2.png')
+   source=state['source'];source.render.resolution_x=2000;source.render.resolution_y=1000;source.render.resolution_percentage=50
+   s.override_optics=True;s.capture_lens=50
+   assert bpy.ops.lichtfeld.capture_framing()=={'FINISHED'}
+   state['step']=6.2;return .1
+  if state['step']==6.2:
+   if ext.capture_preview.camera_pending(bpy.context.scene):return .02
+   assert bpy.context.scene==state['preview']
+   assert (bpy.context.scene.render.resolution_x,bpy.context.scene.render.resolution_y)==(1000,500)
+   assert bpy.context.scene.camera.data.lens==50
+   assert state['counts']==(len(bpy.data.scenes),len(bpy.data.objects),len(bpy.data.cameras))
+   snapshot('sidebar-framing-updated.png')
+   with bpy.context.temp_override(area=view,region=next(r for r in view.regions if r.type=='WINDOW')):
+    assert bpy.ops.lichtfeld.close_capture_framing()=={'FINISHED'}
    assert bpy.context.scene==state['source'] and not s.operation_busy
+   assert view.spaces.active.region_3d.view_perspective==state['perspective']
    s.dataset_mode='REUSE';state['step']=7;return .5
   if state['step']==7:
    snapshot('sidebar-saved-images.png')
@@ -92,6 +119,7 @@ def tick():
   if state['step']==11:
    snapshot('sidebar-load-rig.png')
    s.rig_parameter_source=state['rig_source'];s.rig_distance+=.25
+   s.rig_generator=True;s.rig_details=False
    state['step']=12;return .5
   if state['step']==12:
    snapshot('sidebar-pending-rig.png')

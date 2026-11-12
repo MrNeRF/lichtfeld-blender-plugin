@@ -36,6 +36,7 @@ and offers its own start action above the training settings.
 **Check camera framing** opens the existing temporary framing scene. It checks
 camera selection, output size and optical overrides; it does not render an RGB
 test image. **Back to capture setup** restores the original scene.
+Changing **Camera number** updates the view automatically, reusing the same preview scene. **Update framing** applies output settings and optical overrides without rebuilding scene visibility. If you change capture content or replace the camera collection, return to setup and reopen framing. Source cameras stay unchanged.
 
 | You want to… | Choose… |
 | --- | --- |
@@ -152,6 +153,8 @@ Automatic framing uses the effective horizontal and vertical field of view,
 including the image shape, pixel aspect and capture lens overrides. Disable it
 to choose the rig radius explicitly. It is a framing aid; occlusion, reflective
 surfaces and sufficient overlap still need inspection.
+
+**Last distance** is the radius recorded at the last successful rig generation, in the scene's units. If automatic fitting increased the minimum distance, the panel explains why; disable **Fit subject automatically** and set **Distance from center** for an exact radius. Apply updates camera positions. Manual camera moves do not change this historical value, and older rigs show it after their next generation. **Look at** and **Move aim target in viewport** are directly accessible; only the aim offset is under advanced rig settings.
 
 ## Images, renderer and devices
 

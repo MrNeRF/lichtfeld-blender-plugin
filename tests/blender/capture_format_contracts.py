@@ -6,6 +6,7 @@ import sys
 import importlib
 import bpy
 import numpy as np
+from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 module = 'bl_ext.user_default.lichtfeld_training' if '--installed' in sys.argv else 'lichtfeld_training'
@@ -54,9 +55,14 @@ assert data.lens==22 and cameras[1].data==data
 owned=copy.data;bpy.data.objects.remove(copy);bpy.data.cameras.remove(owned)
 bpy.context.view_layer.update()
 counts=(len(bpy.data.scenes),len(bpy.data.objects),len(bpy.data.cameras))
+poses={camera.name: camera.evaluated_get(graph).matrix_world.normalized().copy() for camera in cameras}
 for _ in range(3):
     print('CHECK framing lifecycle',flush=True)
-    for _ in ext.capture_preview.open_steps(source,bpy.context.window,None):pass
+    opening=ext.capture_preview.open_steps(source,bpy.context.window,None)
+    with patch.object(ext.rig_edit,'render_busy',return_value=True):
+        assert next(opening) is ext.ui_runtime.WAIT
+        assert counts==(len(bpy.data.scenes),len(bpy.data.objects),len(bpy.data.cameras))
+    for _ in opening:pass
     preview=bpy.context.scene
     assert ext.capture_preview.source_scene(preview)==source
     assert (preview.render.resolution_x,preview.render.resolution_y)==(576,1024)
@@ -65,10 +71,67 @@ for _ in range(3):
     assert not s.operation_busy
     assert tuple(getattr(source.render,k) for k in ('resolution_x','resolution_y','pixel_aspect_y'))==before_render
     assert data.lens==22 and np.max(np.abs(np.asarray(cameras[0].matrix_world)-before_matrix))<1e-6
+    # Rapid navigation reuses the prepared scene, coalesces to the last index,
+    # and evaluates the hidden source cameras with their tracking constraints.
+    preview_id=preview.as_pointer()
+    preview_counts=(len(bpy.data.scenes),len(bpy.data.objects),len(bpy.data.cameras))
+    with patch.object(ext.capture_settings,'copy_camera',wraps=ext.capture_settings.copy_camera) as copying:
+        s.capture_preview_index=4
+        s.capture_preview_index=3
+        s.capture_preview_index=2
+        while ext.capture_preview.camera_pending(preview):ext.ui_runtime.tick()
+        assert copying.call_count==1,copying.call_count
+    assert bpy.context.scene.as_pointer()==preview_id
+    assert preview['capture_camera_name']==cameras[1].name
+    assert np.max(np.abs(np.asarray(preview.camera.matrix_world)-poses[cameras[1].name]))<1e-6
+    assert preview.camera.data.lens==40 and preview.camera.data.animation_data is None
+    assert (len(bpy.data.scenes),len(bpy.data.objects),len(bpy.data.cameras))==preview_counts
+    assert not s.operation_busy
+    # Render owns the datablocks until it finishes; the queued view then applies.
+    with patch.object(ext.rig_edit,'render_busy',return_value=True) as render_guard:
+        s.capture_preview_index=1
+        ext.ui_runtime.tick()
+        assert render_guard.call_count==1,'A render wait must not busy-poll within the UI tick'
+        assert preview['capture_camera_name']==cameras[1].name
+        assert (len(bpy.data.scenes),len(bpy.data.objects),len(bpy.data.cameras))==preview_counts
+    while ext.capture_preview.camera_pending(preview):ext.ui_runtime.tick()
+    assert preview['capture_camera_name']==cameras[0].name
+    # An invalid view leaves the last usable preview intact and permits recovery.
+    cameras[2].data.type='ORTHO'
+    with patch.object(ext.ui_runtime,'report_notice') as notice:
+        s.capture_preview_index=3
+        while ext.capture_preview.camera_pending(preview):ext.ui_runtime.tick()
+        assert notice.call_count==1
+        assert 'Perspective' in notice.call_args.args[1]
+    assert preview['capture_camera_name']==cameras[0].name
+    cameras[2].data.type='PERSP'
     s.capture_preview_index=2
+    while ext.capture_preview.camera_pending(preview):ext.ui_runtime.tick()
+    assert preview['capture_camera_name']==cameras[1].name
+    s.capture_preview_index=10000
+    while ext.capture_preview.camera_pending(preview):ext.ui_runtime.tick()
+    assert s.capture_preview_index==len(cameras) and preview['capture_camera_name']==cameras[-1].name
+    # A user-linked temporary camera becomes theirs; updating must preserve it.
+    shared=bpy.data.scenes.new('User scene')
+    retained=preview.camera;retained_data=retained.data
+    retained_pose=retained.matrix_world.copy()
+    shared.collection.objects.link(retained)
+    s.capture_preview_index=2
+    while ext.capture_preview.camera_pending(preview):ext.ui_runtime.tick()
+    assert retained.name in shared.objects and retained.data==retained_data
+    assert np.max(np.abs(np.asarray(retained.matrix_world)-retained_pose))<1e-6
+    assert not retained.get(ext.capture_preview.CAMERA)
+    bpy.data.objects.remove(retained,do_unlink=True)
+    bpy.data.cameras.remove(retained_data);bpy.data.scenes.remove(shared)
     for _ in ext.capture_preview.open_steps(source,bpy.context.window,None):pass
     assert len(bpy.data.scenes)==counts[0]+1
+    preview=bpy.context.scene
+    # Closing before the queued camera update starts cannot resurrect a preview.
+    s.capture_preview_index=1
+    if ext.capture_preview.camera_pending(preview):
+        next(ext.ui_runtime._actions[0][0])
     assert bpy.ops.lichtfeld.close_capture_framing()=={'FINISHED'}
+    ext.ui_runtime.tick()
     assert bpy.context.scene==source
     assert (len(bpy.data.scenes),len(bpy.data.objects),len(bpy.data.cameras))==counts
 # Invalid settings fail before creating any preview data, with the source restored.
@@ -236,3 +299,39 @@ with tempfile.TemporaryDirectory() as directory:
         assert np.std(pixels[0].reshape(-1,4)[:,:3])>.01,'Uniform render cannot prove parity'
         print('SCALED_CAMERA_RENDER_PARITY_PASS',engine,flush=True)
 owned=copy.data;bpy.data.objects.remove(copy,do_unlink=True);bpy.data.cameras.remove(owned)
+
+# Saving while a view update is queued cannot persist a permanently busy flag.
+collection=bpy.data.collections.new('Reload framing cameras');source.collection.children.link(collection)
+for index in range(4):
+    camera=bpy.data.objects.new(f'Reload {index}',bpy.data.cameras.new(f'Reload {index}'))
+    camera.location=(index*2,0,1);collection.objects.link(camera)
+s.camera_collection=collection;s.capture_preview_index=1
+for _ in ext.capture_preview.open_steps(source,bpy.context.window,None):pass
+preview=bpy.context.scene
+s.capture_preview_index=2
+assert ext.capture_preview.camera_pending(preview)
+with tempfile.TemporaryDirectory() as directory:
+    path=str(Path(directory)/'framing-pending.blend')
+    bpy.ops.wm.save_as_mainfile(filepath=path)
+    bpy.ops.wm.open_mainfile(filepath=path)
+preview=bpy.context.scene;source=ext.capture_preview.source_scene(preview)
+assert source is not None,'The saved preview lost its source'
+while ext.capture_preview.camera_pending(preview):ext.ui_runtime.tick()
+assert preview['capture_camera_name']=='Reload 1'
+source.lichtfeld_training.capture_preview_index=3
+while ext.capture_preview.camera_pending(preview):ext.ui_runtime.tick()
+assert preview['capture_camera_name']=='Reload 2'
+assert bpy.ops.lichtfeld.close_capture_framing()=={'FINISHED'}
+print('FRAMING_RELOAD_RESETS_PENDING_AND_NAVIGATES_PASS',flush=True)
+
+# Deleting the source cancels its queued update and leaves an orphan closable.
+for _ in ext.capture_preview.open_steps(source,bpy.context.window,None):pass
+preview=bpy.context.scene
+source.lichtfeld_training.capture_preview_index=1
+bpy.data.scenes.remove(source)
+ext.ui_runtime.tick()
+assert not ext.capture_preview.camera_pending(preview)
+assert ext.capture_preview.source_scene(preview) is None
+assert bpy.ops.lichtfeld.close_capture_framing()=={'FINISHED'}
+assert not ext.capture_preview.is_preview(bpy.context.scene)
+print('QUEUED_FRAMING_SOURCE_DELETION_CLOSES_SAFELY_PASS',flush=True)

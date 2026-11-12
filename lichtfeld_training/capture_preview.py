@@ -8,6 +8,11 @@ from .ui_text import draw_paragraph
 SOURCE = 'lichtfeld_capture_preview_source'
 CAMERA = 'lichtfeld_capture_preview_camera'
 _views = {}
+_pending = set()
+
+
+def camera_pending(scene):
+    return scene.as_pointer() in _pending
 
 
 def is_preview(scene):
@@ -52,18 +57,25 @@ def restore_window(window, area):
         pass
 
 
-def remove(scene):
+def remove_camera(scene):
     camera = scene.get(CAMERA)
     if isinstance(camera, bpy.types.Object) and camera.get(CAMERA):
         other_scenes = [item for item in camera.users_scene if item != scene]
         if other_scenes:
             # A user deliberately linked the temporary camera elsewhere.
             camera.pop(CAMERA, None)
+            if camera.name in scene.collection.objects:
+                scene.collection.objects.unlink(camera)
         else:
             data = camera.data
             bpy.data.objects.remove(camera, do_unlink=True)
             if data.users == 0:
                 bpy.data.cameras.remove(data)
+
+
+def remove(scene):
+    _pending.discard(scene.as_pointer())
+    remove_camera(scene)
     bpy.data.scenes.remove(scene)
 
 
@@ -80,9 +92,126 @@ def cleanup():
                     restore_window(window, area)
         remove(scene)
     _views.clear()
+    _pending.clear()
+
+
+def prepare_camera(source, window):
+    """Use the capture copy contract for both opening and changing a view."""
+    settings = source.lichtfeld_training
+    scene = window.scene
+    value = capture_settings.format_for(source, settings)
+    overrides = capture_settings.camera_for(settings)
+    cameras = []
+    if settings.camera_collection:
+        for obj in settings.camera_collection.all_objects:
+            if obj.type == 'CAMERA':
+                cameras.append(obj)
+            yield
+    cameras.sort(key=lambda obj: obj.name)
+    if not cameras:
+        raise ValueError('Choose a camera collection first')
+    index = min(settings.capture_preview_index, len(cameras))
+    original = cameras[index - 1]
+    if original.name not in scene.objects:
+        raise ValueError('The camera collection changed. Return to capture setup and reopen framing.')
+    # Another window can still display a shared preview after its first window
+    # closes. Pick a live context without changing any window's scene.
+    window = next((item for item in bpy.context.window_manager.windows
+                   if item == window and item.scene == scene), None) or next(
+                       (item for item in bpy.context.window_manager.windows if item.scene == scene), None)
+    if window is None:
+        raise ReferenceError('The framing window was closed')
+    with bpy.context.temp_override(window=window):
+        graph = bpy.context.evaluated_depsgraph_get()
+        camera = capture_settings.copy_camera(original, graph, overrides)
+    camera[CAMERA] = True
+    return camera, original.name, len(cameras), index, value
+
+
+def camera_changed(settings, _context):
+    """Queue one update per visible preview; RNA callbacks never copy scene data."""
+    source = settings.id_data
+    if settings.operation_busy or settings.running or settings.job_directory:
+        return
+    for window in bpy.context.window_manager.windows:
+        preview = window.scene
+        if source_scene(preview) != source or camera_pending(preview):
+            continue
+        _pending.add(preview.as_pointer())
+        ui_runtime.schedule(camera_steps(source, preview),
+                            lambda error: ui_runtime.report_notice('ERROR', error))
+
+
+def camera_steps(source, preview):
+    """Replace only the owned camera/format, retaining the prepared scene and view."""
+    from . import rig_edit
+    camera = None
+    try:
+        # The preview can be closed, replaced or deleted before its queued turn.
+        window = next((item for item in bpy.context.window_manager.windows if item.scene == preview), None)
+        if window is None or source_scene(preview) != source:
+            return
+        settings = source.lichtfeld_training
+        if settings.operation_busy or settings.running or settings.job_directory:
+            return
+        work = prepare_camera(source, window)
+        while True:
+            if (not any(item.scene == preview for item in bpy.context.window_manager.windows) or
+                    source_scene(preview) != source or settings.operation_busy or settings.running or settings.job_directory):
+                work.close()
+                return
+            if rig_edit.render_busy(bpy.context):
+                yield ui_runtime.WAIT
+                continue
+            try:
+                next(work)
+            except StopIteration as result:
+                camera, name, count, index, value = result.value
+                break
+            yield
+        # No yield between camera allocation and commit/cleanup.
+        preview.collection.objects.link(camera)
+        preview.camera = camera
+        remove_camera(preview)
+        preview[CAMERA] = camera
+        camera = None
+        capture_settings.apply_format(preview, value)
+        preview['capture_camera_name'] = name
+        preview['capture_camera_count'] = count
+        preview['capture_format_label'] = f"{value['width']} × {value['height']} px"
+        settings.capture_preview_index = index
+    except ReferenceError:
+        # Closing a window or deleting a scene invalidates its pending update.
+        return
+    finally:
+        if camera is not None:
+            data = camera.data
+            bpy.data.objects.remove(camera, do_unlink=True)
+            if data.users == 0:
+                bpy.data.cameras.remove(data)
+        if is_preview(preview):
+            _pending.discard(preview.as_pointer())
 
 
 def open_steps(source, window, area):
+    """Opening can span UI ticks; defer every data edit while a render owns Main."""
+    from . import rig_edit
+    work = _open_steps(source, window, area)
+    try:
+        while True:
+            if rig_edit.render_busy(bpy.context):
+                yield ui_runtime.WAIT
+                continue
+            try:
+                step = next(work)
+            except StopIteration:
+                return
+            yield step
+    finally:
+        work.close()
+
+
+def _open_steps(source, window, area):
     settings = source.lichtfeld_training
     settings.operation_busy = True
     preview = None
@@ -91,39 +220,15 @@ def open_steps(source, window, area):
     try:
         if window.scene != source and source_scene(window.scene) != source:
             return
-        value = capture_settings.format_for(source, settings)
-        overrides = capture_settings.camera_for(settings)
-        cameras = []
-        if settings.camera_collection:
-            for obj in settings.camera_collection.all_objects:
-                if obj.type == 'CAMERA':
-                    cameras.append(obj)
-                yield
-        cameras.sort(key=lambda obj: obj.name)
-        if not cameras:
-            raise ValueError('Choose a camera collection first')
-        settings.capture_preview_index = min(settings.capture_preview_index, len(cameras))
-        original = cameras[settings.capture_preview_index - 1]
+        camera, name, count, index, value = yield from prepare_camera(source, window)
+        settings.capture_preview_index = index
         layer = source.view_layers.get(window.scene.get('capture_source_layer', '')) if source_scene(window.scene) else window.view_layer
         layer = layer or source.view_layers[0]
-        previous_scene, previous_layer = window.scene, window.view_layer
-        try:
-            window.scene = source
-            window.view_layer = layer
-            # A scene/view-layer temp_override can leave Blender 5.3 beta's
-            # graph without valid Bases. Switch and restore before yielding.
-            with bpy.context.temp_override(window=window):
-                graph = bpy.context.evaluated_depsgraph_get()
-                camera = capture_settings.copy_camera(original, graph, overrides)
-        finally:
-            window.scene = previous_scene
-            window.view_layer = previous_layer
-        camera[CAMERA] = True
         preview = bpy.data.scenes.new('LichtFeld capture framing')
         preview[SOURCE] = source
         preview['lichtfeld_capture_preview'] = True
-        preview['capture_camera_name'] = original.name
-        preview['capture_camera_count'] = len(cameras)
+        preview['capture_camera_name'] = name
+        preview['capture_camera_count'] = count
         preview['capture_source_layer'] = layer.name
         preview['capture_format_label'] = f"{value['width']} × {value['height']} px"
         preview.collection.objects.link(camera)
@@ -171,9 +276,10 @@ def open_steps(source, window, area):
             space = area.spaces.active
             if key not in _views:
                 _views[key] = (space.region_3d.view_perspective, space.use_local_camera, space.camera)
+        window.scene = preview
+        if area and area.type == 'VIEW_3D':
             space.use_local_camera = False
             space.region_3d.view_perspective = 'CAMERA'
-        window.scene = preview
         complete = True
         if previous and not any(w.scene == previous for w in bpy.context.window_manager.windows):
             remove(previous)
@@ -198,6 +304,9 @@ class LF_OT_capture_framing(bpy.types.Operator):
 
     @classmethod
     def poll(cls, context):
+        from .rig_edit import render_busy
+        if render_busy(context):
+            return False
         if is_preview(context.scene) and source_scene(context.scene) is None:
             return False
         source = source_scene(context.scene) or context.scene
@@ -209,6 +318,9 @@ class LF_OT_capture_framing(bpy.types.Operator):
         if is_preview(context.scene) and source == context.scene:
             self.report({'ERROR'}, 'The original scene was removed. Close this temporary preview to return to another scene.')
             return {'CANCELLED'}
+        if is_preview(context.scene):
+            camera_changed(source.lichtfeld_training, context)
+            return {'FINISHED'}
         work = open_steps(source, context.window, context.area)
         def failed(error):
             ui_runtime.report_notice('ERROR', error)
@@ -230,7 +342,17 @@ class LF_OT_close_capture_framing(bpy.types.Operator):
     bl_label = 'Back to capture setup'
     bl_description = 'Return to the original scene and remove the temporary framing scene and camera'
 
+    @classmethod
+    def poll(cls, context):
+        from .rig_edit import render_busy
+        source = source_scene(context.scene)
+        return is_preview(context.scene) and not render_busy(context) and not (
+            source and source.lichtfeld_training.operation_busy)
+
     def execute(self, context):
+        from .rig_edit import render_busy
+        if render_busy(context):
+            return {'CANCELLED'}
         scene = context.scene
         source = source_scene(scene)
         if not is_preview(scene) or source and source.lichtfeld_training.operation_busy:
@@ -259,12 +381,14 @@ def draw(layout, context, source, *, width=None):
     box = layout.box()
     box.label(text=context.scene.get('capture_camera_name', ''))
     box.label(text=context.scene.get('capture_format_label', ''))
+    from .rig_edit import render_busy
+    box.enabled = not render_busy(context)
     box.prop(s, 'capture_preview_index', text='Camera number')
     box.label(text=f"{context.scene.get('capture_camera_count', 0)} cameras, sorted by name")
     draw_capture_format(box, source, s, wrapped)
     draw_capture_overrides(box, s, wrapped)
     box.operator('lichtfeld.capture_framing', text='Update framing', icon='FILE_REFRESH')
-    wrapped(layout, 'Framing preview only. Apply changes with Update framing. Return to setup to capture; source cameras stay unchanged.')
+    wrapped(layout, 'Camera changes are automatic. Update framing applies output settings and camera overrides. Source cameras stay unchanged.')
 
 
 def draw_orphaned(layout, _context):

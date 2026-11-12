@@ -21,7 +21,18 @@ assert bpy.ops.lichtfeld.create_rig()=={"FINISHED"}
 collection=s.camera_collection
 original=sorted((o for o in collection.objects if o.type=="CAMERA"),key=lambda o:o["lichtfeld_camera_index"])
 ids=[o.as_pointer() for o in original];target=s.rig_aim;target_id=target.as_pointer()
+s.rig_auto_fit=False;s.rig_radius=3.25
+assert bpy.ops.lichtfeld.create_rig()=={'FINISHED'}
+assert collection['lichtfeld_generated_radius']==3.25 and not collection['lichtfeld_fit_limited']
+assert all(abs(o.location.length-3.25)<1e-5 for o in original)
+s.rig_auto_fit=True
+with patch.object(ext.capture_settings,'fitting_factor',return_value=10):
+    assert bpy.ops.lichtfeld.create_rig()=={'FINISHED'}
+assert collection['lichtfeld_fit_limited']
+assert all(abs(o.location.length-collection['lichtfeld_generated_radius'])<1e-5 for o in original)
+assert bpy.ops.lichtfeld.create_rig()=={'FINISHED'}
 locations=[o.location.copy() for o in original]
+assert all(abs(o.location.length-collection['lichtfeld_generated_radius'])<1e-5 for o in original)
 manual=bpy.data.objects.new("User helper",None);collection.objects.link(manual)
 s.rig_aim_offset=(0,0,.5)
 assert bpy.ops.lichtfeld.create_rig()=={"FINISHED"}
@@ -49,6 +60,7 @@ print("RIG_COUNT_EDIT_PRESERVES_MANUAL_OBJECTS_PASS")
 s.rig_distance=5
 baseline=[(o,o.data,o.matrix_world.copy(),o.constraints.get(ext.rig_edit.AIM).target) for o in collection.objects if o.type=="CAMERA"]
 base_counts=(len(bpy.data.objects),len(bpy.data.cameras),len(bpy.data.collections))
+base_radius=collection['lichtfeld_generated_radius']
 completed=False
 for cut in range(150):
     operator=SimpleNamespace(collection=None,rig_backup=[],committed=False,report=lambda *args:None)
@@ -63,6 +75,7 @@ for cut in range(150):
     work.close()
     for _ in ext.LF_OT_rig.cleanup(operator):pass
     assert base_counts==(len(bpy.data.objects),len(bpy.data.cameras),len(bpy.data.collections)),cut
+    assert collection['lichtfeld_generated_radius']==base_radius,cut
     bpy.context.view_layer.update()
     for obj,data,matrix,aim in baseline:
         assert obj.data==data and obj.constraints.get(ext.rig_edit.AIM).target==aim,cut
@@ -130,6 +143,19 @@ for phase in ('update','committed','rollback','path'):
         data=guide.data;bpy.data.objects.remove(guide,do_unlink=True);bpy.data.curves.remove(data)
 s.rig_mode='SPHERE';s.rig_curve=None
 print('RIG_RENDER_PAUSE_CANCEL_ROLLBACK_AND_POSTCOMMIT_CLEANUP_PASS',flush=True)
+
+# A non-radial rig cannot retain a stale radius from its preceding sphere.
+curve=bpy.data.curves.new('Distance feedback path','CURVE');curve.dimensions='3D'
+spline=curve.splines.new('POLY');spline.points.add(1)
+spline.points[0].co=(-4,-4,2,1);spline.points[1].co=(4,-4,2,1)
+guide=bpy.data.objects.new('Distance feedback path',curve);bpy.context.scene.collection.objects.link(guide)
+s.rig_mode='PATH';s.rig_curve=guide
+assert bpy.ops.lichtfeld.create_rig()=={'FINISHED'}
+assert 'lichtfeld_generated_radius' not in collection and 'lichtfeld_fit_limited' not in collection
+s.rig_mode='SPHERE';s.rig_curve=None
+assert bpy.ops.lichtfeld.create_rig()=={'FINISHED'}
+bpy.data.objects.remove(guide,do_unlink=True);bpy.data.curves.remove(curve)
+print('GENERATED_DISTANCE_MANUAL_AUTOFIT_CANCEL_AND_PATH_PASS',flush=True)
 
 # Loaded recipes restore controls; invalid metadata must not partially edit them.
 assert bpy.ops.lichtfeld.read_rig()=={"FINISHED"}

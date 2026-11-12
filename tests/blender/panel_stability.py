@@ -128,6 +128,25 @@ for loaded,action in ((False,'lichtfeld.read_rig'),(True,'lichtfeld.create_rig')
     else:assert any(name=='lichtfeld.read_rig' for name,row in layout.operations),'Revert must remain accessible'
 print('CAPTURE_PLAN_APPLIED_REFERENCE_TASK_ACTIONS_AND_COLLAPSED_SECTIONS_PASS')
 
+# Distance feedback follows native scene units; aiming remains directly available.
+s.rig_generator=True;s.rig_details=False;s.rig_mode='SPHERE'
+s.camera_collection['lichtfeld_generated_radius']=3.25
+s.camera_collection['lichtfeld_fit_limited']=True
+for system,scale,expected in (('NONE',.01,'3.25'),('METRIC',.01,'3.25 cm'),('IMPERIAL',1,"10.66'")):
+    bpy.context.scene.unit_settings.system=system
+    bpy.context.scene.unit_settings.scale_length=scale
+    layout=Layout()
+    ext.draw_capture_cameras(layout,context,s,ready,False,lambda box,text:box.label(text=text))
+    assert f'Last distance: {expected}' in layout.labels
+    assert 'rig_aim_mode' in dict(layout.fields) and 'rig_aim_offset' not in dict(layout.fields)
+    assert any('increased by automatic fitting' in label for label in layout.labels)
+s.rig_mode='PATH';s.rig_orientation='TANGENT'
+layout=Layout()
+ext.draw_capture_cameras(layout,context,s,ready,False,lambda box,text:box.label(text=text))
+assert not any(label.startswith('Last distance:') for label in layout.labels)
+assert 'rig_aim_mode' not in dict(layout.fields)
+print('RIG_DISTANCE_UNITS_AND_DIRECT_AIM_CONTROLS_PASS')
+
 pre = ext.preflight
 area = SimpleNamespace(type="VIEW_3D", tag_redraw=Mock())
 fake_bpy = SimpleNamespace(data=SimpleNamespace(screens=[SimpleNamespace(areas=[area])]))
