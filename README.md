@@ -5,9 +5,10 @@
 
 # LichtFeld for Blender
 
-Create a camera rig, capture a calibrated dataset, and train a navigable Gaussian
-splat from a Blender scene. The extension launches capture and training in
-separate processes, so LichtFeld Studio can remain closed while you work in Blender.
+Browse your LichtFeld Portal assets and bring their splats into Blender, or create
+a camera rig, capture a calibrated dataset, and train a navigable Gaussian splat
+from your scene. Capture, training and Portal asset preparation use separate
+processes, so the LichtFeld Studio window can remain closed.
 
 **Version 0.1.0 · Blender 5.3.x · GPL-3.0-or-later**
 
@@ -26,15 +27,17 @@ separate processes, so LichtFeld Studio can remain closed while you work in Blen
 This repository contains the Blender extension. The LichtFeld backend is installed
 separately. Training uses its public
 [training-hook API](https://github.com/MrNeRF/LichtFeld-Studio/blob/master/docs/plugins/api-reference.md#training-hooks);
-the Studio observer interface is a separate feature.
+the LichtFeld Studio observer interface is a separate feature.
 
 ## Requirements
 
 | Component | Requirement |
 | --- | --- |
 | Blender | 5.3.x, with native Gaussian point-cloud support |
+| Portal browsing | Online access enabled in Blender and a Portal account; no LichtFeld Studio installation needed |
+| Portal import | LichtFeld Studio with `licht ... --export-ply ...` support and the GPU required by that build |
 | Capture renderer | Cycles or EEVEE; a working device configuration for that engine |
-| Training backend | Headless LichtFeld with the public `lichtfeld_sessions` package, camera principal-point properties, `SplatData.shN_rows`, and scoped training hooks with explicit progress/outcomes |
+| Training backend | Headless LichtFeld with `plugin run` compatibility probing, the public `lichtfeld_sessions` package, camera principal-point properties, `SplatData.shN_rows`, and scoped training hooks with explicit progress/outcomes |
 | Training hardware | The CUDA/GPU requirements of the selected LichtFeld build |
 | Storage | A writable jobs directory with room for the captured project, images, maps, checkpoints, and splats |
 
@@ -76,7 +79,8 @@ The interface is currently in English.
 3. Open its preferences, select the actual LichtFeld **executable file**, and
    choose a permanent jobs directory. Select **Verify installation**.
 4. In the 3D Viewport, press **N** and open the **LichtFeld** sidebar tab.
-   The gear button returns to the extension preferences; the question mark opens the user guide.
+   Choose **Portal** or **Capture / Train**. The gear opens extension preferences;
+   the question mark in Capture / Train opens the user guide.
 
 Installing from source means building the ZIP above; this is a regular Blender
 extension, not a startup script. Updating the ZIP does not require changing its

@@ -7,6 +7,11 @@ Install the extension ZIP from Blender Preferences, enable it, and open the
 the actual LichtFeld executable and a writable, permanent jobs folder. **Verify
 installation** checks that the executable starts and verifies the native adapter APIs listed in the [requirements](../README.md#requirements), in the backend's own Python runtime. It does not open LichtFeld Studio's GUI or start training. Unsupported installations leave the compact setup view visible. Dataset-only capture can be used without a backend.
 
+Choose **Capture / Train** for the capture workflow or **Portal** to browse online
+assets. Without a tab selected, a scene with a rig, training job or temporary
+training view opens Capture / Train. Background job recovery does not override
+an explicit tab choice; you can switch at any time without stopping either workflow.
+
 Save the source `.blend` before capture. Blender creates an isolated saved copy
 for the render process; the source directory must allow temporary staging files.
 Keep linked assets accessible. A job records its capture configuration, so editing
@@ -278,9 +283,9 @@ Job and dataset metadata can contain local paths and scene-derived content;
 review them before sharing.
 # Portal Gallery
 
-The extension is named **LichtFeld**. Its main panel opens Portal Gallery; expand **Capture and training** only when you need the capture workflow. If no compatible LichtFeld Studio executable is configured, Training shows a compact setup view. **Generate dataset only** remains available without LichtFeld Studio, and existing jobs and read-only trainer connections remain accessible. The installation check verifies the required training APIs in LichtFeld Studio's own Python runtime without starting training or loading user plugins. The training adapter repeats the same check at job startup.
+The extension is named **LichtFeld**. Its sidebar has two tabs: **Portal** for your online assets, and **Capture / Train** for cameras, datasets and training. Only the selected workflow is shown. If no compatible LichtFeld Studio executable is configured, Capture / Train shows a compact setup view. **Generate dataset only** remains available without LichtFeld Studio, and existing jobs and read-only trainer connections remain accessible. The installation check verifies the required training APIs in LichtFeld Studio's own Python runtime without starting training or loading user plugins. The training adapter repeats the same check at job startup.
 
-Open **LichtFeld → Portal Gallery → Browse Portal Gallery…**, or use
+Choose **Portal → Browse gallery…** in the LichtFeld sidebar, or use
 **File → Import → LichtFeld Portal Gallery…**. The gallery is independent of the
 training panel and does not change the selected training job.
 
@@ -303,11 +308,16 @@ Blender's extension user storage and are separate from credentials and training 
 Import requires a LichtFeld Studio installation supporting
 `licht project.licht --export-ply output.ply`, configured in the extension's
 Settings. Browsing and account connection do not need LichtFeld Studio running.
+The current native exporter requires a working CUDA-capable GPU; this requirement
+applies to preparing an import, not to browsing the gallery.
 The headless exporter combines the project's visible splats and their transforms
 into one Gaussian object; existing Blender objects and training results remain.
 The native Gaussian attributes, including SH, are retained. The current Blender
 scene's display transform remains in effect. Environment and project cameras
 are not imported.
+Imported assets use Blender's Z-up convention, matching LichtFeld Studio's native
+PLY drag-out into Blender. This generic orientation differs from returning a
+Blender-origin training result to its original capture scene.
 
 Blender has its own Portal authorization. Use **Sign out** to forget that authorization and connect a different account; LichtFeld Studio stays connected. Offline sign-out only removes the local credentials and makes no network requests. Account controls are also available in the extension preferences. Use **Clear Portal cache** in the extension settings
 to remove retained downloads and thumbnails; files in use by another import are

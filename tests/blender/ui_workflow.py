@@ -9,6 +9,7 @@ parser.add_argument('--installed',action='store_true')
 options=parser.parse_args(sys.argv[sys.argv.index('--')+1:])
 area=options.area.resolve();area.mkdir(parents=True,exist_ok=True)
 ext=importlib.import_module('bl_ext.user_default.lichtfeld_training')
+bpy.context.window_manager.lichtfeld_workspace = 'TRAINING'
 prefs=ext.preferences();prefs.backend_path=str(options.backend.resolve());prefs.jobs_directory=str(area/'jobs')
 bpy.context.preferences.view.show_splash=False
 view=max(bpy.context.window.screen.areas,key=lambda a:a.width*a.height)
@@ -24,7 +25,7 @@ state={'step':0,'start':time.monotonic()}
 def popup():
  view=max(bpy.context.window.screen.areas,key=lambda a:a.width*a.height)
  with bpy.context.temp_override(area=view,region=next(r for r in view.regions if r.type=='WINDOW')):
-  bpy.ops.wm.call_panel(name='LF_PT_training',keep_open=True)
+  bpy.ops.wm.call_panel(name='LF_PT_lichtfeld',keep_open=True)
 def snap(name):
  bpy.ops.screen.screenshot(filepath=str(area/(name+'.png')));print('AUDIT_CAPTURE',name,flush=True)
 def tick():

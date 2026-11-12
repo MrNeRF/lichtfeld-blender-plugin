@@ -87,7 +87,7 @@ def environment(prefs,force=False,capture_only=False):
   def fail(error):done({'ok':False,'message':str(error),'backend':False,'folder':False})
   version=current.get('message') if current.get('backend') and current.get('ok') else None
   ui_runtime.submit(lambda:jobs.check_environment(*key,backend_version=version),done,fail)
- return current if current.get('generation') == _save_generation else {'ok':False,'message':'Checking installation and job folder…','checking':True}
+ return current if current.get('generation') == _save_generation else {**current,'ok':False,'message':'Checking installation and job folder…','checking':True}
 
 def collect(context,capture_only=False):
  initial=signature(context)

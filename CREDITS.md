@@ -20,18 +20,18 @@ defaults used by this integration.
 The Portal client wheel is generated from LichtFeld Studio's canonical Python account and gallery owners. The unmodified LichtFeld icon and light/dark wordmarks in `lichtfeld_training/assets` come from LichtFeld Studio's `src/visualizer/gui/assets` (`lichtfeld-icon.png`, `lichtfeld-splash-logo.png`, and `lichtfeld-splash-logo-dark.png`) and preserve its visual identity. They are covered by the upstream project's licensing and the LichtFeld Studio Authors attribution above.
 
 The shared session transport, coordinate geometry and bounded capture helpers
-are owned by Studio's public `lichtfeld_sessions` package. Its generated
+are owned by LichtFeld Studio's public `lichtfeld_sessions` package. Its generated
 GPL-3.0-or-later pure Python wheel is bundled in `lichtfeld_training/wheels`,
 including its license and package metadata. The extension owns its job-aware
 reader in `session_reader.py` and imports the public shared package.
 `mrnf_defaults.json` and `training_profiles.json` reflect LichtFeld's native
 optimization settings. Preserve this attribution when redistributing those files.
 
-Studio is distributed under its own
+LichtFeld Studio is distributed under its own
 [GPL license](https://github.com/MrNeRF/LichtFeld-Studio/blob/master/LICENSE) and
 [NVIDIA GPU Library Exception](https://github.com/MrNeRF/LichtFeld-Studio/blob/master/LICENSE-EXCEPTION.txt).
 That additional permission applies as stated by its copyright holders. This
-extension does not issue a new NVIDIA linking exception or apply Studio's
+extension does not issue a new NVIDIA linking exception or apply LichtFeld Studio's
 exception to other people's code. No LichtFeld executable, CUDA toolkit, GPU
 driver, or NVIDIA runtime library is included in the extension archive.
 
@@ -43,7 +43,7 @@ driver, or NVIDIA runtime library is included in the extension archive.
 placement and camera-visible colored point-cloud initialization. Its extension
 manifest declares GPL-3.0-or-later.
 
-We acknowledge those workflow concepts. LichtFeld Training implements its own
+We acknowledge those workflow concepts. LichtFeld for Blender implements its own
 editable camera distributions, evaluated-mesh sampling, captured-depth
 unprojection, bounded initialization, job supervision, and preview integration.
 Gauss Cannon modules, UI, artwork, and documentation are not vendored or shipped
@@ -51,7 +51,7 @@ as part of this extension.
 
 This acknowledgement is not a relicensing notice. Any future incorporation of
 third-party source must retain its applicable license and copyright notices;
-Studio's additional GPU permission cannot grant rights over that source.
+LichtFeld Studio's additional GPU permission cannot grant rights over that source.
 
 ## Runtime dependencies and file formats
 

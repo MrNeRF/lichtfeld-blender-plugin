@@ -6,11 +6,12 @@ import queue
 from pathlib import Path
 import bpy
 import bpy.utils.previews
-from bpy.props import CollectionProperty, IntProperty, PointerProperty, StringProperty
+from bpy.props import CollectionProperty, EnumProperty, IntProperty, PointerProperty, StringProperty
 from mathutils import Matrix
 from . import capture_preview, preview_scene, ui_runtime, rig_edit
-from .session_geometry import source_model_transform
+from .session_geometry import RDF_TO_BLENDER
 from .portal_runtime import Runtime
+from lichtfeld_portal.path_io import native_path
 
 _runtime = None
 _icons = None
@@ -28,7 +29,21 @@ _import_cancel = None
 _popup_region = None
 _thumbnail_attempted = set()
 _page_signature = None
-PAGE_SIZE = 6
+GALLERY_WIDTH = 900
+GALLERY_COLUMNS = 3
+PAGE_SIZE = 2 * GALLERY_COLUMNS
+IMAGE_ICON = bpy.types.UILayout.bl_rna.functions["prop"].parameters["icon"].enum_items["IMAGE_DATA"].value
+ACCOUNT_ERRORS = {
+    "sign_in_unavailable": "The Portal is temporarily unavailable. Try again.",
+    "access_denied": "The account connection was denied in the Portal.",
+    "expired_token": "The sign-in code expired. Connect again to get a new code.",
+    "invalid_grant": "The sign-in request is no longer valid. Connect again.",
+    "invalid_token": "Your Portal session has expired. Connect your account again.",
+    "portal_origin_mismatch": "This account was connected to a different Portal. Connect again.",
+    "unsafe_portal_url": "The Portal address is not trusted. Check your Portal configuration.",
+    "connection_storage_failed": "Blender could not save the Portal connection. Check configuration folder permissions.",
+    "local_credentials_removal_failed": "Blender could not remove the saved connection. Check configuration folder permissions and sign out again.",
+}
 _view_signature = None
 _view = None
 
@@ -104,6 +119,18 @@ def import_target(scene):
     return scene
 
 
+def select_workspace(context):
+    """Open an existing capture/job scene in its workflow after loading a file."""
+    if context.window_manager.is_property_set("lichtfeld_workspace"):
+        return  # Keep the current workspace until Blender replaces its UI state.
+    settings = context.scene.lichtfeld_training
+    training = (settings.job_directory or settings.attached_session or settings.running or
+                settings.camera_collection or settings.dataset_mode == "REUSE" or
+                capture_preview.is_preview(context.scene) or preview_scene.is_preview(context.scene))
+    if training:
+        context.window_manager.lichtfeld_workspace = "TRAINING"
+
+
 def import_steps(scene, identifier, count, fields):
     cloud = yield from ui_runtime.pointcloud_steps(fields, count, "Portal splat")
     committed = False
@@ -113,7 +140,7 @@ def import_steps(scene, identifier, count, fields):
             bpy.ops.ed.undo_push(message="Before Portal import")
         title = next((row["title"] for row in state()["rows"] if row["id"] == identifier), "Portal splat")
         obj = bpy.data.objects.new(title, cloud)
-        obj.matrix_world = Matrix(source_model_transform().tolist())
+        obj.matrix_world = Matrix(RDF_TO_BLENDER)
         obj["lichtfeld_portal_scene"] = identifier
         scene.collection.objects.link(obj)
         committed = True
@@ -190,6 +217,7 @@ def tick_steps():
     global _stage, _pending, _rows, _generation, _identity, _last_revision, _destination
     global _last_online, _refresh_wanted, _frame
     if _runtime is None:
+        select_workspace(bpy.context)
         runtime()
         return 0.2
     online = bpy.app.online_access
@@ -237,7 +265,7 @@ def tick_steps():
                 if identifier in _icons:
                     _icons[identifier].reload()
                 else:
-                    _icons.load(identifier, path, "IMAGE")
+                    _icons.load(identifier, native_path(path), "IMAGE")
             except (OSError, RuntimeError):
                 pass  # A missing thumbnail must not prevent importing the asset.
         elif kind == "cache_cleared":
@@ -272,7 +300,7 @@ def tick_steps():
     for key in tuple(_icons):
         if key != "lichtfeld" and key not in visible:
             del _icons[key]
-    if online and _popup_region is not None and snapshot["phase"] == "idle":
+    if online and _popup_region is not None and snapshot["phase"] in ("idle", "failed", "canceled"):
         for index in indices:
             identifier = settings.rows[index].identifier
             if identifier not in _thumbnail_attempted:
@@ -351,11 +379,11 @@ def account_controls(layout):
         row.operator_context = "INVOKE_DEFAULT"
         row.operator("lichtfeld.portal_action", text="Open network preferences", icon="PREFERENCES").action = "network_preferences"
     if account and account.signed_in:
-        row = layout.row()
+        row = layout.split(factor=0.7)
         row.label(text=account.display_name, icon="USER")
         row.enabled = snapshot["phase"] in ("idle", "failed", "canceled", "thumbnail")
         row.operator_context = "INVOKE_DEFAULT"
-        row.operator("lichtfeld.portal_action", text="Sign out", icon="USER").action = "sign_out"
+        row.operator("lichtfeld.portal_action", text="Sign out").action = "sign_out"
     elif bpy.app.online_access and account and account.linking:
         layout.label(text="Approve the connection in your browser", icon="URL")
         layout.label(text="Code: " + account.user_code)
@@ -365,24 +393,34 @@ def account_controls(layout):
         layout.operator("lichtfeld.portal_action", text="Cancel connection").action = "cancel"
     elif bpy.app.online_access:
         layout.operator("lichtfeld.portal_action", text="Connect account", icon="USER").action = "connect"
-    if account and account.error:
-        layout.label(text=account.error.replace("_", " "), icon="ERROR")
+    if account and account.error and not account.membership_required:
+        from .ui_text import draw_paragraph
+        region = bpy.context.region_popup or bpy.context.region
+        draw_paragraph(layout, ACCOUNT_ERRORS.get(account.error, "Could not connect to the Portal. Try connecting again."),
+                       region.width if region else GALLERY_WIDTH, bpy.context.preferences.system.ui_scale)
     if account and account.membership_required:
         layout.label(text="This account needs access to LichtFeld Portal", icon="INFO")
 
 
 def gallery_controls(layout, context):
     from .ui_text import draw_paragraph
-    layout.label(text="LichtFeld · Portal Gallery", icon_value=brand_icon())
+    heading = layout.row(align=True)
+    heading.label(text="LichtFeld · Portal Gallery", icon_value=brand_icon())
+    heading.operator_context = "INVOKE_DEFAULT"
+    heading.operator("lichtfeld.setup", text="", icon="PREFERENCES")
     account_controls(layout)
     snapshot = state()
     account = snapshot.get("account")
     if not bpy.app.online_access or not account or not account.signed_in:
-        if snapshot["message"]:
+        if snapshot["message"] and not (account and account.error):
             draw_paragraph(layout, snapshot["message"], 850, context.preferences.system.ui_scale)
         return
     busy = snapshot["phase"] not in ("idle", "failed", "canceled", "thumbnail")
     settings = context.window_manager.lichtfeld_portal
+    configured = bool(context.preferences.addons[__package__].preferences.backend_path.strip())
+    if not configured:
+        layout.label(text="Choose LichtFeld Studio in Settings to import assets", icon="INFO")
+        layout.operator("lichtfeld.setup", text="Configure LichtFeld Studio…", icon="PREFERENCES")
     indices, total, page, pages = gallery_page(context)
     row = layout.row(align=True)
     row.prop(settings, "search", text="", icon="VIEWZOOM")
@@ -397,20 +435,21 @@ def gallery_controls(layout, context):
     target = import_target(context.scene)
     reason = available(target) if target else "The source scene is no longer available."
     if indices:
-        grid = layout.grid_flow(row_major=True, columns=3, even_columns=True, even_rows=True, align=False)
+        grid = layout.grid_flow(row_major=True, columns=GALLERY_COLUMNS, even_columns=True, even_rows=True, align=False)
         for index in indices:
             item = settings.rows[index]
             card = grid.box()
-            card.template_icon(icon_value=_icons[item.identifier].icon_id if item.identifier in _icons else brand_icon(), scale=9)
+            card.template_icon(icon_value=_icons[item.identifier].icon_id if item.identifier in _icons else IMAGE_ICON,
+                               scale=GALLERY_WIDTH / GALLERY_COLUMNS / 20 - 1.5)
             card.label(text=item.title, icon="OUTLINER_OB_POINTCLOUD")
             if item.description:
                 draw_paragraph(card, item.description[:120], 260, context.preferences.system.ui_scale)
             action = card.row()
-            action.enabled = target is not None and not busy
+            action.enabled = target is not None and not busy and configured
             button = action.operator("lichtfeld.portal_action", text="Queue import" if reason else "Import", icon="IMPORT")
             button.action, button.identifier = "import", item.identifier
         # Keep partial rows at the same card width as a full gallery page.
-        for _ in range((-len(indices)) % 3):
+        for _ in range((-len(indices)) % GALLERY_COLUMNS):
             grid.column().label(text="")
     else:
         layout.label(text="No matching projects" if settings.search else "Your Portal gallery is empty", icon="INFO")
@@ -443,7 +482,7 @@ class LF_OT_portal_action(bpy.types.Operator):
     @classmethod
     def description(cls, context, properties):
         return {
-            "import": "Download this asset and add its visible splats to the current scene; existing objects and training results stay intact",
+            "import": "Download and add the visible splats to your scene. Requires a LichtFeld Studio installation for headless conversion; existing objects and training results stay intact",
             "refresh": "Check your Portal gallery for available assets",
             "connect": "Approve Blender's Portal connection in your browser; no password is entered in Blender",
             "cancel": "Cancel the pending connection or asset import; this does not stop training",
@@ -465,6 +504,8 @@ class LF_OT_portal_action(bpy.types.Operator):
 
     def execute(self, context):
         global _destination, _import_cancel
+        # Native RNA stores an explicit choice; delayed job recovery respects it.
+        context.window_manager.lichtfeld_workspace = context.window_manager.lichtfeld_workspace
         if self.action == "cancel":
             cancel_import()
             runtime().stop()
@@ -519,8 +560,9 @@ class LF_OT_portal_browser(bpy.types.Operator):
     bl_description = "Browse your LichtFeld Portal assets and add splats to the current scene"
 
     def invoke(self, context, event):
+        context.window_manager.lichtfeld_workspace = context.window_manager.lichtfeld_workspace
         runtime()
-        return context.window_manager.invoke_popup(self, width=900)
+        return context.window_manager.invoke_popup(self, width=GALLERY_WIDTH)
 
     def draw(self, context):
         global _popup_region
@@ -563,29 +605,35 @@ class LF_PT_portal(bpy.types.Panel):
     bl_region_type = "UI"
     bl_category = "LichtFeld"
     bl_order = -1
+    bl_ui_units_x = 20
 
     def draw_header(self, context):
         self.layout.label(text="", icon_value=brand_icon())
 
+    def draw_header_preset(self, context):
+        self.layout.operator("lichtfeld.setup", text="", icon="PREFERENCES")
+
     def draw(self, context):
-        row = self.layout.row(align=True)
+        self.layout.prop(context.window_manager, "lichtfeld_workspace", expand=True)
+        if context.window_manager.lichtfeld_workspace != "PORTAL":
+            from . import draw_training
+            draw_training(self, context)
+            return
+        if capture_preview.is_preview(context.scene):
+            self.layout.label(text="Temporary capture preview", icon="INFO")
+            self.layout.operator("lichtfeld.close_capture_framing", text="Back to source scene", icon="BACK")
+        elif preview_scene.is_preview(context.scene):
+            self.layout.label(text="Temporary trainer color view", icon="INFO")
+            self.layout.operator("lichtfeld.trainer_color_view", text="Back to source scene", icon="BACK")
+        row = self.layout.row()
         row.operator_context = "INVOKE_DEFAULT"
-        row.operator("lichtfeld.portal_gallery", text="Browse Portal Gallery…", icon="ASSET_MANAGER")
-        row.operator("lichtfeld.setup", text="", icon="PREFERENCES")
+        row.operator("lichtfeld.portal_gallery", text="Browse gallery…")
+        account_controls(self.layout)
         snapshot = state()
         account = snapshot.get("account")
-        if not bpy.app.online_access:
-            self.layout.label(text="Blender is offline", icon="INFO")
-        elif account and account.signed_in:
-            self.layout.label(text=account.display_name, icon="USER")
-        elif account and account.linking:
-            self.layout.label(text="Waiting for browser approval", icon="URL")
-        if snapshot["phase"] not in ("idle", "failed", "canceled", "thumbnail"):
-            self.layout.label(text=snapshot["message"] or snapshot["phase"].capitalize())
-        elif snapshot["message"]:
-            self.layout.label(text=snapshot["message"], icon="INFO")
-        if context.active_object and context.active_object.get("lichtfeld_portal_scene"):
-            self.layout.operator("lichtfeld.portal_frame", icon="VIEWZOOM")
+        if snapshot["message"] and not (account and account.error):
+            from .ui_text import draw_paragraph
+            draw_paragraph(self.layout, snapshot["message"], context.region.width, context.preferences.system.ui_scale)
 
 
 CLASSES = (LF_PortalRow, LF_PortalState, LF_OT_portal_action, LF_OT_portal_browser, LF_OT_portal_frame, LF_PT_portal)
@@ -600,8 +648,13 @@ def import_menu(self, context):
 def register():
     global _icons
     _icons = bpy.utils.previews.new()
-    _icons.load("lichtfeld", str(Path(__file__).with_name("assets") / "lichtfeld-icon.png"), "IMAGE")
+    _icons.load("lichtfeld", native_path(Path(__file__).with_name("assets") / "lichtfeld-icon.png"), "IMAGE")
     bpy.types.WindowManager.lichtfeld_portal = PointerProperty(type=LF_PortalState, options={"SKIP_SAVE"})
+    bpy.types.WindowManager.lichtfeld_workspace = EnumProperty(name="LichtFeld workspace",
+        description="Choose Portal assets or the scene capture and training workflow",
+        items=(("PORTAL", "Portal", "Browse and import your Portal assets", "ASSET_MANAGER", 0),
+               ("TRAINING", "Capture / Train", "Prepare cameras and datasets, train or view a trainer", "CAMERA_DATA", 1)),
+        default="PORTAL", options={"SKIP_SAVE"})
     bpy.types.TOPBAR_MT_file_import.append(import_menu)
     if not bpy.app.background:
         bpy.app.timers.register(tick, first_interval=0.2, persistent=True)
@@ -619,6 +672,7 @@ def unregister():
         bpy.app.timers.unregister(tick)
     bpy.types.TOPBAR_MT_file_import.remove(import_menu)
     del bpy.types.WindowManager.lichtfeld_portal
+    del bpy.types.WindowManager.lichtfeld_workspace
     if _icons is not None:
         bpy.utils.previews.remove(_icons)
     _icons = None

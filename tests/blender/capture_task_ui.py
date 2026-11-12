@@ -56,7 +56,7 @@ for task, action in [('CAPTURE','lichtfeld.start_training'), ('EXPORT','lichtfel
     layout = Layout()
     with patch.object(ext.preflight, 'cached', return_value=ready) as cached, \
          patch.object(ext.preflight, 'environment', return_value={'backend':True}):
-        ext.LF_PT_training.draw(SimpleNamespace(layout=layout), context)
+        ext.draw_training(SimpleNamespace(layout=layout), context)
     actions = [name for kind, *rest in layout.records if kind=='operator' for name in rest
                if name in {'lichtfeld.start_training','lichtfeld.export_dataset','lichtfeld.restart_training'}]
     assert actions == [action], (task, actions)
@@ -73,7 +73,7 @@ for task, action in [('CAPTURE','lichtfeld.start_training'), ('EXPORT','lichtfel
 s.dataset_mode = 'CAPTURE'
 layout = Layout()
 with patch.object(ext.preflight, 'environment', return_value={'backend':False, 'message':'Choose LichtFeld Studio'}):
-    ext.LF_PT_training.draw(SimpleNamespace(layout=layout), context)
+    ext.draw_training(SimpleNamespace(layout=layout), context)
 assert ('operator', 'lichtfeld.setup') in layout.records
 assert ('operator', 'lichtfeld.start_training') not in layout.records
 assert not any(kind == 'prop' and name in {'iterations', 'camera_collection'} for kind, *items in layout.records for name in items)
@@ -88,7 +88,7 @@ for checking, errors in [(True,['Checking source and cameras…']), (False,[]),
     layout = Layout()
     value = {**ready, 'checking':checking, 'errors':errors}
     with patch.object(ext.preflight, 'cached', return_value=value), patch.object(ext.preflight, 'issues', return_value=errors):
-        ext.LF_PT_training.draw(SimpleNamespace(layout=layout), context)
+        ext.draw_training(SimpleNamespace(layout=layout), context)
     orders.append(layout.records)
 assert all(order == orders[0] for order in orders)
 
@@ -119,6 +119,8 @@ with patch.object(ext.jobs, 'verify_backend', return_value='Verified backend') a
     before = wait_environment()
     assert before['ok'], before
     bpy.ops.wm.save_as_mainfile(filepath=str(area/'source.blend'))
+    checking = ext.preflight.environment(prefs)
+    assert checking.get('checking') and checking.get('backend') and not checking['ok'], checking
     after = wait_environment()
     assert after['ok'], after
     assert after['generation'] != before['generation']

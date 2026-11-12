@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Portal I/O and materialization. This module must never import bpy."""
 from concurrent.futures import Future
+from contextlib import ExitStack
 import atexit
 from lichtfeld_portal.path_io import Path, TemporaryDirectory, native_path
 import hashlib
@@ -225,7 +226,13 @@ class Runtime:
         owner = self.cache_owner(account, client.expected_session)
         cache = self.cache_directory / "assets" / owner / str(uuid.UUID(identifier))
         mkdir_private(cache, parents=True, exist_ok=True)
-        with locked_sidecar(cache / "download.lock", blocking=False):
+        with ExitStack() as ownership:
+            try:
+                ownership.enter_context(locked_sidecar(cache / "download.lock", blocking=False))
+            except OSError as error:
+                from lichtfeld_portal.gallery_logging import safe_text
+                self.update(details=safe_text(error))
+                raise ValueError("This asset's cache is in use or unavailable. Finish any import in another Blender session, or check cache folder permissions, then try again.") from error
             project, checkpoint_path = cache / "asset.licht", cache / "download.json"
             try:
                 checkpoint = read_json(checkpoint_path)

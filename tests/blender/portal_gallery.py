@@ -13,6 +13,7 @@ import numpy as np
 import ssl
 from lichtfeld_portal import http
 from lichtfeld_portal.path_io import Path as IOPath, TemporaryDirectory
+from lichtfeld_portal.private_directory import locked_sidecar
 
 context = http._system_ssl_context()
 assert context.check_hostname and context.verify_mode == ssl.CERT_REQUIRED
@@ -24,6 +25,33 @@ portal = extension.portal_ui
 brand = portal._icons["lichtfeld"]
 portal.clear_thumbnails()
 assert portal._icons["lichtfeld"] is brand
+browser = bpy.context.window_manager.lichtfeld_portal
+assert bpy.context.window_manager.lichtfeld_workspace == "PORTAL"
+bpy.context.window_manager.lichtfeld_workspace = "TRAINING"
+bpy.context.window_manager.lichtfeld_workspace = "PORTAL"
+settings = bpy.context.scene.lichtfeld_training
+settings.job_directory = "remembered-job"
+bpy.context.window_manager.property_unset("lichtfeld_workspace")
+portal.select_workspace(bpy.context)
+assert bpy.context.window_manager.lichtfeld_workspace == "TRAINING"
+# Explicit Portal navigation must not be stolen by a delayed job recovery.
+bpy.context.window_manager.lichtfeld_workspace = "PORTAL"
+portal.select_workspace(bpy.context)
+assert bpy.context.window_manager.lichtfeld_workspace == "PORTAL"
+settings.job_directory = ""
+bpy.context.window_manager.property_unset("lichtfeld_workspace")
+portal.select_workspace(bpy.context)
+assert bpy.context.window_manager.lichtfeld_workspace == "PORTAL"
+with TemporaryDirectory() as directory:
+    filename = str(IOPath(directory) / "workspace.blend")
+    bpy.context.scene.lichtfeld_training.camera_collection = bpy.data.collections.new("Saved capture")
+    bpy.context.window_manager.lichtfeld_workspace = "TRAINING"
+    bpy.ops.wm.save_as_mainfile(filepath=filename)
+    bpy.context.window_manager.lichtfeld_workspace = "PORTAL"
+    bpy.ops.wm.open_mainfile(filepath=filename)
+    assert bpy.context.window_manager.lichtfeld_workspace == "TRAINING"
+bpy.context.scene.lichtfeld_training.camera_collection = None
+bpy.context.window_manager.lichtfeld_workspace = "PORTAL"
 browser = bpy.context.window_manager.lichtfeld_portal
 for number in range(13):
     item = browser.rows.add()
@@ -90,6 +118,12 @@ with TemporaryDirectory() as directory:
     try:
         with patch.object(runtime, "_client", return_value=SimpleNamespace(expected_session=identity, download=download)), \
              patch.object(runtime, "_backend", side_effect=backend):
+            with locked_sidecar(cache / "download.lock"):
+                try:
+                    runtime._download(account, identifier, str(executable), cancel=runtime.cancel)
+                    raise AssertionError("A second import bypassed the existing asset lock")
+                except ValueError as error:
+                    assert "cache is in use or unavailable" in str(error)
             runtime._download(account, identifier, str(executable), cancel=runtime.cancel)
         kind, payload = runtime.events.get_nowait()
         assert kind == "import" and payload[3] == 2
@@ -97,7 +131,7 @@ with TemporaryDirectory() as directory:
     finally:
         runtime.close()
 
-with tempfile.TemporaryDirectory() as directory:
+with TemporaryDirectory() as directory:
     portal._runtime = portal.Runtime(directory)
     identifier = "ef4cb85d-b868-4e51-a0de-bac3bfa269ed"
     portal._runtime.update(rows=({"id": identifier, "title": "Portal test", "description": ""},))
@@ -106,9 +140,16 @@ with tempfile.TemporaryDirectory() as directory:
     portal._refresh_wanted = False
     portal._runtime.update(account=SimpleNamespace(email=identity[0], connected_since=identity[1],
         signed_in=True), rows_identity=identity, bump_generation=True)
-    image = str(Path(extension.__file__).parent / "assets/lichtfeld-icon.png")
-    thumbnail = portal._icons.load(identifier, image, "IMAGE")
+    image_path = IOPath(directory).joinpath(*(["thumbnail-" + "x" * 40] * 5), "image.png")
+    image_path.parent.mkdir(parents=True)
+    shutil.copyfile(Path(extension.__file__).parent / "assets/lichtfeld-icon.png", image_path)
+    image = str(image_path)
+    portal._runtime.events.put(("thumbnail", (identity, identifier, image)))
+    portal.tick_steps()
+    thumbnail = portal._icons[identifier]
+    assert list(thumbnail.image_size) == [128, 128]
     icon_id = thumbnail.icon_id
+    portal._runtime.update(bump_generation=True)
     portal.tick_steps()
     assert portal._icons[identifier] is thumbnail  # Refresh must not invalidate a drawn icon.
     portal._runtime.events.put(("thumbnail", (identity, identifier, image)))
@@ -132,7 +173,13 @@ with tempfile.TemporaryDirectory() as directory:
     assert imported.data.attributes.get("lichtfeld_rgb_tail_5")
     assert source["preserve"] == "original" and source.name in scene.objects
     assert scene.lichtfeld_training.result_object is None
-    assert imported.matrix_world[1][1] == -1 and imported.matrix_world[2][2] == -1
+    # Same world directions as native LichtFeld drag-out into Blender, rather
+    # than the different transform recorded for a Blender capture roundtrip.
+    from mathutils import Vector
+    assert imported.matrix_world.to_3x3() @ Vector((0, -1, 0)) == Vector((0, 0, 1))
+    assert imported.matrix_world.to_3x3() @ Vector((0, 0, 1)) == Vector((0, 1, 0))
+    assert imported.matrix_world.to_3x3().determinant() == 1
+    np.testing.assert_allclose(extension.session_geometry.source_model_transform(), np.diag([1, -1, -1, 1]))
     portal._destination = scene.session_uid
     portal._import_cancel = threading.Event()
     portal._frame = (identifier, 2, frames[0])
@@ -159,4 +206,5 @@ with tempfile.TemporaryDirectory() as directory:
     portal._runtime = None
 bpy.ops.preferences.addon_disable(module=NAME)
 assert not hasattr(bpy.types.WindowManager, "lichtfeld_portal")
+assert not hasattr(bpy.types.WindowManager, "lichtfeld_workspace")
 print("PORTAL_GALLERY_NATIVE_OK", flush=True)
