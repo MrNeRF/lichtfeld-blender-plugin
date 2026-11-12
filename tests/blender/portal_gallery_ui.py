@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Open the installed native browser in an isolated UI qualification profile."""
 import importlib
+import sys
 from pathlib import Path
 import bpy
 
@@ -9,6 +10,8 @@ bpy.ops.preferences.addon_enable(module="bl_ext.user_default.lichtfeld_training"
 extension = importlib.import_module("bl_ext.user_default.lichtfeld_training")
 bpy.context.preferences.view.show_splash = False
 root = Path(bpy.utils.user_resource("CONFIG")).parent
+if "--" in sys.argv:
+    extension.preferences().backend_path = sys.argv[sys.argv.index("--") + 1]
 bpy.ops.wm.save_as_mainfile(filepath=str(root / "portal-gallery-ui.blend"))
 
 

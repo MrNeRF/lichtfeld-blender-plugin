@@ -9,7 +9,7 @@ tags = ["Render", "Import-Export"]
 blender_version_min = "5.3.0"
 blender_version_max = "5.4.0"
 license = ["SPDX:GPL-3.0-or-later"]
-wheels = ["./wheels/lichtfeld_training_protocol-0.1.2-py3-none-any.whl", "./wheels/lichtfeld_portal_client-0.1.0-py3-none-any.whl"]
+wheels = ["./wheels/lichtfeld_training_protocol-0.1.2-py3-none-any.whl", "./wheels/lichtfeld_portal_client-0.1.1-py3-none-any.whl"]
 
 [permissions]
 files = "Capture scenes, save training jobs, and import Portal splats"

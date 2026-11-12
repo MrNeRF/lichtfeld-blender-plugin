@@ -83,6 +83,28 @@ class PortalRuntimeTests(unittest.TestCase):
                 finish.set()
                 runtime.close()
 
+    def test_canceling_a_thumbnail_without_replacement_returns_to_idle(self):
+        with tempfile.TemporaryDirectory() as root:
+            runtime = module.Runtime(root)
+            runtime.account = self.account()
+            entered, release = threading.Event(), threading.Event()
+            def thumbnail(*_):
+                entered.set()
+                release.wait(timeout=5)
+                return 200, "tag", b"unused"
+            try:
+                with patch.object(runtime, "_client", return_value=SimpleNamespace(thumbnail=thumbnail)):
+                    runtime.start("thumbnail", "ef4cb85d-b868-4e51-a0de-bac3bfa269ed")
+                    self.assertTrue(entered.wait(timeout=5))
+                    runtime.stop()
+                    release.set()
+                    runtime.future.result(timeout=5)
+                    self.assertEqual(runtime.snapshot()["phase"], "idle")
+                    self.assertTrue(runtime.events.empty())
+            finally:
+                release.set()
+                runtime.close()
+
     def test_account_change_cannot_publish_the_previous_gallery(self):
         with tempfile.TemporaryDirectory() as root:
             runtime = module.Runtime(root)

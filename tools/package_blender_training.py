@@ -27,6 +27,7 @@ rig_edit.py rig_geometry.py rig_mesh.py rig_path.py scene_render.py
 scene_render_worker.py session_cameras.py session_geometry.py session_reader.py
 supervisor.py training_options.py training_profiles.json
 ui_help.py ui_runtime.py ui_text.py visibility.py workflow.py portal_runtime.py portal_ui.py
+assets/lichtfeld-icon.png assets/lichtfeld-logo-white.png assets/lichtfeld-logo-black.png
 """.split()) | set(WHEELS)
 DOCUMENT_FILES = ("LICENSE", "CREDITS.md", "README.md", "CONTRIBUTING.md",
                   "docs/user-guide.md", "docs/technical-reference.md")
@@ -63,26 +64,39 @@ py-modules = ["_lfs_path_io"]
                         "--outdir", str(staging / "dist")], cwd=staging, check=True,
                        env={**os.environ, "SOURCE_DATE_EPOCH": "315532800"})
         wheel = staging / "dist" / Path(PROTOCOL_WHEEL).name
-        installed = destination / wheel.name
-        if installed.exists():
-            # Blender caches wheel distributions by name/version. Compare their
-            # payloads, not ZIP timestamps, ordering or compression settings.
-            with zipfile.ZipFile(installed) as previous, zipfile.ZipFile(wheel) as rebuilt:
-                names = set(previous.namelist())
-                if names != set(rebuilt.namelist()) or any(
-                        previous.read(name) != rebuilt.read(name) for name in names):
-                    raise ValueError("Protocol wheel contents changed under the same distribution version. "
-                                     "Update the protocol version in the manifest and reviewed wheel inventory.")
-            return
-        destination.mkdir(parents=True, exist_ok=True)
-        descriptor, filename = tempfile.mkstemp(prefix=wheel.name + "-", suffix=".tmp", dir=destination)
-        temporary = Path(filename)
-        try:
-            with os.fdopen(descriptor, "wb") as stream:
-                stream.write(wheel.read_bytes())
-            temporary.replace(destination / wheel.name)
-        finally:
-            temporary.unlink(missing_ok=True)
+        retain_wheel(wheel, destination)
+
+
+def retain_wheel(wheel, destination):
+    installed = destination / wheel.name
+    if installed.exists():
+        # Blender caches wheel distributions by name/version. Compare their
+        # payloads, not ZIP timestamps, ordering or compression settings.
+        with zipfile.ZipFile(installed) as previous, zipfile.ZipFile(wheel) as rebuilt:
+            names = set(previous.namelist())
+            if names != set(rebuilt.namelist()) or any(
+                    previous.read(name) != rebuilt.read(name) for name in names):
+                raise ValueError("Wheel contents changed under the same distribution version. "
+                                 "Update the dependency version in the manifest and reviewed wheel inventory.")
+        return
+    destination.mkdir(parents=True, exist_ok=True)
+    descriptor, filename = tempfile.mkstemp(prefix=wheel.name + "-", suffix=".tmp", dir=destination)
+    temporary = Path(filename)
+    try:
+        with os.fdopen(descriptor, "wb") as stream:
+            stream.write(wheel.read_bytes())
+        temporary.replace(destination / wheel.name)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def build_portal_client(lichtfeld_source):
+    destination = Path(__file__).resolve().parents[1] / "lichtfeld_training/wheels"
+    with tempfile.TemporaryDirectory() as directory:
+        subprocess.run([sys.executable, str(Path(lichtfeld_source) / "tools/package_portal_client.py"),
+                        "--output", directory], check=True)
+        wheel = next(name for name in WHEELS if "portal_client" in name)
+        retain_wheel(Path(directory) / Path(wheel).name, destination)
 
 
 def package(output, *, repository=None):
@@ -143,6 +157,5 @@ if __name__ == "__main__":
     arguments = parser.parse_args()
     if arguments.lichtfeld_source:
         build_protocol(arguments.lichtfeld_source)
-        subprocess.run([sys.executable, str(arguments.lichtfeld_source / "tools/package_portal_client.py"),
-                        "--output", str(Path(__file__).resolve().parents[1] / "lichtfeld_training/wheels")], check=True)
+        build_portal_client(arguments.lichtfeld_source)
     print(package(arguments.output).resolve())

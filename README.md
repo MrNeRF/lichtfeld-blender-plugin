@@ -1,3 +1,8 @@
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="lichtfeld_training/assets/lichtfeld-logo-white.png">
+  <img src="lichtfeld_training/assets/lichtfeld-logo-black.png" alt="LichtFeld Studio" height="36">
+</picture>
+
 # LichtFeld for Blender
 
 Create a camera rig, capture a calibrated dataset, and train a navigable Gaussian
@@ -36,8 +41,7 @@ the Studio observer interface is a separate feature.
 Dataset-only capture does not require LichtFeld or a training GPU. Training and
 external viewing need a compatible backend; an older executable may not provide
 the required APIs. **Verify installation** checks that the selected executable
-starts and the jobs directory is writable. The adapter checks native API support
-when a job starts and validates its hook payload before optimization proceeds.
+starts, verifies its native training APIs, and checks the jobs directory. The adapter repeats that API check when a job starts and validates its hook payload before optimization proceeds.
 First use may need network access to prepare the backend's isolated NumPy runtime.
 The ZIP bundles LichtFeld's pure Python training-protocol wheel. NumPy, native
 libraries and backend executables are supplied separately.

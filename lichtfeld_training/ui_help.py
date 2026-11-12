@@ -97,7 +97,6 @@ PROPERTIES = {
     'previews_enabled': 'Whether live model transfer is enabled; freezing previews does not pause training',
     'show_result': 'Display the trained splat and hide captured source geometry, or restore the source visibility',
     'object': 'Source object retained independently of the current viewport selection',
-    'verification': 'Result of checking the configured LichtFeld executable and output folder',
     'directory': 'Choose the parent folder for a new, uniquely named complete dataset export',
     'new_total': 'New total step count, including steps already completed in the saved checkpoint',
     'action': 'Action sent to the owned job; connected external trainers remain read-only',

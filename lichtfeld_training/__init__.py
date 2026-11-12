@@ -200,10 +200,10 @@ class LichtFeldPreferences(bpy.types.AddonPreferences):
                                 description="The LichtFeld Studio installation used for training and Portal asset preparation")
     jobs_directory: StringProperty(name="Training jobs", subtype="DIR_PATH",
                                   description="Permanent folder for datasets, checkpoints and results")
-    verification: StringProperty(options={"SKIP_SAVE"})
 
     def draw(self, context):
         layout = self.layout
+        layout.label(text="LichtFeld for Blender", icon_value=portal_ui.brand_icon())
         layout.prop(self, "backend_path")
         box = layout.box()
         box.label(text="Portal Gallery", icon="ASSET_MANAGER")
@@ -214,8 +214,9 @@ class LichtFeldPreferences(bpy.types.AddonPreferences):
         row = layout.row()
         row.enabled = bool(self.backend_path)
         row.operator("lichtfeld.verify_installation", icon="CHECKMARK")
-        if self.verification:
-            for line in textwrap.wrap(self.verification, width=70):
+        if self.backend_path:
+            installation = preflight.environment(self)
+            for line in textwrap.wrap(installation['message'], width=70):
                 layout.label(text=line)
         layout.prop(self, "jobs_directory")
         for line in textwrap.wrap("Jobs: " + preflight.jobs_folder(self), width=70):
@@ -445,16 +446,10 @@ for _name in training_options.FIELDS:
 class LF_OT_verify(bpy.types.Operator):
     bl_idname = "lichtfeld.verify_installation"
     bl_label = "Verify installation"
-    bl_description = "Check that the executable starts; training API compatibility is checked when a job starts"
+    bl_description = "Verify the configured LichtFeld Studio executable and its training APIs in the background"
 
     def execute(self, context):
         prefs = preferences(context)
-        path = bpy.path.abspath(prefs.backend_path)
-        prefs.verification = "Checking installation…"
-        def done(text):
-            prefs.verification = text
-        directory = preflight.jobs_folder(prefs)
-        ui_runtime.submit(lambda: jobs.check_environment(path, directory)["message"], callback=done, failure=done)
         preflight.environment(prefs, force=True)
         return {"FINISHED"}
 
@@ -2059,8 +2054,10 @@ def draw_capture_actions(setup, settings, ready, errors, capture_only, wrapped):
 
 
 class LF_PT_training(bpy.types.Panel):
-    bl_label = "Training"
+    bl_label = "Capture and training"
     bl_idname = "LF_PT_training"
+    bl_parent_id = "LF_PT_lichtfeld"
+    bl_options = {"DEFAULT_CLOSED"}
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
     bl_category = "LichtFeld"

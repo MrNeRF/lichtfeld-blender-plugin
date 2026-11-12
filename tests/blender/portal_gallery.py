@@ -4,7 +4,6 @@
 import importlib
 import tempfile
 import threading
-import hashlib
 import shutil
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -21,6 +20,20 @@ NAME = "bl_ext.user_default.lichtfeld_training"
 bpy.ops.preferences.addon_enable(module=NAME)
 extension = importlib.import_module(NAME)
 portal = extension.portal_ui
+brand = portal._icons["lichtfeld"]
+portal.clear_thumbnails()
+assert portal._icons["lichtfeld"] is brand
+browser = bpy.context.window_manager.lichtfeld_portal
+for number in range(13):
+    item = browser.rows.add()
+    item.identifier, item.title = str(number), f"Project {number}"
+assert portal.gallery_page(bpy.context)[:2] == (list(range(6)), 13)
+browser.page = 99
+assert browser.page == 3 and portal.gallery_page(bpy.context)[0] == [12]
+browser.search = "Project 12"
+assert browser.page == 1 and portal.gallery_page(bpy.context)[:2] == ([12], 1)
+browser.rows.clear()
+browser.search = ""
 scene = bpy.context.scene
 source = scene.objects.get("Cube")
 source["preserve"] = "original"
@@ -50,8 +63,8 @@ with tempfile.TemporaryDirectory() as directory:
     identifier = "ef4cb85d-b868-4e51-a0de-bac3bfa269ed"
     identity = ("owner@example.test", "session")
     account = SimpleNamespace(base_url="https://portal.lichtfeld.io",
-        snapshot=lambda: SimpleNamespace(email=identity[0], connected_since=identity[1]))
-    owner = hashlib.sha256(repr((account.base_url, *identity)).encode("utf-8")).hexdigest()
+        snapshot=lambda: SimpleNamespace(email=identity[0], connected_since=identity[1], signed_in=True))
+    owner = runtime.cache_owner(account, identity)
     cache = runtime.cache_directory / "assets" / owner / identifier
     cache.mkdir(parents=True)
     (cache / "download.json").write_text("[]")

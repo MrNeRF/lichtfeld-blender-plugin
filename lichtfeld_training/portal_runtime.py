@@ -15,6 +15,10 @@ import uuid
 
 
 class Runtime:
+    @staticmethod
+    def cache_owner(account, session):
+        return hashlib.sha256(repr((account.base_url, session[0])).encode("utf-8")).hexdigest()
+
     def __init__(self, directory, cache_directory=None):
         self.directory = Path(directory)
         self.cache_directory = Path(cache_directory) if cache_directory is not None else self.directory / "cache"
@@ -119,11 +123,8 @@ class Runtime:
                 raise InterruptedError("Operation canceled")
             if action == "connect":
                 account.start_device_flow()
-            elif action == "disconnect":
-                account.disconnect()
-                self.update(rows=(), bump_generation=True)
             elif action == "sign_out":
-                account.sign_out()
+                account.sign_out(revoke=arguments[0] if arguments else True)
                 self.update(rows=(), bump_generation=True)
             elif action == "clear_cache":
                 self._clear_cache(cancel)
@@ -140,13 +141,13 @@ class Runtime:
                 current = account.snapshot()
                 if (current.email, current.connected_since) != client.expected_session:
                     raise ValueError("The Portal account changed. Refresh the gallery again.")
-                self.update(rows=rows, bump_generation=True)
+                self.update(rows=rows, rows_identity=client.expected_session, bump_generation=True)
             elif action == "thumbnail":
                 client = self._client(account)
                 _, _, data = client.thumbnail(arguments[0])
                 if cancel.is_set():
-                    return
-                owner = hashlib.sha256(repr((account.base_url, *client.expected_session)).encode("utf-8")).hexdigest()
+                    raise InterruptedError("Thumbnail canceled")
+                owner = self.cache_owner(account, client.expected_session)
                 folder = self.cache_directory / "thumbnails" / owner
                 from lichtfeld_portal.private_directory import mkdir_private
                 mkdir_private(folder, parents=True, exist_ok=True)
@@ -159,7 +160,7 @@ class Runtime:
                         temporary.replace(path)
                     finally:
                         temporary.unlink(missing_ok=True)
-                self.events.put(("thumbnail", (arguments[0], str(path))))
+                self.events.put(("thumbnail", (client.expected_session, arguments[0], str(path))))
             elif action == "import":
                 self._download(account, *arguments, cancel=cancel)
                 return
@@ -221,8 +222,7 @@ class Runtime:
             probe.seek(0)
             if code or b"--export-ply" not in probe.read():
                 raise ValueError("Update LichtFeld Studio: this installation does not support Portal asset export (--export-ply).")
-        identity = (account.base_url, *client.expected_session)
-        owner = hashlib.sha256(repr(identity).encode("utf-8")).hexdigest()
+        owner = self.cache_owner(account, client.expected_session)
         cache = self.cache_directory / "assets" / owner / str(uuid.UUID(identifier))
         mkdir_private(cache, parents=True, exist_ok=True)
         with locked_sidecar(cache / "download.lock", blocking=False):
@@ -257,17 +257,18 @@ class Runtime:
                             message = details.read(1200).decode("utf-8", errors="replace")
                         from lichtfeld_portal.gallery_logging import safe_text
                         self.update(details=safe_text(message))
-                        raise ValueError("LichtFeld Studio could not prepare this asset. A supported CUDA GPU is required. Copy error details for the backend's reason.")
+                        raise ValueError("LichtFeld Studio could not prepare this project. Copy error details for the backend's reason.")
                 self.update(phase="decoding", message="Preparing Blender data…")
                 with output.open("rb") as stream:
                     arrays, _ = read_ply(stream, cancel.is_set)
                 fields = blender_fields(arrays)
                 if cancel.is_set():
                     raise InterruptedError("Import canceled")
-                if (account.snapshot().email, account.snapshot().connected_since) != client.expected_session:
+                current = account.snapshot()
+                if not current.signed_in or (current.email, current.connected_since) != client.expected_session:
                     raise ValueError("The Portal account changed. Import the asset again.")
-                self.events.put(("import", (client.expected_session, cancel, identifier, len(arrays["means"]), fields)))
-                self.update(phase="ready", message="Ready to add to the scene")
+            self.events.put(("import", (client.expected_session, cancel, identifier, len(arrays["means"]), fields)))
+            self.update(phase="ready", message="Ready to add to the scene")
 
     def _clear_cache(self, cancel):
         from lichtfeld_portal.private_directory import locked_sidecar

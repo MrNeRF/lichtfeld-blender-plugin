@@ -19,7 +19,6 @@ _rows = None
 _stage = None
 _destination = None
 _pending = None
-_thumbnail = ""
 _identity = None
 _last_revision = -1
 _last_online = None
@@ -27,10 +26,25 @@ _refresh_wanted = False
 _frame = None
 _import_cancel = None
 _popup_region = None
+_thumbnail_attempted = set()
+_page_signature = None
+PAGE_SIZE = 6
+_view_signature = None
+_view = None
 
 
 def state():
     return _runtime.snapshot() if _runtime else {"phase": "idle", "rows": (), "message": "", "progress": 0}
+
+
+def brand_icon():
+    return _icons["lichtfeld"].icon_id if _icons and "lichtfeld" in _icons else 0
+
+
+def clear_thumbnails():
+    for key in tuple(_icons):
+        if key != "lichtfeld":
+            del _icons[key]
 
 
 def runtime():
@@ -56,14 +70,30 @@ def available(scene):
     return ""
 
 
-def selected(context):
+def gallery_page(context):
+    global _view_signature, _view
     settings = context.window_manager.lichtfeld_portal
-    row = settings.rows[settings.index] if 0 <= settings.index < len(settings.rows) else None
-    if row and settings.search:
-        flags = bpy.types.UI_UL_list.filter_items_by_name(settings.search, 1, [row], "title")
-        if not flags[0]:
-            return None
-    return row
+    rows = settings.rows
+    signature = (_generation, len(rows), settings.search, settings.page)
+    if signature == _view_signature:
+        return _view
+    flags = bpy.types.UI_UL_list.filter_items_by_name(settings.search, 1, rows, "title") if settings.search else None
+    indices = [i for i in range(len(rows)) if flags is None or flags[i]]
+    pages = max(1, (len(indices) + PAGE_SIZE - 1) // PAGE_SIZE)
+    page = min(settings.page - 1, pages - 1)
+    _view_signature = signature
+    _view = indices[page * PAGE_SIZE:(page + 1) * PAGE_SIZE], len(indices), page, pages
+    return _view
+
+
+def search_changed(settings, context):
+    settings.page = 1
+
+
+def page_changed(settings, context):
+    pages = gallery_page(context)[3]
+    if settings.page > pages:
+        settings.page = pages
 
 
 def import_target(scene):
@@ -156,12 +186,16 @@ def tick():
 
 
 def tick_steps():
-    global _stage, _pending, _rows, _generation, _thumbnail, _identity, _last_revision, _destination
+    global _page_signature, _popup_region
+    global _stage, _pending, _rows, _generation, _identity, _last_revision, _destination
     global _last_online, _refresh_wanted, _frame
     if _runtime is None:
         runtime()
         return 0.2
     online = bpy.app.online_access
+    if online and _last_online is False:
+        _thumbnail_attempted.clear()
+        _refresh_wanted = True
     if not online and _last_online is not False:
         _runtime.stop()
         cancel_import()
@@ -173,8 +207,7 @@ def tick_steps():
         if _identity is not None:
             invalidate()
             _runtime.update(rows=(), bump_generation=True)
-            for key in tuple(_icons):
-                del _icons[key]
+            clear_thumbnails()
         _identity = identity
         _refresh_wanted = bool(identity)
     if online and _refresh_wanted and before["phase"] in ("idle", "canceled", "failed"):
@@ -197,16 +230,15 @@ def tick_steps():
             if expected_identity == identity and token is _import_cancel and not token.is_set() and _destination is not None:
                 _pending = payload
         elif kind == "thumbnail":
-            identifier, path = value
+            expected_identity, identifier, path = value
+            if expected_identity != identity or identifier in _icons:
+                continue
             try:
-                for key in tuple(_icons):
-                    del _icons[key]
                 _icons.load(identifier, path, "IMAGE")
             except (OSError, RuntimeError):
                 pass  # A missing thumbnail must not prevent importing the asset.
         elif kind == "cache_cleared":
-            for key in tuple(_icons):
-                del _icons[key]
+            clear_thumbnails()
     snapshot = _runtime.snapshot()
     if _import_cancel and _import_cancel.is_set():
         cancel_import()
@@ -214,9 +246,10 @@ def tick_steps():
         _runtime.update(phase="canceled", message="Import canceled")
     if snapshot["generation"] != _generation:
         _generation = snapshot["generation"]
+        clear_thumbnails()
         bpy.context.window_manager.lichtfeld_portal.rows.clear()
-        _rows = iter(snapshot["rows"])
-        _thumbnail = ""
+        bpy.context.window_manager.lichtfeld_portal.page = 1
+        _rows = iter(snapshot["rows"] if snapshot.get("rows_identity") == identity else ())
     deadline = time.monotonic() + 0.003
     rows_changed = False
     while _rows and time.monotonic() < deadline:
@@ -227,10 +260,23 @@ def tick_steps():
         item = bpy.context.window_manager.lichtfeld_portal.rows.add()
         item.identifier, item.title, item.description = row["id"], row["title"], row["description"]
         rows_changed = True
-    row = selected(bpy.context)
-    if online and row and row.identifier != _thumbnail and snapshot["phase"] == "idle":
-        if _runtime.start("thumbnail", row.identifier):
-            _thumbnail = row.identifier
+    settings = bpy.context.window_manager.lichtfeld_portal
+    indices, _, page, _ = gallery_page(bpy.context)
+    signature = (_generation, settings.search, page)
+    if signature != _page_signature:
+        _page_signature = signature
+        _thumbnail_attempted.clear()
+    visible = {settings.rows[index].identifier for index in indices}
+    for key in tuple(_icons):
+        if key != "lichtfeld" and key not in visible:
+            del _icons[key]
+    if online and _popup_region is not None and snapshot["phase"] == "idle":
+        for index in indices:
+            identifier = settings.rows[index].identifier
+            if identifier not in _icons and identifier not in _thumbnail_attempted:
+                if _runtime.start("thumbnail", identifier):
+                    _thumbnail_attempted.add(identifier)
+                break
     if _pending and _stage is None:
         try:
             scene = destination()
@@ -274,13 +320,12 @@ def tick_steps():
             for area in window.screen.areas:
                 if area.type in ("VIEW_3D", "PREFERENCES"):
                     area.tag_redraw()
-        global _popup_region
         if _popup_region is not None:
             try:
                 _popup_region.tag_redraw()
             except ReferenceError:
                 _popup_region = None
-    return 0.1
+    return 0.02 if _stage is not None else (0.1 if _popup_region is not None else 0.5)
 
 
 class LF_PortalRow(bpy.types.PropertyGroup):
@@ -291,23 +336,8 @@ class LF_PortalRow(bpy.types.PropertyGroup):
 
 class LF_PortalState(bpy.types.PropertyGroup):
     rows: CollectionProperty(type=LF_PortalRow, options={"SKIP_SAVE"})
-    index: IntProperty(name="Selected asset", description="Asset to preview and import", options={"SKIP_SAVE"})
-    search: StringProperty(name="Search assets", description="Filter the Portal gallery by title", options={"SKIP_SAVE"})
-
-
-class LF_UL_portal(bpy.types.UIList):
-    def draw_filter(self, context, layout):
-        layout.prop(self, "use_filter_sort_alpha", text="Sort by name")
-
-    def draw_item(self, context, layout, data, item, icon, active_data, active_propname, index=0, flt_flag=0):
-        layout.label(text=item.title, icon="OUTLINER_OB_POINTCLOUD")
-
-    def filter_items(self, context, data, propname):
-        rows = getattr(data, propname)
-        search = context.window_manager.lichtfeld_portal.search
-        flags = bpy.types.UI_UL_list.filter_items_by_name(search, self.bitflag_filter_item, rows, "title") if search else []
-        order = bpy.types.UI_UL_list.sort_items_by_name(rows, "title") if self.use_filter_sort_alpha else []
-        return flags, order
+    search: StringProperty(name="Search projects", description="Filter your Portal projects by title", update=search_changed, options={"SKIP_SAVE"})
+    page: IntProperty(name="Gallery page", description="Browse another page of your Portal projects", min=1, default=1, update=page_changed, options={"SKIP_SAVE"})
 
 
 def account_controls(layout):
@@ -318,22 +348,20 @@ def account_controls(layout):
         row = layout.row()
         row.operator_context = "INVOKE_DEFAULT"
         row.operator("lichtfeld.portal_action", text="Open network preferences", icon="PREFERENCES").action = "network_preferences"
-        return
     if account and account.signed_in:
-        layout.label(text="Connected as " + account.display_name, icon="USER")
         row = layout.row()
+        row.label(text=account.display_name, icon="USER")
         row.enabled = snapshot["phase"] in ("idle", "failed", "canceled", "thumbnail")
-        row.operator("lichtfeld.portal_action", text="Disconnect Blender").action = "disconnect"
         row.operator_context = "INVOKE_DEFAULT"
         row.operator("lichtfeld.portal_action", text="Sign out", icon="USER").action = "sign_out"
-    elif account and account.linking:
+    elif bpy.app.online_access and account and account.linking:
         layout.label(text="Approve the connection in your browser", icon="URL")
         layout.label(text="Code: " + account.user_code)
         row = layout.row(align=True)
         row.operator("lichtfeld.portal_action", text="Open browser", icon="URL").action = "browser"
         row.operator("lichtfeld.portal_action", text="Copy code", icon="COPYDOWN").action = "copy"
         layout.operator("lichtfeld.portal_action", text="Cancel connection").action = "cancel"
-    else:
+    elif bpy.app.online_access:
         layout.operator("lichtfeld.portal_action", text="Connect account", icon="USER").action = "connect"
     if account and account.error:
         layout.label(text=account.error.replace("_", " "), icon="ERROR")
@@ -342,56 +370,61 @@ def account_controls(layout):
 
 
 def gallery_controls(layout, context):
-    layout.label(text="Portal Gallery", icon="ASSET_MANAGER")
+    from .ui_text import draw_paragraph
+    layout.label(text="LichtFeld · Portal Gallery", icon_value=brand_icon())
     account_controls(layout)
-    if not bpy.app.online_access:
-        if state()["message"]:
-            from .ui_text import draw_paragraph
-            draw_paragraph(layout, state()["message"], 600, context.preferences.system.ui_scale)
-        return
     snapshot = state()
-    busy = snapshot["phase"] not in ("idle", "failed", "canceled", "thumbnail")
-    row = layout.row()
     account = snapshot.get("account")
-    row.enabled = bpy.app.online_access and not busy and bool(account and account.signed_in)
-    row.operator("lichtfeld.portal_action", text="Refresh gallery", icon="FILE_REFRESH").action = "refresh"
-    layout.prop(context.window_manager.lichtfeld_portal, "search", text="", icon="VIEWZOOM")
-    layout.template_list("LF_UL_portal", "", context.window_manager.lichtfeld_portal, "rows",
-                         context.window_manager.lichtfeld_portal, "index", rows=7)
-    item = selected(context)
-    if item:
-        icon = _icons[item.identifier].icon_id if _icons and item.identifier in _icons else 0
-        layout.template_icon(icon_value=icon, scale=8)
-        layout.label(text=item.title)
-        layout.label(text="Import: visible project splats · PLY")
-        layout.label(text="Requires LichtFeld Studio and a supported CUDA GPU", icon="INFO")
-        if item.description:
-            from .ui_text import draw_paragraph
-            description = item.description[:600] + ("…" if len(item.description) > 600 else "")
-            draw_paragraph(layout, description, 600, context.preferences.system.ui_scale)
+    if not bpy.app.online_access or not account or not account.signed_in:
+        if snapshot["message"]:
+            draw_paragraph(layout, snapshot["message"], 850, context.preferences.system.ui_scale)
+        return
+    busy = snapshot["phase"] not in ("idle", "failed", "canceled", "thumbnail")
+    settings = context.window_manager.lichtfeld_portal
+    indices, total, page, pages = gallery_page(context)
+    row = layout.row(align=True)
+    row.prop(settings, "search", text="", icon="VIEWZOOM")
+    refresh = row.row(align=True)
+    refresh.enabled = not busy
+    refresh.operator("lichtfeld.portal_action", text="", icon="FILE_REFRESH").action = "refresh"
+    row = layout.row()
+    row.label(text=f"{total:,} project{'s' if total != 1 else ''} on your Portal")
+    if pages > 1:
+        row.prop(settings, "page", text=f"Page / {pages}")
     target = import_target(context.scene)
     reason = available(target) if target else "The source scene is no longer available."
+    if indices:
+        grid = layout.grid_flow(row_major=True, columns=3, even_columns=True, even_rows=True, align=False)
+        for index in indices:
+            item = settings.rows[index]
+            card = grid.box()
+            card.template_icon(icon_value=_icons[item.identifier].icon_id if item.identifier in _icons else brand_icon(), scale=9)
+            card.label(text=item.title, icon="OUTLINER_OB_POINTCLOUD")
+            if item.description:
+                draw_paragraph(card, item.description[:120], 260, context.preferences.system.ui_scale)
+            action = card.row()
+            action.enabled = target is not None and not busy
+            button = action.operator("lichtfeld.portal_action", text="Queue import" if reason else "Import", icon="IMPORT")
+            button.action, button.identifier = "import", item.identifier
+    else:
+        layout.label(text="No matching projects" if settings.search else "Your Portal gallery is empty", icon="INFO")
     if target:
-        layout.label(text="Destination: " + target.name)
+        layout.label(text="Import into: " + target.name, icon="SCENE_DATA")
     if reason:
-        layout.label(text=reason, icon="INFO")
-    row = layout.row()
-    row.enabled = bool(item) and target is not None and not busy and bpy.app.online_access
-    row.operator("lichtfeld.portal_action", text="Download and queue import" if reason and target else "Import into scene", icon="IMPORT").action = "import"
-    if context.active_object and context.active_object.get("lichtfeld_portal_scene"):
-        layout.operator("lichtfeld.portal_frame", icon="VIEWZOOM")
+        draw_paragraph(layout, reason, 850, context.preferences.system.ui_scale)
     if busy:
-        layout.label(text=snapshot["phase"].capitalize())
-        layout.progress(factor=snapshot["progress"], type="BAR", text="Downloading" if snapshot["phase"] == "import" else snapshot["phase"].capitalize())
-        if snapshot["phase"] not in ("disconnect", "sign_out"):
+        phase = {"import": "Downloading", "converting": "Preparing asset", "decoding": "Preparing Blender data", "importing": "Adding to scene", "refresh": "Refreshing gallery", "ready": "Waiting to import"}.get(snapshot["phase"], "Working")
+        layout.progress(factor=snapshot["progress"], type="BAR", text=phase)
+        if snapshot["phase"] != "sign_out":
             layout.operator("lichtfeld.portal_action", text="Cancel", icon="CANCEL").action = "cancel"
     if snapshot["message"]:
-        from .ui_text import draw_paragraph
-        draw_paragraph(layout, snapshot["message"], 600, context.preferences.system.ui_scale)
+        draw_paragraph(layout, snapshot["message"], 850, context.preferences.system.ui_scale)
     if snapshot.get("total_bytes"):
         layout.label(text=f"Download size: {snapshot['total_bytes'] / (1024 * 1024):.1f} MiB")
     if snapshot.get("details"):
         layout.operator("lichtfeld.portal_action", text="Copy error details", icon="COPYDOWN").action = "copy_error"
+    if context.active_object and context.active_object.get("lichtfeld_portal_scene"):
+        layout.operator("lichtfeld.portal_frame", icon="VIEWZOOM")
 
 
 class LF_OT_portal_action(bpy.types.Operator):
@@ -399,6 +432,7 @@ class LF_OT_portal_action(bpy.types.Operator):
     bl_label = "Portal Gallery action"
     bl_description = "Connect, browse or import from your LichtFeld Portal gallery without changing the training job"
     action: StringProperty(options={"SKIP_SAVE"})
+    identifier: StringProperty(name="Portal project", description="The project chosen for import", options={"SKIP_SAVE"})
 
     @classmethod
     def description(cls, context, properties):
@@ -406,11 +440,10 @@ class LF_OT_portal_action(bpy.types.Operator):
             "import": "Download this asset and add its visible splats to the current scene; existing objects and training results stay intact",
             "refresh": "Check your Portal gallery for available assets",
             "connect": "Approve Blender's Portal connection in your browser; no password is entered in Blender",
-            "disconnect": "Disconnect Blender's Portal account without changing LichtFeld Studio's connection",
             "cancel": "Cancel the pending connection or asset import; this does not stop training",
             "browser": "Open the Portal approval page in your browser",
             "copy": "Copy the device approval code to the clipboard",
-            "sign_out": "Revoke Blender's authorization and forget the saved account so you can connect a different one",
+            "sign_out": "Sign out of the Portal in Blender; LichtFeld Studio and imported objects are unaffected. Offline sign-out removes local credentials only",
             "clear_cache": "Remove cached Portal downloads and thumbnails; imported objects, credentials and training jobs remain",
             "network_preferences": "Open Blender's network preferences; online access is never enabled automatically",
             "copy_error": "Copy redacted backend diagnostics to help investigate the import failure",
@@ -442,7 +475,7 @@ class LF_OT_portal_action(bpy.types.Operator):
         if self.action == "copy_error":
             context.window_manager.clipboard = state().get("details", "")
             return {"FINISHED"}
-        if not bpy.app.online_access:
+        if not bpy.app.online_access and self.action != "sign_out":
             self.report({"WARNING"}, "Enable online access in Blender Preferences to use Portal Gallery")
             return {"CANCELLED"}
         if self.action in ("browser", "copy"):
@@ -455,7 +488,7 @@ class LF_OT_portal_action(bpy.types.Operator):
                 bpy.ops.wm.url_open(url=account.verification_uri_complete)
             return {"FINISHED"}
         if self.action == "import":
-            item = selected(context)
+            item = next((row for row in context.window_manager.lichtfeld_portal.rows if row.identifier == self.identifier), None)
             target = import_target(context.scene)
             if not item or target is None or _stage is not None:
                 self.report({"WARNING"}, "Select an asset and an available source scene; finish any pending import first")
@@ -467,7 +500,10 @@ class LF_OT_portal_action(bpy.types.Operator):
             else:
                 self.report({"INFO"}, "The previous operation is finishing; try again shortly")
         else:
-            runtime().start(self.action)
+            if self.action == "sign_out":
+                runtime().start(self.action, bpy.app.online_access)
+            else:
+                runtime().start(self.action)
         return {"FINISHED"}
 
 
@@ -478,7 +514,7 @@ class LF_OT_portal_browser(bpy.types.Operator):
 
     def invoke(self, context, event):
         runtime()
-        return context.window_manager.invoke_popup(self, width=650)
+        return context.window_manager.invoke_popup(self, width=900)
 
     def draw(self, context):
         global _popup_region
@@ -515,12 +551,15 @@ class LF_OT_portal_frame(bpy.types.Operator):
 
 
 class LF_PT_portal(bpy.types.Panel):
-    bl_idname = "LF_PT_portal"
-    bl_label = "Portal Gallery"
+    bl_idname = "LF_PT_lichtfeld"
+    bl_label = "LichtFeld"
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
     bl_category = "LichtFeld"
     bl_order = -1
+
+    def draw_header(self, context):
+        self.layout.label(text="", icon_value=brand_icon())
 
     def draw(self, context):
         row = self.layout.row(align=True)
@@ -543,18 +582,19 @@ class LF_PT_portal(bpy.types.Panel):
             self.layout.operator("lichtfeld.portal_frame", icon="VIEWZOOM")
 
 
-CLASSES = (LF_PortalRow, LF_PortalState, LF_UL_portal, LF_OT_portal_action, LF_OT_portal_browser, LF_OT_portal_frame, LF_PT_portal)
+CLASSES = (LF_PortalRow, LF_PortalState, LF_OT_portal_action, LF_OT_portal_browser, LF_OT_portal_frame, LF_PT_portal)
 
 
 def import_menu(self, context):
     row = self.layout.row()
     row.operator_context = "INVOKE_DEFAULT"
-    row.operator("lichtfeld.portal_gallery", text="LichtFeld Portal Gallery…")
+    row.operator("lichtfeld.portal_gallery", text="LichtFeld Portal Gallery…", icon_value=brand_icon())
 
 
 def register():
     global _icons
     _icons = bpy.utils.previews.new()
+    _icons.load("lichtfeld", str(Path(__file__).with_name("assets") / "lichtfeld-icon.png"), "IMAGE")
     bpy.types.WindowManager.lichtfeld_portal = PointerProperty(type=LF_PortalState, options={"SKIP_SAVE"})
     bpy.types.TOPBAR_MT_file_import.append(import_menu)
     if not bpy.app.background:
@@ -562,9 +602,9 @@ def register():
 
 
 def unregister():
-    global _runtime, _icons, _generation, _rows, _thumbnail, _identity, _last_revision
+    global _runtime, _icons, _generation, _rows, _identity, _last_revision
     global _last_online, _refresh_wanted, _import_cancel
-    global _popup_region
+    global _popup_region, _page_signature, _view_signature, _view
     invalidate()
     if _runtime:
         _runtime.close()
@@ -578,10 +618,13 @@ def unregister():
     _icons = None
     _generation = -1
     _rows = None
-    _thumbnail = ""
     _identity = None
     _last_revision = -1
     _last_online = None
     _refresh_wanted = False
     _import_cancel = None
     _popup_region = None
+    _page_signature = None
+    _view_signature = None
+    _view = None
+    _thumbnail_attempted.clear()

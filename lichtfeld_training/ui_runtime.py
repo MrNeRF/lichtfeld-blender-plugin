@@ -402,7 +402,7 @@ def tick():
     if dirty:
         for screen in bpy.data.screens:
             for area in screen.areas:
-                if area.type == "VIEW_3D":
+                if area.type in {"VIEW_3D", "PREFERENCES"}:
                     area.tag_redraw()
     return 0.02
 

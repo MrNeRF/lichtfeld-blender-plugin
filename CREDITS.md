@@ -1,6 +1,6 @@
 # Credits and licensing
 
-## LichtFeld Training for Blender
+## LichtFeld for Blender
 
 Copyright © 2026 LichtFeld Studio Authors.
 
@@ -16,6 +16,8 @@ license is in [LICENSE](LICENSE); source files use
 Gaussian training backend and native renderer. Its authors and contributors also
 provide the shared external-session protocol implementation and native training
 defaults used by this integration.
+
+The Portal client wheel is generated from LichtFeld Studio's canonical Python account and gallery owners. The unmodified LichtFeld icon and light/dark wordmarks in `lichtfeld_training/assets` come from LichtFeld Studio's `src/visualizer/gui/assets` (`lichtfeld-icon.png`, `lichtfeld-splash-logo.png`, and `lichtfeld-splash-logo-dark.png`) and preserve its visual identity. They are covered by the upstream project's licensing and the LichtFeld Studio Authors attribution above.
 
 The shared session transport, coordinate geometry and bounded capture helpers
 are owned by Studio's public `lichtfeld_sessions` package. Its generated
@@ -61,8 +63,7 @@ Studio's additional GPU permission cannot grant rights over that source.
 
 Dependencies retain their own licenses and notices. The package contains the
 extension's Python source and configuration, not those projects' binary releases.
-No public demo scenes, third-party model files, training datasets, logos, or
-screenshots are included.
+No public demo scenes, third-party model files, training datasets, third-party logos, or screenshots are included.
 
 The extension's software license does not grant rights to input scenes, textures,
 models, or other assets. Those materials and any applicable rights in exported
