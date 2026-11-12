@@ -45,7 +45,7 @@ PROPERTIES = {
     'seed_points': 'Maximum initial point count shared across all captured views; positive depth supervision needs enough visible correspondences',
     'rig_orientation': 'Aim path cameras at the target or along the curve tangent; camera positions stay on the sampled path',
     'rig_generator': 'Show parameters for creating or updating generated cameras; existing cameras are used until Apply is pressed',
-    'rig_details': 'Show generated-camera distance, elevation, rotation and lens controls',
+    'rig_details': 'Show elevation, rotation, lens and custom aiming controls; distance is available directly in Cameras',
     'optimizer_file': 'Optional native optimizer JSON; managed parameters must be set with the visible training controls',
     'mask_mode': 'Choose how native training uses foreground alpha masks; whole-scene captures use Automatic or None',
     'strategy': 'Native LichtFeld training strategy; changing it applies that strategy’s optimizer defaults',

@@ -83,16 +83,16 @@ are not retried automatically.
 
 ### Generate or edit a rig
 
-**Capture content and quality** chooses what is rendered. **Rig reference** chooses
+**Content and quality** chooses what is rendered. **Center** in the camera section chooses
 the surfaces used to position the cameras and calculate **Reference center**.
-These are independent: use **Use selected for rig** on a character, then capture
+These are independent: choose **Remembered objects** and **Use selected objects as center** on a character, then capture
 the **Entire scene** without changing the rig subject. Later viewport selections
 do not replace the remembered rig objects. A reference can also be a collection
 or the entire scene. Changing either choice does not move cameras until you apply
 rig parameters. The reference itself remains part of the capture when included
 in the chosen capture content; placement meshes and path curves remain helpers.
 
-A new rig with **Not set** adopts its current capture surfaces once and remembers
+A new rig with **Capture content (first rig)** adopts its current capture surfaces once and remembers
 them. Existing older rigs have no recorded reference: their cameras remain usable
 for capture, but choose a reference explicitly before applying rig changes. Loading
 a rig restores its saved reference without changing capture content. Renaming a
@@ -115,11 +115,12 @@ Curve paths support poly, Bézier and NURBS splines; a closed path avoids repeat
 the first endpoint. Mesh placement uses evaluated geometry and transformed normals;
 the offset and viewing direction control which side is observed.
 
-Select an existing generated rig and use **Load this rig's parameters** before
-editing. Choosing a collection leaves the controls unchanged; **Apply rig parameters**
+Select an existing generated rig and use **Load selected rig** before
+editing when its controls have not been loaded. Choosing a collection leaves the controls unchanged; **Apply rig changes**
 and the viewport aim action remain unavailable until that rig has been loaded.
 Loading changes the controls only. Applying updates the chosen rig. Previously
 saved scenes without a recorded parameter source also need one explicit Load.
+For an existing camera collection without generated-rig metadata, **Create a new rig** creates and selects a separate generated collection; it does not append cameras to the original collection.
 Updating it preserves generated camera identities where possible and retains
 additional custom cameras in the collection. Inspect coverage after changing
 placement, count, lens, aspect ratio or target.

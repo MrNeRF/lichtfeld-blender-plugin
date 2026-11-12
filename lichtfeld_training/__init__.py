@@ -453,7 +453,7 @@ class LF_OT_setup(bpy.types.Operator):
 class LF_OT_tight_framing(bpy.types.Operator):
     bl_idname = "lichtfeld.tight_framing"
     bl_label = "Use tight framing"
-    bl_description = "Set a close, automatically fitted radius for a centered rig. Then Apply rig parameters and review coverage before capturing again"
+    bl_description = "Set a close, automatically fitted radius for a centered rig. Then apply rig changes and review coverage before capturing again"
 
     @classmethod
     def poll(cls,context):
@@ -1796,7 +1796,7 @@ def draw_capture_cameras(box, context, settings, ready, rig_changed, wrapped):
         additional = len(ready['cameras']) - ready.get('generated_cameras', 0)
         if managed and additional > 0 and not ready.get('checking'):
             box.label(text=f"{ready.get('generated_cameras', 0):,} generated · {additional:,} additional")
-        box.prop(settings, 'rig_generator', text='Edit rig' if managed else 'Generate additional cameras',
+        box.prop(settings, 'rig_generator', text='Edit rig' if managed else 'Create a new rig',
                  icon='TRIA_DOWN' if settings.rig_generator else 'TRIA_RIGHT', emboss=False)
         if managed and settings.rig_parameter_source != rig:
             box.operator('lichtfeld.read_rig', text='Load selected rig', icon='IMPORT')
