@@ -19,11 +19,13 @@ the open scene after launch does not change that job's images.
 
 Choose the **Activity** first: capture and train, generate a dataset only, or train saved images. **Open job** and **View trainer** open existing work without changing this setup; **Back to setup** returns to it. **Return to previous job** is available when a previous job was retained. The gear button opens configuration, and the question mark opens this guide.
 
-The compact capture summary shows the content, actual camera count and output dimensions. Expand **Capture details** for the View Layer, applied rig reference, renderer, lens and static frame. Pending rig controls remain visible in the compact summary; they do not replace existing camera poses until Apply. Rig, framing, save and capture/export actions stay above the editing sections.
+Setup follows **1 · Content and quality → 2 · Cameras → 3 · Capture and train** (or **Generate dataset**). Choose what to render first, then select existing cameras or create a rig. Creating/updating has one action in the camera section. Distance is directly accessible; expand **Advanced rig settings** for elevation, lens and custom aiming. Choosing a center reference changes camera placement, not the captured content.
 
-Expand **Capture content and quality**, **Capture cameras**, **Render and output**,
+Once a camera collection is chosen, the compact summary and capture/export action appear after the settings. Expand **Capture details** for the View Layer, applied rig reference, renderer, lens and static frame. Pending controls remain visible; they do not replace camera poses until Apply. Save is offered only when the scene needs saving, and framing is available after a camera collection has been chosen.
+
+Expand the content/camera sections, **Render and output**,
 or **Training and preview** to edit the corresponding controls. These are native
-Blender sections; closing them keeps the main actions available. Dataset-only
+Blender sections; closing them keeps the final capture/export action available. Dataset-only
 capture hides training controls. Training saved images hides scene capture controls
 and offers its own start action above the training settings.
 

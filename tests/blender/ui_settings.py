@@ -16,9 +16,8 @@ s.job_directory='';s.attached_session=''
 s.engine='CYCLES';bpy.context.scene.cycles.device='CPU'
 s.views=48
 bpy.ops.object.select_all(action='DESELECT');bpy.data.objects['Cube'].select_set(True);bpy.context.view_layer.objects.active=bpy.data.objects['Cube']
-bpy.ops.lichtfeld.create_rig()
 view=max(bpy.context.window.screen.areas,key=lambda a:a.width*a.height);view.type='VIEW_3D'
-state={'step':0,'start':time.monotonic()}
+state={'step':-2,'start':time.monotonic()}
 def popup():
  with bpy.context.temp_override(area=view,region=next(r for r in view.regions if r.type=='WINDOW')):bpy.ops.wm.call_panel(name='LF_PT_training',keep_open=True)
 
@@ -31,6 +30,15 @@ def tick():
  try:
   assert time.monotonic()-state['start']<60
   if s.operation_busy:return .1
+  if state['step']==-2:
+   view.spaces.active.show_region_ui=True;state['step']=-1;return .5
+  if state['step']==-1:
+   region=next(r for r in view.regions if r.type=='UI');region.active_panel_category='LichtFeld'
+   snapshot('sidebar-first-use.png')
+   s.dataset_mode='EXPORT';prefs.backend_path=''
+   snapshot('sidebar-first-dataset.png')
+   s.dataset_mode='CAPTURE';prefs.backend_path=str(options.backend.resolve())
+   bpy.ops.lichtfeld.create_rig();state['step']=0;return .5
   if state['step']==0:
    bpy.ops.wm.save_as_mainfile(filepath=str(area/'settings.blend'));state['step']=1;return 1
   if state['step']==1:
