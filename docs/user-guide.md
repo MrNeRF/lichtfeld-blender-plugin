@@ -279,3 +279,43 @@ Checkpoints and completed results remain separate from the transient live previe
 After training finishes, a compatible LichtFeld Studio observer can use **Import saved model** to load the full saved best evaluated model, or the last valid model if no evaluated candidate exists. It creates an editable local model with the result's coordinate presentation and full SH data. The observer hides its transient preview after a successful import. Keep the job folder available until import completes.
 Job and dataset metadata can contain local paths and scene-derived content;
 review them before sharing.
+# Portal Gallery
+
+Open **LichtFeld → Portal Gallery → Browse Portal Gallery…**, or use
+**File → Import → LichtFeld Portal Gallery…**. The gallery is independent of the
+training panel and does not change the selected training job.
+
+1. Enable Blender's online access if it is disabled.
+2. Choose **Connect account** and approve the connection in your browser. If the
+   browser does not open, use **Open browser** and **Copy code**. No password is
+   entered or stored in the Blender scene.
+3. Select an asset from your account's gallery. Use the list's search filter to
+   find it and inspect its thumbnail and description.
+4. Choose **Import into scene**. Download and conversion run in the background;
+   closing the browser keeps the operation running. Reopen it to see progress or
+   cancel. Import waits while Blender is rendering or preparing a capture. From
+   a temporary preview, the displayed destination is its source scene; the
+   temporary scene itself is never modified.
+
+Interrupted representation downloads can resume when the Portal provides the
+same representation. A completed download is rechecked before reuse, so retrying
+asset preparation does not need another full transfer. Cached files belong to
+Blender's extension user storage and are separate from credentials and training jobs.
+
+Import requires a LichtFeld Studio installation supporting
+`licht project.licht --export-ply output.ply`, configured in the extension's
+Settings. Browsing and account connection do not need LichtFeld Studio running.
+The headless exporter combines the project's visible splats and their transforms
+into one Gaussian object; existing Blender objects and training results remain.
+The native Gaussian attributes, including SH, are retained. The current Blender
+scene's display transform remains in effect. Environment and project cameras
+are not imported.
+
+Blender has its own Portal authorization. **Disconnect Blender** does not change
+LichtFeld Studio's account connection. Account controls are also available in the
+extension preferences. Use **Sign out** to forget Blender's authorization and
+connect a different account. Use **Clear Portal cache** in the extension settings
+to remove retained downloads and thumbnails; files in use by another import are
+kept. Imported objects and training jobs are unaffected. Upload, automatic
+synchronization and installation from LichtFeld Studio are not part of this
+first integration.

@@ -14,8 +14,9 @@ import tempfile
 import tomllib
 import zipfile
 
-PROTOCOL_WHEEL = tomllib.loads((Path(__file__).resolve().parents[1] /
-                               "lichtfeld_training/blender_manifest.toml").read_text(encoding="utf-8"))["wheels"][0].removeprefix("./")
+WHEELS = tuple(path.removeprefix("./") for path in tomllib.loads((Path(__file__).resolve().parents[1] /
+                               "lichtfeld_training/blender_manifest.toml").read_text(encoding="utf-8"))["wheels"])
+PROTOCOL_WHEEL = WHEELS[0]
 
 RUNTIME_FILES = frozenset("""
 __init__.py backend_hook.py blender_manifest.toml bridge_core.py
@@ -25,8 +26,8 @@ mrnf_defaults.json preflight.py preview_scene.py render_devices.py render_worker
 rig_edit.py rig_geometry.py rig_mesh.py rig_path.py scene_render.py
 scene_render_worker.py session_cameras.py session_geometry.py session_reader.py
 supervisor.py training_options.py training_profiles.json
-ui_help.py ui_runtime.py ui_text.py visibility.py workflow.py
-""".split()) | {PROTOCOL_WHEEL}
+ui_help.py ui_runtime.py ui_text.py visibility.py workflow.py portal_runtime.py portal_ui.py
+""".split()) | set(WHEELS)
 DOCUMENT_FILES = ("LICENSE", "CREDITS.md", "README.md", "CONTRIBUTING.md",
                   "docs/user-guide.md", "docs/technical-reference.md")
 
@@ -142,4 +143,6 @@ if __name__ == "__main__":
     arguments = parser.parse_args()
     if arguments.lichtfeld_source:
         build_protocol(arguments.lichtfeld_source)
+        subprocess.run([sys.executable, str(arguments.lichtfeld_source / "tools/package_portal_client.py"),
+                        "--output", str(Path(__file__).resolve().parents[1] / "lichtfeld_training/wheels")], check=True)
     print(package(arguments.output).resolve())

@@ -26,30 +26,37 @@ def load_record(root, record, should_cancel=lambda: False):
         except FileNotFoundError:
             if "path" not in record:
                 raise
-    import numpy as np
     path = artifact_path(root, record["path"])
     with verified_artifact(path, record, should_cancel) as stream:
-        if stream.readline() != b"ply\n" or stream.readline() != b"format binary_little_endian 1.0\n":
-            raise ValueError("Expected a binary Gaussian PLY")
-        fields, count = [], None
-        for _ in range(256):
-            line = stream.readline().decode("ascii").strip()
-            if line == "end_header":
-                break
-            if line.startswith("element vertex "):
-                count = int(line.split()[-1])
-            elif line.startswith("property "):
-                _, kind, name = line.split()
-                if kind != "float":
-                    raise ValueError("Unsupported Gaussian PLY property")
-                fields.append(name)
-        else:
-            raise ValueError("PLY header limit exceeded")
-        if not count or not 0 < count <= 10000000:
-            raise ValueError("Invalid Gaussian count")
-        values = np.fromfile(stream, dtype="<f4", count=count * len(fields))
-        if values.size != count * len(fields) or not np.isfinite(values).all():
-            raise ValueError("Invalid Gaussian payload")
+        return read_ply(stream, should_cancel)
+
+
+def read_ply(stream, should_cancel=lambda: False):
+    """Decode Gaussian PLY from an already opened stream on a numerical worker."""
+    import numpy as np
+    if should_cancel():
+        raise InterruptedError("Import canceled")
+    if stream.readline() != b"ply\n" or stream.readline() != b"format binary_little_endian 1.0\n":
+        raise ValueError("Expected a binary Gaussian PLY")
+    fields, count = [], None
+    for _ in range(256):
+        line = stream.readline().decode("ascii").strip()
+        if line == "end_header":
+            break
+        if line.startswith("element vertex "):
+            count = int(line.split()[-1])
+        elif line.startswith("property "):
+            _, kind, name = line.split()
+            if kind != "float":
+                raise ValueError("Unsupported Gaussian PLY property")
+            fields.append(name)
+    else:
+        raise ValueError("PLY header limit exceeded")
+    if not count or not 0 < count <= 10000000:
+        raise ValueError("Gaussian PLY must contain between 1 and 10,000,000 splats")
+    values = np.fromfile(stream, dtype="<f4", count=count * len(fields))
+    if values.size != count * len(fields) or not np.isfinite(values).all():
+        raise ValueError("Invalid Gaussian payload")
     values = values.reshape(count, len(fields))
     def columns(names):
         return np.ascontiguousarray(values[:, [fields.index(name) for name in names]])

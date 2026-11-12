@@ -54,7 +54,8 @@ for task, action in [('CAPTURE','lichtfeld.start_training'), ('EXPORT','lichtfel
                      ('REUSE','lichtfeld.restart_training')]:
     s.dataset_mode = task
     layout = Layout()
-    with patch.object(ext.preflight, 'cached', return_value=ready) as cached:
+    with patch.object(ext.preflight, 'cached', return_value=ready) as cached, \
+         patch.object(ext.preflight, 'environment', return_value={'backend':True}):
         ext.LF_PT_training.draw(SimpleNamespace(layout=layout), context)
     actions = [name for kind, *rest in layout.records if kind=='operator' for name in rest
                if name in {'lichtfeld.start_training','lichtfeld.export_dataset','lichtfeld.restart_training'}]
@@ -67,6 +68,17 @@ for task, action in [('CAPTURE','lichtfeld.start_training'), ('EXPORT','lichtfel
         assert 'use_depth_loss' in fields and 'use_normal_loss' in fields
         assert 'depth_loss_weight' not in fields and 'normal_loss_weight' not in fields
         assert all(call.kwargs.get('capture_only') is True for call in cached.call_args_list)
+
+# An unavailable backend exposes setup, not unusable training controls.
+s.dataset_mode = 'CAPTURE'
+layout = Layout()
+with patch.object(ext.preflight, 'environment', return_value={'backend':False, 'message':'Choose LichtFeld Studio'}):
+    ext.LF_PT_training.draw(SimpleNamespace(layout=layout), context)
+assert ('operator', 'lichtfeld.setup') in layout.records
+assert ('operator', 'lichtfeld.start_training') not in layout.records
+assert not any(kind == 'prop' and name in {'iterations', 'camera_collection'} for kind, *items in layout.records for name in items)
+assert bpy.ops.lichtfeld.setup_view(mode='EXPORT') == {'FINISHED'}
+assert s.mode == 'NEW' and s.dataset_mode == 'EXPORT'
 
 # Validation updates never move the export button or editable fields.
 s.dataset_mode = 'EXPORT'

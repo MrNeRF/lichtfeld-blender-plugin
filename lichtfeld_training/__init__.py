@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2026 LichtFeld Studio Authors
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Installable LichtFeld Training extension for Blender 5.3."""
+"""LichtFeld integration for Blender 5.3."""
 
 import math
 import json
@@ -26,7 +26,7 @@ from .visibility import set_hidden, source_steps
 from .ui_text import draw_paragraph
 from .session_geometry import source_model_transform
 from . import ui_runtime
-from . import jobs, preflight, workflow, rig_geometry, rig_path, rig_edit, training_options, preview_scene, capture_settings, capture_preview, scene_render, ui_help
+from . import jobs, preflight, workflow, rig_geometry, rig_path, rig_edit, training_options, preview_scene, capture_settings, capture_preview, scene_render, ui_help, portal_ui
 
 _PACKAGE = __package__
 _ROOT = Path(__file__).resolve().parent
@@ -197,7 +197,7 @@ class LichtFeldPreferences(bpy.types.AddonPreferences):
     bl_idname = _PACKAGE
 
     backend_path: StringProperty(name="LichtFeld executable", subtype="FILE_PATH",
-                                description="The LichtFeld Studio installation used for headless training")
+                                description="The LichtFeld Studio installation used for training and Portal asset preparation")
     jobs_directory: StringProperty(name="Training jobs", subtype="DIR_PATH",
                                   description="Permanent folder for datasets, checkpoints and results")
     verification: StringProperty(options={"SKIP_SAVE"})
@@ -205,6 +205,12 @@ class LichtFeldPreferences(bpy.types.AddonPreferences):
     def draw(self, context):
         layout = self.layout
         layout.prop(self, "backend_path")
+        box = layout.box()
+        box.label(text="Portal Gallery", icon="ASSET_MANAGER")
+        portal_ui.account_controls(box)
+        row = box.row()
+        row.operator_context = "INVOKE_DEFAULT"
+        row.operator("lichtfeld.portal_action", text="Clear Portal cache", icon="TRASH").action = "clear_cache"
         row = layout.row()
         row.enabled = bool(self.backend_path)
         row.operator("lichtfeld.verify_installation", icon="CHECKMARK")
@@ -1459,7 +1465,8 @@ class LF_OT_setup_view(bpy.types.Operator):
     bl_description = "Open capture setup, a saved job, or read-only trainer viewing without changing capture settings"
     mode: EnumProperty(items=[('NEW', 'Capture setup', 'Return to the current capture or saved-image setup'),
                               ('OPEN', 'Open job', 'Open a saved training job'),
-                              ('CONNECT', 'View trainer', 'Find active trainers for read-only viewing')])
+                              ('CONNECT', 'View trainer', 'Find active trainers for read-only viewing'),
+                              ('EXPORT', 'Generate dataset only', 'Capture images and cameras without installing or starting LichtFeld Studio')])
 
     @classmethod
     def poll(cls, context):
@@ -1471,10 +1478,14 @@ class LF_OT_setup_view(bpy.types.Operator):
     def description(cls, context, properties):
         return {'NEW': 'Return to capture or saved-image setup; your current settings are retained',
                 'OPEN': 'Choose a saved training job to reopen; capture settings are retained',
-                'CONNECT': 'Find active trainers for read-only viewing; this does not start or stop training'}.get(properties.mode, cls.bl_description)
+                'CONNECT': 'Find active trainers for read-only viewing; this does not start or stop training',
+                'EXPORT': 'Prepare a dataset with Blender without starting training or requiring LichtFeld Studio'}.get(properties.mode, cls.bl_description)
 
     def execute(self, context):
-        context.scene.lichtfeld_training.mode = self.mode
+        settings = context.scene.lichtfeld_training
+        settings.mode = 'NEW' if self.mode == 'EXPORT' else self.mode
+        if self.mode == 'EXPORT':
+            settings.dataset_mode = 'EXPORT'
         if self.mode == 'CONNECT':
             refresh_sessions()
         return {'FINISHED'}
@@ -2048,7 +2059,7 @@ def draw_capture_actions(setup, settings, ready, errors, capture_only, wrapped):
 
 
 class LF_PT_training(bpy.types.Panel):
-    bl_label = "LichtFeld Training"
+    bl_label = "Training"
     bl_idname = "LF_PT_training"
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
@@ -2122,6 +2133,17 @@ class LF_PT_training(bpy.types.Panel):
             row.enabled = settings.discovered_session not in {'NONE', ''}
             row.operator("lichtfeld.attach_session", icon="LINKED")
             return
+        if settings.dataset_mode != 'EXPORT':
+            installation = preflight.environment(prefs)
+            if not installation.get('backend'):
+                layout.label(text='Set up training', icon='PREFERENCES')
+                wrapped(layout, installation.get('message', 'Choose your LichtFeld Studio installation.'))
+                layout.operator('lichtfeld.setup', text='Configure LichtFeld Studio…', icon='FILE_FOLDER')
+                row = layout.row()
+                row.enabled = bool(prefs.backend_path) and not installation.get('checking')
+                row.operator('lichtfeld.verify_installation', text='Check installation again', icon='FILE_REFRESH')
+                layout.operator('lichtfeld.setup_view', text='Generate dataset only', icon='EXPORT').mode = 'EXPORT'
+                return
         setup = layout.column()
         setup.enabled = not settings.operation_busy
         setup.prop(settings, "dataset_mode", text="Activity")
@@ -2194,6 +2216,7 @@ def poll_jobs():
 
 @persistent
 def history_changing(_):
+    portal_ui.before_history()
     # RNA collection iterators cannot survive Blender replacing Main on Undo.
     # Close the cooperative scan while its datablocks are still valid.
     preflight.invalidate()
@@ -2221,6 +2244,7 @@ def saved(_):
 
 @persistent
 def unloading(_):
+    portal_ui.invalidate()
     global _session_scan_pending, _sessions, _session_items
     _session_scan_pending = False
     _sessions = []
@@ -2263,7 +2287,7 @@ def loaded(_):
 _CLASSES = (LichtFeldPreferences, LichtFeldSourceRef, LichtFeldRigReference, LichtFeldSettings, LF_OT_notice, LF_OT_verify, LF_OT_setup, LF_OT_tight_framing, LF_OT_rig, LF_OT_live_rig, rig_edit.LF_GGT_live_rig,
             LF_OT_start, LF_OT_export_dataset, LF_OT_pick_sources, LF_OT_select_aim, LF_OT_inspect_camera, LF_OT_read_rig, LF_OT_command, LF_OT_import, LF_OT_resume, LF_OT_dataset, LF_OT_new_capture, LF_OT_inspect_dataset, LF_OT_restart, LF_OT_folder, LF_OT_reconnect, LF_OT_load_job, LF_OT_compare,
             LF_OT_setup_view, LF_OT_scan_sessions, LF_OT_attach_session, LF_OT_detach_session, LF_OT_previous_job, LF_OT_color_look, LF_OT_color_command, LF_OT_model_view, LF_OT_color_view, LF_OT_capture_lighting,
-            *capture_preview.CLASSES, *scene_render.CLASSES, LF_PT_training)
+            *capture_preview.CLASSES, *scene_render.CLASSES, *portal_ui.CLASSES, LF_PT_training)
 
 ui_help.apply(_CLASSES)
 
@@ -2273,6 +2297,7 @@ def register():
         bpy.utils.register_class(cls)
     bpy.types.Scene.lichtfeld_training = PointerProperty(type=LichtFeldSettings)
     bpy.types.Collection.lichtfeld_rig_reference = PointerProperty(type=LichtFeldRigReference)
+    portal_ui.register()
     bpy.app.handlers.undo_pre.append(history_changing)
     bpy.app.handlers.redo_pre.append(history_changing)
     bpy.app.handlers.undo_post.append(history_changed)
@@ -2284,6 +2309,7 @@ def register():
 
 
 def unregister():
+    portal_ui.unregister()
     # Blender unregisters native modal handlers. Release their owned datablocks
     # first, while the RNA settings and operator types still exist.
     manager = bpy.context.window_manager

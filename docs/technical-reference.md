@@ -11,6 +11,19 @@ render pipeline.
 
 ## Process boundaries
 
+Portal Gallery uses the `lichtfeld-portal-client` wheel generated from the
+canonical LichtFeld Studio Portal modules. It does not import modules from an
+installed executable's directory or add wheel paths to `sys.path`. Blender host
+callbacks provide browser dispatch and token-free UI state; credential storage,
+refresh, URL validation and downloads retain their canonical implementation.
+Credentials live in Blender's user configuration, separately from LichtFeld
+Studio, and never in RNA properties or a `.blend` file.
+
+`.licht` assets are validated by the Portal client and materialized through
+LichtFeld Studio's closed-project exporter in a cancellable child process.
+The shared Gaussian PLY reader and cooperative point-cloud builder then prepare
+and commit a new object; Portal assets never acquire a training job identity.
+
 The installed extension registers Blender properties, operators and panels.
 Blender's UI thread owns `bpy` scene changes. Cooperative operations yield while
 walking large scenes or staging preview buffers. Worker threads perform filesystem

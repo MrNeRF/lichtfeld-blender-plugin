@@ -1,4 +1,4 @@
-# LichtFeld Training for Blender
+# LichtFeld for Blender
 
 Create a camera rig, capture a calibrated dataset, and train a navigable Gaussian
 splat from a Blender scene. The extension launches capture and training in
@@ -8,6 +8,7 @@ separate processes, so LichtFeld Studio can remain closed while you work in Blen
 
 ## What you can do
 
+- Browse your LichtFeld Portal gallery and import its visible splats into your scene.
 - Use existing perspective cameras or generate an editable sphere, hemisphere,
   ring, curve-path, or mesh-based camera rig.
 - Capture with Cycles or EEVEE using Blender's render settings and explicit devices.
@@ -67,7 +68,7 @@ The interface is currently in English.
    source, run `python tools/package_blender_training.py` with Python 3.11 or newer.
    The installable archive is written to `dist/`.
 2. In Blender, open **Edit → Preferences → Get Extensions**, then choose
-   **Install from Disk…** from the menu and select the ZIP. Enable **LichtFeld Training**.
+   **Install from Disk…** from the menu and select the ZIP. Enable **LichtFeld**.
 3. Open its preferences, select the actual LichtFeld **executable file**, and
    choose a permanent jobs directory. Select **Verify installation**.
 4. In the 3D Viewport, press **N** and open the **LichtFeld** sidebar tab.

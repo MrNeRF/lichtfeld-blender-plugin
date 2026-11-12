@@ -73,6 +73,31 @@ def scene_key(scene):
     return identifier
 
 
+def pointcloud_steps(data, count, name="LichtFeld splat", cloud=None):
+    """Construct complete Gaussian data cooperatively, independently of a job."""
+    owned = cloud is None
+    complete = False
+    try:
+        if cloud is None:
+            cloud = bpy.data.pointclouds.new(name)
+            cloud.type = "GAUSSIAN_SPLAT"
+            yield
+            cloud.resize(count)
+            yield
+        for attribute_name, kind, property_name, values in data:
+            attribute = cloud.attributes.get(attribute_name) or cloud.attributes.new(attribute_name, kind, "POINT")
+            yield
+            attribute.data.foreach_set(property_name, values)
+            yield
+        cloud.update_tag()
+        yield
+        complete = True
+        return cloud
+    finally:
+        if owned and cloud is not None and not complete and cloud.users == 0:
+            bpy.data.pointclouds.remove(cloud)
+
+
 def build(scene, frame, key):
     """Yield after every native bulk operation. Incomplete data is never displayed."""
     expected = scene.get("lichtfeld_expected_job")
@@ -101,19 +126,8 @@ def build(scene, frame, key):
             elif candidate.users == 0:
                 bpy.data.pointclouds.remove(candidate)
             yield
-        if cloud is None:
-            cloud = bpy.data.pointclouds.new("LichtFeld prepared snapshot")
-            cloud.type = "GAUSSIAN_SPLAT"
-            yield
-            cloud.resize(frame["count"])
-            yield
-        for name, kind, property_name, values in frame["data"]:
-            attribute = cloud.attributes.get(name) or cloud.attributes.new(name, kind, "POINT")
-            yield
-            attribute.data.foreach_set(property_name, values)
-            yield
-        cloud.update_tag()
-        yield
+        cloud = yield from pointcloud_steps(frame["data"], frame["count"],
+                                           "LichtFeld prepared snapshot", cloud)
         job = frame["job"]
         existing = scene.lichtfeld_training.result_object
         previous_result = existing if existing and existing.get("lichtfeld_job_id") != job["id"] else None
