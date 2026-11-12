@@ -7,6 +7,7 @@ import importlib
 import bpy
 import numpy as np
 from unittest.mock import patch
+from mathutils import Vector
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 module = 'bl_ext.user_default.lichtfeld_training' if '--installed' in sys.argv else 'lichtfeld_training'
@@ -123,13 +124,14 @@ for _ in range(3):
     assert not retained.get(ext.capture_preview.CAMERA)
     bpy.data.objects.remove(retained,do_unlink=True)
     bpy.data.cameras.remove(retained_data);bpy.data.scenes.remove(shared)
-    for _ in ext.capture_preview.open_steps(source,bpy.context.window,None):pass
+    assert bpy.ops.lichtfeld.capture_framing()=={'FINISHED'}
+    while ext.capture_preview.camera_pending(preview):ext.ui_runtime.tick()
     assert len(bpy.data.scenes)==counts[0]+1
     preview=bpy.context.scene
     # Closing before the queued camera update starts cannot resurrect a preview.
     s.capture_preview_index=1
-    if ext.capture_preview.camera_pending(preview):
-        next(ext.ui_runtime._actions[0][0])
+    assert ext.capture_preview.camera_pending(preview)
+    next(ext.ui_runtime._actions[0][0])
     assert bpy.ops.lichtfeld.close_capture_framing()=={'FINISHED'}
     ext.ui_runtime.tick()
     assert bpy.context.scene==source
@@ -143,6 +145,77 @@ except ValueError:pass
 assert not s.operation_busy and bpy.context.scene==source
 assert (len(bpy.data.scenes),len(bpy.data.objects),len(bpy.data.cameras))==counts
 print('RECTANGULAR_FITTING_EVALUATED_OVERRIDES_AND_PREVIEW_LIFECYCLE_PASS',flush=True)
+
+# Frame changes must evaluate animated optics AND a moved, hidden tracking target
+# at the source capture frame, not reuse a previously evaluated static matrix.
+s.capture_clip_start=.05;s.override_optics=False
+target=s.rig_aim;base=target.location.copy()
+target.keyframe_insert(data_path='location',frame=1)
+target.location=base+Vector((1,2,3))
+target.keyframe_insert(data_path='location',frame=20)
+expected={}
+for frame in (20,1):
+    source.frame_set(frame);bpy.context.view_layer.update()
+    expected[frame]=cameras[1].evaluated_get(bpy.context.evaluated_depsgraph_get()).matrix_world.normalized().copy()
+assert bpy.ops.lichtfeld.capture_framing()=={'FINISHED'}
+preview=bpy.context.scene;preview.frame_set(20)
+s.capture_preview_index=2
+while ext.capture_preview.camera_pending(preview):ext.ui_runtime.tick()
+assert source.frame_current==preview.frame_current==1 and preview.camera.data.lens==22
+assert np.max(np.abs(np.asarray(preview.camera.matrix_world)-expected[1]))<1e-6
+source.frame_set(20)
+s.capture_preview_index=3;s.capture_preview_index=2
+while ext.capture_preview.camera_pending(preview):ext.ui_runtime.tick()
+assert source.frame_current==preview.frame_current==20 and preview.camera.data.lens==66
+assert np.max(np.abs(np.asarray(preview.camera.matrix_world)-expected[20]))<1e-6
+source.frame_set(1);target.animation_data_clear();target.location=base
+s.override_optics=True;s.capture_lens=40
+
+# Changes made after the first cooperative yield must win, including an explicit
+# Update framing request coalesced into the already queued camera switch.
+s.capture_preview_index=1
+assert ext.capture_preview.camera_pending(preview)
+next(ext.ui_runtime._actions[0][0])
+source.render.resolution_x=800;source.render.resolution_y=600;source.render.resolution_percentage=100
+s.capture_lens=50
+assert bpy.ops.lichtfeld.capture_framing()=={'FINISHED'}
+while ext.capture_preview.camera_pending(preview):ext.ui_runtime.tick()
+assert (preview.render.resolution_x,preview.render.resolution_y)==(800,600)
+assert preview.camera.data.lens==50 and preview['capture_camera_name']==cameras[0].name
+
+# A queued setup dependency behind the request must run: no dropped input and no
+# FIFO deadlock while waiting for the source to become editable again.
+s.operation_busy=True;s.capture_preview_index=3
+def finish_setup():
+    yield
+    s.operation_busy=False
+ext.ui_runtime.schedule(finish_setup())
+for _ in range(100):
+    ext.ui_runtime.tick()
+    if not ext.capture_preview.camera_pending(preview):break
+assert not s.operation_busy and not ext.capture_preview.camera_pending(preview)
+assert preview['capture_camera_name']==cameras[2].name
+assert bpy.ops.lichtfeld.close_capture_framing()=={'FINISHED'}
+source.render.resolution_x,source.render.resolution_y,source.render.pixel_aspect_y=before_render
+s.capture_lens=40
+
+# Native scene deletion bypasses the plugin's remove(); an old request must clear
+# its own key without erasing a newer request at a reused pointer.
+for replacement in (None,object()):
+    assert bpy.ops.lichtfeld.capture_framing()=={'FINISHED'}
+    preview=bpy.context.scene
+    s.capture_preview_index=2
+    key=preview.as_pointer()
+    assert ext.capture_preview.camera_pending(preview)
+    bpy.context.window.scene=source
+    bpy.data.scenes.remove(preview)
+    if replacement is not None:ext.capture_preview._pending[key]=replacement
+    ext.ui_runtime.tick()
+    if replacement is None:assert key not in ext.capture_preview._pending
+    else:
+        assert ext.capture_preview._pending[key] is replacement
+        ext.capture_preview._pending.pop(key)
+print('FRAMING_FRAME_LATEST_SETTINGS_BUSY_DEPENDENCY_AND_DELETED_PREVIEW_PASS',flush=True)
 
 # Nested custom collections use the same explicit order in readiness and framing.
 s.capture_clip_start = .05
@@ -174,7 +247,6 @@ assert bpy.ops.lichtfeld.close_capture_framing() == {'FINISHED'}
 print('NESTED_CAPTURE_ORDER_MATCHES_READINESS_AND_FRAMING_PASS', flush=True)
 
 # Blender ignores orthogonal camera scale; framing and capture must do the same.
-from mathutils import Vector
 from bpy_extras.object_utils import world_to_camera_view
 import tempfile
 camera = bpy.data.objects[sorted(names)[0]]

@@ -2094,13 +2094,11 @@ def loaded(_):
     ui_runtime.clear()
     _imported.clear()
     source = bpy.data.filepath
-    if not source:
-        return
-    directory = preflight.connection_folder(preferences())
+    directory = preflight.connection_folder(preferences()) if source else None
     for scene in bpy.data.scenes:
         settings = scene.lichtfeld_training
         capture_preview.camera_changed(settings, None)
-        if settings.job_directory or settings.attached_session:
+        if not source or settings.job_directory or settings.attached_session:
             continue
         name = scene.name
         def done(root, scene=scene, source=source):

@@ -37,6 +37,7 @@ and offers its own start action above the training settings.
 camera selection, output size and optical overrides; it does not render an RGB
 test image. **Back to capture setup** restores the original scene.
 Changing **Camera number** updates the view automatically, reusing the same preview scene. **Update framing** applies output settings and optical overrides without rebuilding scene visibility. If you change capture content or replace the camera collection, return to setup and reopen framing. Source cameras stay unchanged.
+Each update uses the source scene's capture frame, even if you moved the temporary preview's timeline. Pending changes wait for rendering or setup work to finish and use the latest camera, output size and optical overrides.
 
 | You want to… | Choose… |
 | --- | --- |
