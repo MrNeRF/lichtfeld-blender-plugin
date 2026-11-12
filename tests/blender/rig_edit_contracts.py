@@ -648,3 +648,16 @@ assert not any(o.get(ext.rig_edit.LIVE) is True for o in bpy.data.objects)
 assert bpy.ops.lichtfeld.live_rig()=={'FINISHED'}
 assert bpy.ops.lichtfeld.live_rig()=={'FINISHED'}
 print('PERSISTED_PARTIAL_ENTRY_APPLY_REPAIRS_CANONICAL_PARENT_AND_DRIVERS_PASS')
+# Live entry uses the same perspective/rigid-pose contract as capture.
+camera=next(o for o in s.camera_collection.objects if o.type=='CAMERA')
+counts=(len(bpy.data.objects),len(bpy.data.cameras))
+camera.data.type='ORTHO'
+try:
+    bpy.ops.lichtfeld.live_rig()
+except RuntimeError as error:
+    assert camera.name in str(error) and 'Perspective' in str(error)
+else:raise AssertionError('Live editing accepted an unsupported capture camera')
+assert counts==(len(bpy.data.objects),len(bpy.data.cameras))
+assert ext.rig_edit.live_root(s) is None
+camera.data.type='PERSP'
+print('LIVE_ENTRY_REUSES_NAMED_CAPTURE_CALIBRATION_CONTRACT_PASS')

@@ -391,9 +391,9 @@ def _shared_outside_preview(obj, source):
     return any(scene != source and capture_preview.source_scene(scene) != source for scene in obj.users_scene)
 
 
-def _live_members(settings):
+def _live_members(settings, graph):
     """Qualify the actual applied rig, not today's possibly moved reference."""
-    from . import rig_geometry
+    from . import rig_geometry, capture_settings
     collection = settings.camera_collection
     if collection.library or collection.override_library:
         raise ValueError('Make the rig local before editing it live')
@@ -423,6 +423,7 @@ def _live_members(settings):
         recipe.get('rig_max', 85), recipe.get('rig_rings', 1), recipe.get('rig_phase', 0))
     center = None
     for camera, direction in zip(cameras, directions):
+        capture_settings.camera_pose(camera, graph)
         position = camera.matrix_world.translation
         offset = Vector(direction) * radius
         center = position - offset if center is None else center
@@ -443,7 +444,7 @@ def edit_live(owner, context):
         if collection.get('lichtfeld_rig_recipe') != rig_recipe(settings):
             raise ValueError('Apply or revert pending rig parameters before editing live')
         context.view_layer.update()
-        cameras, target, recipe, radius, center = yield from _live_members(settings)
+        cameras, target, recipe, radius, center = yield from _live_members(settings, context.evaluated_depsgraph_get())
         root = bpy.data.objects.new('LichtFeld Live Rig', None)
         owner.live_controller = root
         root[LIVE] = True
