@@ -108,9 +108,14 @@ with TemporaryDirectory() as directory:
         assert options["checkpoint"] is None and options["reuse_completed"]
         project.write_bytes(b"fake download; exporter is the boundary under test")
 
+    calls, scene_convert = [], []
+
     def backend(arguments, log, cancel, timeout):
+        calls.append(arguments[1:])
         if arguments[-1] == "--help":
-            log.write(b"--export-ply")
+            # Older builds list .licht input without scene-aware conversion.
+            log.write(import_module(NAME + ".portal_runtime").SCENE_CONVERT if scene_convert
+                      else b"Input: .licht (project)")
         else:
             shutil.copyfile(Path(directory) / record["path"], IOPath(arguments[-1]))
         return 0
@@ -118,6 +123,12 @@ with TemporaryDirectory() as directory:
     try:
         with patch.object(runtime, "_client", return_value=SimpleNamespace(expected_session=identity, download=download)), \
              patch.object(runtime, "_backend", side_effect=backend):
+            try:
+                runtime._download(account, identifier, str(executable), cancel=runtime.cancel)
+                raise AssertionError("An older convert was accepted for Portal projects")
+            except ValueError as error:
+                assert "Update LichtFeld Studio" in str(error)
+            scene_convert.append(True)
             with locked_sidecar(cache / "download.lock"):
                 try:
                     runtime._download(account, identifier, str(executable), cancel=runtime.cancel)
@@ -125,6 +136,7 @@ with TemporaryDirectory() as directory:
                 except ValueError as error:
                     assert "cache is in use or unavailable" in str(error)
             runtime._download(account, identifier, str(executable), cancel=runtime.cancel)
+        assert calls[-1][:2] == ["convert", "--no-provenance"] and calls[-1][-1].endswith("asset.ply")
         kind, payload = runtime.events.get_nowait()
         assert kind == "import" and payload[3] == 2
         assert runtime.snapshot()["phase"] == "ready"

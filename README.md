@@ -35,9 +35,9 @@ the LichtFeld Studio observer interface is a separate feature.
 | --- | --- |
 | Blender | 5.3.x, with native Gaussian point-cloud support |
 | Portal browsing | Online access enabled in Blender and a Portal account; no LichtFeld Studio installation needed |
-| Portal import | LichtFeld Studio with `licht ... --export-ply ...` support and the GPU required by that build |
+| Portal import | LichtFeld Studio whose `convert` exports the visible splats of a `.licht` project with their scene transforms, and the GPU required by that build |
 | Capture renderer | Cycles or EEVEE; a working device configuration for that engine |
-| Training backend | Headless LichtFeld with `plugin run` compatibility probing, the public `lichtfeld_sessions` package, camera principal-point properties, `SplatData.shN_rows`, and scoped training hooks with explicit progress/outcomes |
+| Training backend | Headless LichtFeld with the public `lichtfeld_sessions` package, camera principal-point properties, `SplatData.shN_rows`, and scoped training hooks with explicit progress/outcomes |
 | Training hardware | The CUDA/GPU requirements of the selected LichtFeld build |
 | Storage | A writable jobs directory with room for the captured project, images, maps, checkpoints, and splats |
 

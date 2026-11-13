@@ -15,6 +15,9 @@ import time
 import uuid
 
 
+SCENE_CONVERT = b".licht (visible project splats with their scene transforms)"
+
+
 class Runtime:
     @staticmethod
     def cache_owner(account, session):
@@ -190,7 +193,7 @@ class Runtime:
         """Supervise both capability probing and export on the worker thread."""
         if cancel.is_set():
             raise InterruptedError("Import canceled")
-        process = subprocess.Popen(arguments, stdout=log, stderr=subprocess.STDOUT,
+        process = subprocess.Popen(arguments, stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         self.process = process
         deadline = time.monotonic() + timeout
@@ -218,11 +221,14 @@ class Runtime:
         client = self._client(account)
         if not Path(executable).is_file():
             raise ValueError("Choose the LichtFeld Studio executable in Settings before importing.")
+        # Older builds also accept .licht in convert but reject multi-splat scenes
+        # and ignore scene transforms. Only the documented scene-aware input passes.
         with tempfile.TemporaryFile() as probe:
-            code = self._backend([executable, "licht", "--help"], probe, cancel, 15)
+            code = self._backend([executable, "convert", "--help"], probe, cancel, 15)
             probe.seek(0)
-            if code or b"--export-ply" not in probe.read():
-                raise ValueError("Update LichtFeld Studio: this installation does not support Portal asset export (--export-ply).")
+            if code or SCENE_CONVERT not in probe.read():
+                raise ValueError("Update LichtFeld Studio: this installation's convert command cannot "
+                                 "export the visible scene of Portal projects.")
         owner = self.cache_owner(account, client.expected_session)
         cache = self.cache_directory / "assets" / owner / str(uuid.UUID(identifier))
         mkdir_private(cache, parents=True, exist_ok=True)
@@ -257,12 +263,13 @@ class Runtime:
                 if cancel.is_set():
                     raise InterruptedError("Import canceled")
                 self.update(phase="converting", message="Preparing splats with LichtFeld Studio…", progress=0.0)
-                # The canonical closed-project exporter applies visibility and transforms.
-                # No scene is opened, no project scripts are executed, no training starts.
+                # convert shares the closed-project export: visibility, transforms and
+                # published SH. No scene is opened, no project scripts run, no training starts.
                 log_path = cache / "last-export.log"
                 with log_path.open("wb") as log:
-                    code = self._backend([executable, "licht", str(project), "--export-ply", str(output)], log, cancel, 900)
-                    if code:
+                    code = self._backend([executable, "convert", "--no-provenance", str(project), str(output)],
+                                         log, cancel, 900)
+                    if code or not output.is_file():
                         log.flush()
                         with log_path.open("rb") as details:
                             details.seek(max(0, log_path.stat().st_size - 1200))

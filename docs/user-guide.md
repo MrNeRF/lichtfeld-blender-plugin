@@ -283,7 +283,7 @@ Job and dataset metadata can contain local paths and scene-derived content;
 review them before sharing.
 # Portal Gallery
 
-The extension is named **LichtFeld**. Its sidebar has two tabs: **Portal** for your online assets, and **Capture / Train** for cameras, datasets and training. Only the selected workflow is shown. If no compatible LichtFeld Studio executable is configured, Capture / Train shows a compact setup view. **Generate dataset only** remains available without LichtFeld Studio, and existing jobs and read-only trainer connections remain accessible. The installation check verifies the required training APIs in LichtFeld Studio's own Python runtime without starting training or loading user plugins. The training adapter repeats the same check at job startup.
+The extension is named **LichtFeld**. Its sidebar has two tabs: **Portal** for your online assets, and **Capture / Train** for cameras, datasets and training. Only the selected workflow is shown. If no compatible LichtFeld Studio executable is configured, Capture / Train shows a compact setup view. **Generate dataset only** remains available without LichtFeld Studio, and existing jobs and read-only trainer connections remain accessible. The installation check verifies the required training APIs in LichtFeld Studio's own Python runtime without starting training or loading user plugins, using `plugin run` when the installation provides it. The training adapter repeats the same check at job startup, which is the only check for installations without `plugin run`.
 
 Choose **Portal → Browse gallery…** in the LichtFeld sidebar, or use
 **File → Import → LichtFeld Portal Gallery…**. The gallery is independent of the
@@ -305,12 +305,13 @@ same representation. A completed download is rechecked before reuse, so retrying
 asset preparation does not need another full transfer. Cached files belong to
 Blender's extension user storage and are separate from credentials and training jobs.
 
-Import requires a LichtFeld Studio installation supporting
-`licht project.licht --export-ply output.ply`, configured in the extension's
-Settings. Browsing and account connection do not need LichtFeld Studio running.
-The current native exporter requires a working CUDA-capable GPU; this requirement
-applies to preparing an import, not to browsing the gallery.
-The headless exporter combines the project's visible splats and their transforms
+Import requires a LichtFeld Studio installation whose `convert` command exports
+the visible splats of a `.licht` project with their scene transforms, configured
+in the extension's Settings. An older installation is reported before the
+download starts. Browsing and account connection do not need LichtFeld Studio
+running. The native converter requires a working CUDA-capable GPU; this
+requirement applies to preparing an import, not to browsing the gallery.
+The converter combines the project's visible splats and their transforms
 into one Gaussian object; existing Blender objects and training results remain.
 The native Gaussian attributes, including the published SH detail, are retained.
 The current Blender
