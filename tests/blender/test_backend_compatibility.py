@@ -35,11 +35,12 @@ class NativeCompatibility(unittest.TestCase):
                         jobs.verify_backend('selected-backend')
                 self.assertEqual(run.call_args.args[0], ['selected-backend', 'plugin', 'run', str(SOURCE / 'bridge_core.py')])
 
-    def test_installation_without_script_runner_defers_the_same_api_check(self):
+    def test_installation_without_script_runner_is_not_verified(self):
         version = types.SimpleNamespace(returncode=0, stdout=b'LichtFeld Studio test', stderr=b'')
         older = types.SimpleNamespace(returncode=1, stdout=b'', stderr=b'Error: Unknown plugin command: run')
         with patch.object(jobs.subprocess, 'run', side_effect=[version, older]):
-            self.assertIn('checked when a job starts', jobs.verify_backend('selected-backend'))
+            with self.assertRaisesRegex(ValueError, "Update LichtFeld Studio.*before capture.*'plugin run'"):
+                jobs.verify_backend('selected-backend')
         failing = types.SimpleNamespace(returncode=1, stdout=b'', stderr=b'RuntimeError: lacks required training-adapter APIs')
         with patch.object(jobs.subprocess, 'run', side_effect=[version, failing]):
             with self.assertRaisesRegex(ValueError, 'training-adapter APIs'):

@@ -37,14 +37,15 @@ the LichtFeld Studio observer interface is a separate feature.
 | Portal browsing | Online access enabled in Blender and a Portal account; no LichtFeld Studio installation needed |
 | Portal import | LichtFeld Studio whose `convert` exports the visible splats of a `.licht` project with their scene transforms, and the GPU required by that build |
 | Capture renderer | Cycles or EEVEE; a working device configuration for that engine |
-| Training backend | Headless LichtFeld with the public `lichtfeld_sessions` package, camera principal-point properties, `SplatData.shN_rows`, and scoped training hooks with explicit progress/outcomes |
+| Training backend | Headless LichtFeld with `plugin run` compatibility probing, the public `lichtfeld_sessions` package, camera principal-point properties, `SplatData.shN_rows`, and scoped training hooks with explicit progress/outcomes |
 | Training hardware | The CUDA/GPU requirements of the selected LichtFeld build |
 | Storage | A writable jobs directory with room for the captured project, images, maps, checkpoints, and splats |
 
 Dataset-only capture does not require LichtFeld or a training GPU. Training and
 external viewing need a compatible backend; an older executable may not provide
 the required APIs. **Verify installation** checks that the selected executable
-starts, verifies its native training APIs, and checks the jobs directory. The adapter repeats that API check when a job starts and validates its hook payload before optimization proceeds.
+starts, verifies its native training APIs before any capture, and checks the jobs directory.
+An executable without `plugin run` cannot be verified and is reported as needing an update. The adapter repeats that API check when a job starts and validates its hook payload before optimization proceeds.
 First use may need network access to prepare the backend's isolated NumPy runtime.
 The ZIP bundles LichtFeld's pure Python training-protocol wheel. NumPy, native
 libraries and backend executables are supplied separately.

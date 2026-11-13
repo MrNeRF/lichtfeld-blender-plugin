@@ -31,9 +31,9 @@ def verify_backend(path):
     except subprocess.TimeoutExpired:
         raise ValueError("LichtFeld Studio took too long to verify. Check the selected installation and try again.") from None
     if probe.returncode and b"Unknown plugin command: run" in probe.stdout + probe.stderr:
-        # Builds without the standalone script runner still check the same APIs in
-        # the training hook, before any training step.
-        return version + '. Training APIs are checked when a job starts.'
+        # Without the script runner the APIs could only be checked after capture.
+        raise ValueError("Update LichtFeld Studio: this installation cannot check its training APIs "
+                         "before capture because it lacks the 'plugin run' command.")
     if probe.returncode or b"LFS_BLENDER_API_READY" not in probe.stdout:
         from lichtfeld_portal.gallery_logging import safe_text
         detail = safe_text((probe.stdout + probe.stderr).decode("utf-8", errors="replace"))[-700:].strip()
