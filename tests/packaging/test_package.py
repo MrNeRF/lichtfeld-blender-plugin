@@ -59,13 +59,18 @@ class PackageContracts(unittest.TestCase):
             for name in ('src/python/lichtfeld_sessions/__init__.py', 'src/python/_lfs_path_io.py', 'LICENSE'):
                 path = source/name
                 path.parent.mkdir(parents=True, exist_ok=True)
-                path.write_text('# Protocol build fixture\n')
+                path.write_bytes(b'# Protocol build fixture\r\n')
             wheel = repository/'lichtfeld_training'/packager.PROTOCOL_WHEEL
             original = wheel.read_bytes()
             with zipfile.ZipFile(wheel) as archive:
                 payloads = {name: archive.read(name) for name in archive.namelist()}
 
-            def generate(arguments, *, cwd, **kwargs):
+            def generate(arguments, *, cwd=None, **kwargs):
+                if str(arguments[1]).endswith('normalize_shared_wheel.py'):
+                    return
+                for name in ('lichtfeld_sessions/__init__.py', '_lfs_path_io.py', 'LICENSE'):
+                    self.assertEqual((Path(cwd)/name).read_bytes(), b'# Protocol build fixture\n')
+                self.assertNotIn(b'\r\n', (Path(cwd)/'pyproject.toml').read_bytes())
                 output = Path(cwd)/'dist'/wheel.name
                 output.parent.mkdir()
                 with zipfile.ZipFile(output, 'w', compression=zipfile.ZIP_STORED) as archive:

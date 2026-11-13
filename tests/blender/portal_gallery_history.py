@@ -35,14 +35,17 @@ def run():
                 bpy.context.scene.objects["Cube"]["prior_edit"] = 42
                 bpy.ops.ed.undo_push(message="Unrelated edit")
                 uid = bpy.context.scene.session_uid
+                initial_clouds = len(bpy.data.pointclouds)
                 for _ in portal.import_steps(bpy.context.scene, identifier, 2, fields):
                     pass
                 bpy.ops.ed.undo()
                 assert bpy.context.scene.session_uid == uid
                 assert bpy.context.scene.objects["Cube"]["prior_edit"] == 42
                 assert not any(obj.get("lichtfeld_portal_scene") == identifier for obj in bpy.context.scene.objects)
+                assert len(bpy.data.pointclouds) == initial_clouds
                 bpy.ops.ed.redo()
                 assert any(obj.get("lichtfeld_portal_scene") == identifier for obj in bpy.context.scene.objects)
+                assert len(bpy.data.pointclouds) == initial_clouds + 1
                 assert bpy.context.scene.objects["Cube"]["prior_edit"] == 42
                 portal._runtime.close()
                 portal._runtime = None

@@ -16,7 +16,7 @@ import zipfile
 
 WHEELS = tuple(path.removeprefix("./") for path in tomllib.loads((Path(__file__).resolve().parents[1] /
                                "lichtfeld_training/blender_manifest.toml").read_text(encoding="utf-8"))["wheels"])
-PROTOCOL_WHEEL = WHEELS[0]
+PROTOCOL_WHEEL = next(name for name in WHEELS if "lichtfeld_training_protocol-" in name)
 
 RUNTIME_FILES = frozenset("""
 __init__.py backend_hook.py blender_manifest.toml bridge_core.py
@@ -43,6 +43,8 @@ def build_protocol(lichtfeld_source):
                         ignore=shutil.ignore_patterns("__pycache__"))
         for name in ("src/python/_lfs_path_io.py", "LICENSE"):
             shutil.copyfile(source / name, staging / Path(name).name)
+        for path in [*staging.rglob("*.py"), staging / "LICENSE"]:
+            path.write_text(path.read_text(encoding="utf-8"), encoding="utf-8", newline="\n")
         (staging / "pyproject.toml").write_text('''[build-system]
 requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
@@ -59,11 +61,12 @@ authors = [{name = "LichtFeld Studio Authors"}]
 [tool.setuptools]
 packages = ["lichtfeld_sessions"]
 py-modules = ["_lfs_path_io"]
-'''.replace("PROTOCOL_VERSION", Path(PROTOCOL_WHEEL).name.split("-")[1]), encoding="utf-8")
+'''.replace("PROTOCOL_VERSION", Path(PROTOCOL_WHEEL).name.split("-")[1]), encoding="utf-8", newline="\n")
         subprocess.run([sys.executable, "-m", "build", "--wheel", "--no-isolation",
                         "--outdir", str(staging / "dist")], cwd=staging, check=True,
                        env={**os.environ, "SOURCE_DATE_EPOCH": "315532800"})
         wheel = staging / "dist" / Path(PROTOCOL_WHEEL).name
+        subprocess.run([sys.executable, str(source / "tools/normalize_shared_wheel.py"), str(wheel)], check=True)
         retain_wheel(wheel, destination)
 
 
@@ -93,9 +96,9 @@ def retain_wheel(wheel, destination):
 def build_portal_client(lichtfeld_source):
     destination = Path(__file__).resolve().parents[1] / "lichtfeld_training/wheels"
     with tempfile.TemporaryDirectory() as directory:
-        subprocess.run([sys.executable, str(Path(lichtfeld_source) / "tools/package_portal_client.py"),
-                        "--output", directory], check=True)
         wheel = next(name for name in WHEELS if "portal_client" in name)
+        subprocess.run([sys.executable, str(Path(lichtfeld_source) / "tools/package_portal_client.py"),
+                        "--output", directory, "--version", Path(wheel).name.split("-")[1]], check=True)
         retain_wheel(Path(directory) / Path(wheel).name, destination)
 
 

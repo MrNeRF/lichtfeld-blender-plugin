@@ -312,7 +312,8 @@ The current native exporter requires a working CUDA-capable GPU; this requiremen
 applies to preparing an import, not to browsing the gallery.
 The headless exporter combines the project's visible splats and their transforms
 into one Gaussian object; existing Blender objects and training results remain.
-The native Gaussian attributes, including SH, are retained. The current Blender
+The native Gaussian attributes, including the published SH detail, are retained.
+The current Blender
 scene's display transform remains in effect. Environment and project cameras
 are not imported.
 Imported assets use Blender's Z-up convention, matching LichtFeld Studio's native

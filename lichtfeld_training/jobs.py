@@ -170,20 +170,34 @@ def open_folder(path):
         subprocess.Popen(["open" if os.sys.platform == "darwin" else "xdg-open", path])
 
 
-def check_environment(backend, directory, source="", require_backend=True, *, backend_version=None):
+def check_environment(backend, directory, source="", require_backend=True, *, backend_version=None, backend_identity=None):
     if require_backend and not backend:
         return {"ok":False,"backend":False,"folder":False,"message":"Choose the LichtFeld executable in Settings."}
-    version=(backend_version if backend_version is not None else verify_backend(backend)) if require_backend else "Dataset capture folder is writable"
-    root=Path(directory)
-    root.mkdir(mode=0o700,parents=True,exist_ok=True)
-    with tempfile.TemporaryFile(dir=root) as probe:probe.write(b"check")
-    result = {"ok":True,"backend":True,"folder":True,"message":version,"directory":str(root)}
-    if source:
-        path = Path(source)
-        info = path.stat()
-        with tempfile.TemporaryFile(dir=path.parent) as probe:
-            probe.write(b"capture")
-        result["source_identity"] = [info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns]
+    identity = None
+    if require_backend:
+        info = Path(backend).stat()
+        identity = [info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns]
+        version = backend_version if backend_version is not None and identity == backend_identity else verify_backend(backend)
+        info = Path(backend).stat()
+        if identity != [info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns]:
+            raise ValueError("LichtFeld Studio changed during verification. Check the installation again.")
+    else:
+        version = "Dataset capture folder is writable"
+    try:
+        root=Path(directory)
+        root.mkdir(mode=0o700,parents=True,exist_ok=True)
+        with tempfile.TemporaryFile(dir=root) as probe:probe.write(b"check")
+        result = {"ok":True,"backend":True,"folder":True,"message":version,"directory":str(root),
+                  "backend_version":version,"backend_identity":identity}
+        if source:
+            path = Path(source)
+            info = path.stat()
+            with tempfile.TemporaryFile(dir=path.parent) as probe:
+                probe.write(b"capture")
+            result["source_identity"] = [info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns]
+    except (OSError, ValueError) as error:
+        return {"ok":False,"backend":True,"folder":False,"message":str(error),
+                "backend_version":version,"backend_identity":identity}
     return result
 
 

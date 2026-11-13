@@ -279,8 +279,8 @@ class Runtime:
                 current = account.snapshot()
                 if not current.signed_in or (current.email, current.connected_since) != client.expected_session:
                     raise ValueError("The Portal account changed. Import the asset again.")
-            self.events.put(("import", (client.expected_session, cancel, identifier, len(arrays["means"]), fields)))
             self.update(phase="ready", message="Ready to add to the scene")
+            self.events.put(("import", (client.expected_session, cancel, identifier, len(arrays["means"]), fields)))
 
     def _clear_cache(self, cancel):
         from lichtfeld_portal.private_directory import locked_sidecar

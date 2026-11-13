@@ -78,16 +78,28 @@ def invalidate(scene=None):
 
 def environment(prefs,force=False,capture_only=False):
  key=(bpy.path.abspath(prefs.backend_path),jobs_folder(prefs),bpy.data.filepath,not capture_only)
- if force:_environment.pop(key,None)
  current=_environment.get(key,{})
+ known=next((value for candidate,value in _environment.items() if key[0] and candidate[0]==key[0]
+             and candidate[3] and value.get('backend') and value.get('backend_identity')),None)
+ known_backend=bool(known) or any(candidate[0]==key[0] and candidate[3] and pending[1]
+                                  for candidate,pending in _pending.items())
+ if force:
+  for candidate in tuple(_environment):
+   if candidate==key or candidate[0]==key[0] or candidate[1]==key[1]:_environment.pop(candidate,None)
+  for candidate in tuple(_pending):
+   if candidate==key or candidate[0]==key[0] or candidate[1]==key[1]:_pending.pop(candidate,None)
+  current={}
  if current.get('generation') != _save_generation and key not in _pending:
   generation=_save_generation
-  _pending[key]=True
-  def done(value):_environment[key]={**value,'generation':generation};_pending.pop(key,None)
+  token=object();_pending[key]=(token,known_backend)
+  def done(value):
+   if _pending.get(key,(None,))[0] is token:
+    _environment[key]={**value,'generation':generation};_pending.pop(key,None)
   def fail(error):done({'ok':False,'message':str(error),'backend':False,'folder':False})
-  version=current.get('message') if current.get('backend') and current.get('ok') else None
-  ui_runtime.submit(lambda:jobs.check_environment(*key,backend_version=version),done,fail)
- return current if current.get('generation') == _save_generation else {**current,'ok':False,'message':'Checking installation and job folder…','checking':True}
+  version=known.get('backend_version') if known and not force else None
+  identity=known.get('backend_identity') if known and not force else None
+  ui_runtime.submit(lambda:jobs.check_environment(*key,backend_version=version,backend_identity=identity),done,fail)
+ return current if current.get('generation') == _save_generation else {**current,'backend':known_backend or bool(current.get('backend')),'ok':False,'message':'Checking installation and job folder…','checking':True}
 
 def collect(context,capture_only=False):
  initial=signature(context)

@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Bounded background readers. Never import or access bpy, widgets or scene APIs."""
 from pathlib import Path
+import os
 import queue
 import threading
 import time
@@ -36,11 +37,15 @@ def read_ply(stream, should_cancel=lambda: False):
     import numpy as np
     if should_cancel():
         raise InterruptedError("Import canceled")
-    if stream.readline() != b"ply\n" or stream.readline() != b"format binary_little_endian 1.0\n":
+    if stream.readline(5) != b"ply\n" or stream.readline(64) != b"format binary_little_endian 1.0\n":
         raise ValueError("Expected a binary Gaussian PLY")
-    fields, count = [], None
+    fields, count, header_bytes = [], None, 0
     for _ in range(256):
-        line = stream.readline().decode("ascii").strip()
+        raw = stream.readline(65537 - header_bytes)
+        header_bytes += len(raw)
+        if not raw.endswith(b"\n") or header_bytes > 65536:
+            raise ValueError("PLY header limit exceeded")
+        line = raw.decode("ascii").strip()
         if line == "end_header":
             break
         if line.startswith("element vertex "):
@@ -52,8 +57,12 @@ def read_ply(stream, should_cancel=lambda: False):
             fields.append(name)
     else:
         raise ValueError("PLY header limit exceeded")
-    if not count or not 0 < count <= 10000000:
-        raise ValueError("Gaussian PLY must contain between 1 and 10,000,000 splats")
+    # Blender 5.3 foreach_set uses a signed int for the flattened attribute
+    # length; Gaussian rotation and radiance have four values per point.
+    if not count or not 0 < count <= (2_147_483_647 // 4):
+        raise ValueError("Gaussian PLY point count is outside Blender's supported range")
+    if not fields or count * len(fields) * 4 > os.fstat(stream.fileno()).st_size - stream.tell():
+        raise ValueError("Invalid Gaussian payload")
     values = np.fromfile(stream, dtype="<f4", count=count * len(fields))
     if values.size != count * len(fields) or not np.isfinite(values).all():
         raise ValueError("Invalid Gaussian payload")

@@ -132,12 +132,12 @@ def select_workspace(context):
 
 
 def import_steps(scene, identifier, count, fields):
+    if not bpy.app.background and bpy.ops.ed.undo_push.poll():
+        bpy.ops.ed.undo_push(message="Before Portal import")
     cloud = yield from ui_runtime.pointcloud_steps(fields, count, "Portal splat")
     committed = False
     obj = None
     try:
-        if not bpy.app.background and bpy.ops.ed.undo_push.poll():
-            bpy.ops.ed.undo_push(message="Before Portal import")
         title = next((row["title"] for row in state()["rows"] if row["id"] == identifier), "Portal splat")
         obj = bpy.data.objects.new(title, cloud)
         obj.matrix_world = Matrix(RDF_TO_BLENDER)
@@ -270,6 +270,7 @@ def tick_steps():
                 pass  # A missing thumbnail must not prevent importing the asset.
         elif kind == "cache_cleared":
             clear_thumbnails()
+            _thumbnail_attempted.clear()
     snapshot = _runtime.snapshot()
     if _import_cancel and _import_cancel.is_set():
         cancel_import()
@@ -343,7 +344,8 @@ def tick_steps():
             _stage = None
             _destination = None
             _frame = None
-            _runtime.update(phase="failed", message=str(error))
+            message = "Not enough memory to add this asset to Blender" if isinstance(error, MemoryError) else str(error)
+            _runtime.update(phase="failed", message=message)
     if snapshot["revision"] != _last_revision or rows_changed:
         _last_revision = snapshot["revision"]
         for window in bpy.context.window_manager.windows:
@@ -482,7 +484,7 @@ class LF_OT_portal_action(bpy.types.Operator):
     @classmethod
     def description(cls, context, properties):
         return {
-            "import": "Download and add the visible splats to your scene. Requires a LichtFeld Studio installation for headless conversion; existing objects and training results stay intact",
+            "import": "Download and add the visible splats to your scene. Requires LichtFeld Studio for headless conversion; existing objects and training results stay intact",
             "refresh": "Check your Portal gallery for available assets",
             "connect": "Approve Blender's Portal connection in your browser; no password is entered in Blender",
             "cancel": "Cancel the pending connection or asset import; this does not stop training",
