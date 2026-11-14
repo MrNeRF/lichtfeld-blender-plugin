@@ -33,7 +33,7 @@ records=[]
 with patch.object(ext.ui_runtime,'peek',return_value=binding),patch.object(ext.ui_runtime,'binding',return_value=binding):
     for importing in (False,True,False,True):
         s.importing=importing;layout=Layout()
-        ext.LF_PT_training.draw(SimpleNamespace(layout=layout),context)
+        ext.draw_training(SimpleNamespace(layout=layout),context)
         records.append(layout.records)
         assert ext.allowed(bpy.context,'compare') and ext.allowed(bpy.context,'import_best')
         assert bpy.ops.lichtfeld.import_result()=={'FINISHED'}
@@ -42,7 +42,7 @@ with patch.object(ext.ui_runtime,'peek',return_value=binding),patch.object(ext.u
     binding.reader.external=True;s.attached_session='/external'
     assert not ext.allowed(bpy.context,'pause') and not ext.allowed(bpy.context,'stop')
     s.attached_session='';s.running=False;s.status='Failed';status.update(state='failed',dataset_ready=False)
-    layout=Layout();ext.LF_PT_training.draw(SimpleNamespace(layout=layout),context)
+    layout=Layout();ext.draw_training(SimpleNamespace(layout=layout),context)
     assert next(enabled for name,text,enabled in layout.records if name=='lichtfeld.use_dataset') is False
     assert next(enabled for name,text,enabled in layout.records if name=='lichtfeld.new_capture') is True
 print('SNAPSHOT_STAGING_NEVER_TOGGLES_CONTROLS_AND_READONLY_PRESERVED_PASS',flush=True)

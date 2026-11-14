@@ -75,13 +75,23 @@ with tempfile.TemporaryDirectory() as directory:
  root=Path(directory)/'job'
  source=Path(directory)/'source.blend';source.write_bytes(b'saved source')
  job={'id':'launch-failure','root':str(root),'source_file':str(source),'scene':'Scene','connection_directory':str(Path(directory)/'connections')}
- with patch.object(ext.jobs,'remember_job',side_effect=PermissionError('index denied')),patch.object(ext.subprocess,'Popen') as spawn:
+ with patch.object(ext.jobs,'check_environment',return_value={'ok':True}),patch.object(ext.jobs,'remember_job',side_effect=PermissionError('index denied')),patch.object(ext.subprocess,'Popen') as spawn:
   try:ext.launch_supervisor(job)
   except PermissionError:pass
   else:raise AssertionError('Expected failure')
   spawn.assert_not_called()
  assert ext.read_json(root/'state.json')['state']=='failed'
  assert not source.with_name('.lichtfeld-capture-launch-failure.blend').exists()
+ for mode in ({}, {'reuse_dataset':True}, {'resume':True}):
+  root=Path(directory)/('incompatible-'+str(len(mode)))
+  job={'id':'incompatible','root':str(root),'backend':'changed-backend',**mode}
+  with patch.object(ext.jobs,'check_environment',return_value={'ok':False,'message':'Incompatible backend'}) as check, \
+       patch.object(ext.jobs,'freeze_source') as freeze,patch.object(ext.subprocess,'Popen') as spawn:
+   try:ext.launch_supervisor(job)
+   except ValueError as error:assert str(error)=='Incompatible backend'
+   else:raise AssertionError('An incompatible backend was accepted')
+   check.assert_called_once_with('changed-backend',str(root.parent))
+   freeze.assert_not_called();spawn.assert_not_called()
 bpy.ops.preferences.addon_disable(module=module)
 assert not bpy.app.timers.is_registered(ext.poll_jobs)
 print('WORKFLOW_CONTRACTS_PASS')

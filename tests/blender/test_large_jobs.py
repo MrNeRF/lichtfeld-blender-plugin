@@ -42,6 +42,39 @@ def until(condition):
     raise AssertionError('Background reader did not publish the expected status')
 
 class LargeJobs(unittest.TestCase):
+    def test_ply_large_count_is_not_rejected_by_an_arbitrary_ten_million_limit(self):
+        import numpy as np
+        with tempfile.TemporaryFile() as stream:
+            stream.write(b'ply\nformat binary_little_endian 1.0\nelement vertex 10000001\nproperty float x\nend_header\n')
+            stream.seek(0)
+            # Simulate a large file and stop before allocating it: the count must
+            # reach the decoder, while a short payload still fails normally.
+            with patch.object(reader.os, 'fstat', return_value=types.SimpleNamespace(st_size=100_000_000)), \
+                 patch.object(np, 'fromfile', return_value=np.zeros(1, dtype=np.float32)) as decode:
+                with self.assertRaisesRegex(ValueError, 'Invalid Gaussian payload'):
+                    reader.read_ply(stream)
+                self.assertEqual(decode.call_args.kwargs['count'], 10_000_001)
+
+    def test_ply_truncated_large_payload_is_rejected_before_allocation(self):
+        import numpy as np
+        with tempfile.TemporaryFile() as stream:
+            stream.write(b'ply\nformat binary_little_endian 1.0\nelement vertex 10000001\nproperty float x\nend_header\n')
+            stream.seek(0)
+            with patch.object(np, 'fromfile') as decode:
+                with self.assertRaisesRegex(ValueError, 'Invalid Gaussian payload'):
+                    reader.read_ply(stream)
+                decode.assert_not_called()
+
+    def test_ply_count_cannot_overflow_blender_four_component_foreach_set(self):
+        import numpy as np
+        with tempfile.TemporaryFile() as stream:
+            stream.write(b'ply\nformat binary_little_endian 1.0\nelement vertex 536870912\nproperty float x\nend_header\n')
+            stream.seek(0)
+            with patch.object(np, 'fromfile') as decode:
+                with self.assertRaisesRegex(ValueError, "Blender's supported range"):
+                    reader.read_ply(stream)
+                decode.assert_not_called()
+
     def test_capture_validation_signature_is_bounded_and_checked_before_launch(self):
         tree=ast.parse((SOURCE/'__init__.py').read_text(encoding='utf-8'))
         cls=next(node for node in tree.body if isinstance(node,ast.ClassDef) and node.name=='LF_OT_start')

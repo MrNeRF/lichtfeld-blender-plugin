@@ -19,9 +19,33 @@ sys.modules[package.__name__] = package
 core = importlib.import_module(package.__name__ + '.bridge_core')
 control = importlib.import_module(package.__name__ + '.job_control')
 geometry = importlib.import_module('lichtfeld_sessions.geometry')
+jobs = importlib.import_module(package.__name__ + '.jobs')
 
 
 class NativeCompatibility(unittest.TestCase):
+    def test_installation_probe_requires_the_canonical_api_check(self):
+        version = types.SimpleNamespace(returncode=0, stdout=b'LichtFeld Studio test', stderr=b'')
+        for code, output, accepted in ((0, b'LFS_BLENDER_API_READY', True), (0, b'', False), (1, b'', False)):
+            result = types.SimpleNamespace(returncode=code, stdout=output, stderr=b'')
+            with self.subTest(code=code, output=output), patch.object(jobs.subprocess, 'run', side_effect=[version, result]) as run:
+                if accepted:
+                    self.assertIn('Training APIs verified', jobs.verify_backend('selected-backend'))
+                else:
+                    with self.assertRaisesRegex(ValueError, 'compatibility check failed'):
+                        jobs.verify_backend('selected-backend')
+                self.assertEqual(run.call_args.args[0], ['selected-backend', 'plugin', 'run', str(SOURCE / 'bridge_core.py')])
+
+    def test_installation_without_script_runner_is_not_verified(self):
+        version = types.SimpleNamespace(returncode=0, stdout=b'LichtFeld Studio test', stderr=b'')
+        older = types.SimpleNamespace(returncode=1, stdout=b'', stderr=b'Error: Unknown plugin command: run')
+        with patch.object(jobs.subprocess, 'run', side_effect=[version, older]):
+            with self.assertRaisesRegex(ValueError, "Update LichtFeld Studio.*before capture.*'plugin run'"):
+                jobs.verify_backend('selected-backend')
+        failing = types.SimpleNamespace(returncode=1, stdout=b'', stderr=b'RuntimeError: lacks required training-adapter APIs')
+        with patch.object(jobs.subprocess, 'run', side_effect=[version, failing]):
+            with self.assertRaisesRegex(ValueError, 'training-adapter APIs'):
+                jobs.verify_backend('selected-backend')
+
     def test_module_capabilities_are_required_not_version_text(self):
         hooks = type('Hooks', (), {name: lambda self, callback: None for name in
                                  ('on_training_start', 'on_post_step', 'on_training_end')})

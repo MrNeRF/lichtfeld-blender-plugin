@@ -5,10 +5,12 @@
 Install the extension ZIP from Blender Preferences, enable it, and open the
 **LichtFeld** tab in the 3D Viewport sidebar (`N`). In extension preferences, select
 the actual LichtFeld executable and a writable, permanent jobs folder. **Verify
-installation** checks that the executable can start. Training additionally needs
-the native adapter APIs listed in the [requirements](../README.md#requirements).
-These are checked inside the trainer when a job starts; unsupported backends
-report an update error. Dataset-only capture can be used without a backend.
+installation** checks that the executable starts and verifies the native adapter APIs listed in the [requirements](../README.md#requirements), in the backend's own Python runtime. It does not open LichtFeld Studio's GUI or start training. Unsupported installations leave the compact setup view visible. Dataset-only capture can be used without a backend.
+
+Choose **Capture / Train** for the capture workflow or **Portal** to browse online
+assets. Without a tab selected, a scene with a rig, training job or temporary
+training view opens Capture / Train. Background job recovery does not override
+an explicit tab choice; you can switch at any time without stopping either workflow.
 
 Save the source `.blend` before capture. Blender creates an isolated saved copy
 for the render process; the source directory must allow temporary staging files.
@@ -17,7 +19,7 @@ the open scene after launch does not change that job's images.
 
 ## Choose an operation
 
-Choose the **Activity** first: capture and train, generate a dataset only, or train saved images. **Open job** and **View trainer** open existing work without changing this setup; **Back to setup** returns to it. **Return to previous job** is available when a previous job was retained. The gear button opens configuration, and the question mark opens this guide.
+Expand **Capture and training**, then choose the **Activity**: capture and train, generate a dataset only, or train saved images. **Open job** and **View trainer** open existing work without changing this setup; **Back to setup** returns to it. **Return to previous job** is available when a previous job was retained. The gear button opens configuration, and the question mark opens this guide.
 
 Setup follows **1 · Content and quality → 2 · Cameras → 3 · Capture and train** (or **Generate dataset**). Choose what to render first, then select existing cameras or create a rig. Creating/updating has one action in the camera section. Distance is directly accessible; expand **Advanced rig settings** for elevation, lens and custom aiming. Choosing a center reference changes camera placement, not the captured content.
 
@@ -279,3 +281,51 @@ Checkpoints and completed results remain separate from the transient live previe
 After training finishes, a compatible LichtFeld Studio observer can use **Import saved model** to load the full saved best evaluated model, or the last valid model if no evaluated candidate exists. It creates an editable local model with the result's coordinate presentation and full SH data. The observer hides its transient preview after a successful import. Keep the job folder available until import completes.
 Job and dataset metadata can contain local paths and scene-derived content;
 review them before sharing.
+# Portal Gallery
+
+The extension is named **LichtFeld**. Its sidebar has two tabs: **Portal** for your online assets, and **Capture / Train** for cameras, datasets and training. Only the selected workflow is shown. If no compatible LichtFeld Studio executable is configured, Capture / Train shows a compact setup view. **Generate dataset only** remains available without LichtFeld Studio, and existing jobs and read-only trainer connections remain accessible. The installation check verifies the required training APIs in LichtFeld Studio's own Python runtime without starting training or loading user plugins, through `plugin run`, before any images are rendered. An installation without `plugin run` cannot be verified and is reported as needing an update. The training adapter repeats the same check at job startup.
+
+Choose **Portal → Browse gallery…** in the LichtFeld sidebar, or use
+**File → Import → LichtFeld Portal Gallery…**. The gallery is independent of the
+training panel and does not change the selected training job.
+
+1. Enable Blender's online access if it is disabled.
+2. Choose **Connect account** and approve the connection in your browser. If the
+   browser does not open, use **Open browser** and **Copy code**. No password is
+   entered or stored in the Blender scene.
+3. Browse the project cards in your Portal gallery. Search by title, or use **Page** when the catalog has more than six projects. This shows remote projects, not LichtFeld Studio's local Project Manager library.
+4. Choose **Import** on the project card. Download and conversion run in the background;
+   closing the browser keeps the operation running. Reopen it to see progress or
+   cancel. Import waits while Blender is rendering or preparing a capture. From
+   a temporary preview, the displayed destination is its source scene; the
+   temporary scene itself is never modified.
+
+Interrupted representation downloads can resume when the Portal provides the
+same representation. A completed download is rechecked before reuse, so retrying
+asset preparation does not need another full transfer. Cached files belong to
+Blender's extension user storage and are separate from credentials and training jobs.
+
+Import requires a LichtFeld Studio installation whose `convert` command exports
+the visible splats of a `.licht` project with their scene transforms, configured
+in the extension's Settings. An older installation is reported before the
+download starts. Browsing and account connection do not need LichtFeld Studio
+running. The native converter requires a working CUDA-capable GPU; this
+requirement applies to preparing an import, not to browsing the gallery.
+The converter combines the project's visible splats and their transforms
+into one Gaussian object; existing Blender objects and training results remain.
+The native Gaussian attributes, including the published SH detail, are retained.
+The current Blender
+scene's display transform remains in effect. Environment and project cameras
+are not imported.
+Enabled crops are applied to their source splats before merging; they are not
+imported as editable Blender objects. External RAD sources are included at full
+detail and must be accessible to LichtFeld Studio and fit in memory.
+Imported assets use Blender's Z-up convention, matching LichtFeld Studio's native
+PLY drag-out into Blender. This generic orientation differs from returning a
+Blender-origin training result to its original capture scene.
+
+Blender has its own Portal authorization. Use **Sign out** to forget that authorization and connect a different account; LichtFeld Studio stays connected. Offline sign-out only removes the local credentials and makes no network requests. Account controls are also available in the extension preferences. Use **Clear Portal cache** in the extension settings
+to remove retained downloads and thumbnails; files in use by another import are
+kept. Imported objects and training jobs are unaffected. Upload, automatic
+synchronization and installation from LichtFeld Studio are not part of this
+first integration.

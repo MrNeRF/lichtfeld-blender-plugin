@@ -16,6 +16,9 @@ ext=importlib.import_module(module)
 
 scene = bpy.context.scene
 s = scene.lichtfeld_training
+s.max_points = 10_000_001
+assert s.max_points == 10_000_001
+s.max_points = 250_000
 prefs = ext.preferences()
 area = Path(sys.argv[sys.argv.index('--')+1]).resolve()
 area.mkdir(parents=True, exist_ok=True)
@@ -54,8 +57,9 @@ for task, action in [('CAPTURE','lichtfeld.start_training'), ('EXPORT','lichtfel
                      ('REUSE','lichtfeld.restart_training')]:
     s.dataset_mode = task
     layout = Layout()
-    with patch.object(ext.preflight, 'cached', return_value=ready) as cached:
-        ext.LF_PT_training.draw(SimpleNamespace(layout=layout), context)
+    with patch.object(ext.preflight, 'cached', return_value=ready) as cached, \
+         patch.object(ext.preflight, 'environment', return_value={'backend':True}):
+        ext.draw_training(SimpleNamespace(layout=layout), context)
     actions = [name for kind, *rest in layout.records if kind=='operator' for name in rest
                if name in {'lichtfeld.start_training','lichtfeld.export_dataset','lichtfeld.restart_training'}]
     assert actions == [action], (task, actions)
@@ -68,6 +72,17 @@ for task, action in [('CAPTURE','lichtfeld.start_training'), ('EXPORT','lichtfel
         assert 'depth_loss_weight' not in fields and 'normal_loss_weight' not in fields
         assert all(call.kwargs.get('capture_only') is True for call in cached.call_args_list)
 
+# An unavailable backend exposes setup, not unusable training controls.
+s.dataset_mode = 'CAPTURE'
+layout = Layout()
+with patch.object(ext.preflight, 'environment', return_value={'backend':False, 'message':'Choose LichtFeld Studio'}):
+    ext.draw_training(SimpleNamespace(layout=layout), context)
+assert ('operator', 'lichtfeld.setup') in layout.records
+assert ('operator', 'lichtfeld.start_training') not in layout.records
+assert not any(kind == 'prop' and name in {'iterations', 'camera_collection'} for kind, *items in layout.records for name in items)
+assert bpy.ops.lichtfeld.setup_view(mode='EXPORT') == {'FINISHED'}
+assert s.mode == 'NEW' and s.dataset_mode == 'EXPORT'
+
 # Validation updates never move the export button or editable fields.
 s.dataset_mode = 'EXPORT'
 orders = []
@@ -76,7 +91,7 @@ for checking, errors in [(True,['Checking source and cameras…']), (False,[]),
     layout = Layout()
     value = {**ready, 'checking':checking, 'errors':errors}
     with patch.object(ext.preflight, 'cached', return_value=value), patch.object(ext.preflight, 'issues', return_value=errors):
-        ext.LF_PT_training.draw(SimpleNamespace(layout=layout), context)
+        ext.draw_training(SimpleNamespace(layout=layout), context)
     orders.append(layout.records)
 assert all(order == orders[0] for order in orders)
 
@@ -92,7 +107,9 @@ assert ext.jobs.check_environment('', prefs.jobs_directory, require_backend=Fals
 assert not ext.jobs.check_environment('', prefs.jobs_directory, require_backend=True)['ok']
 
 # Saving refreshes source identity and permissions, not the executable probe.
-prefs.backend_path = 'TRUSTED'
+backend = area/'fake-backend'
+backend.write_bytes(b'backend')
+prefs.backend_path = str(backend)
 ext.preflight.clear()
 def wait_environment():
     deadline = time.monotonic() + 5
@@ -107,10 +124,50 @@ with patch.object(ext.jobs, 'verify_backend', return_value='Verified backend') a
     before = wait_environment()
     assert before['ok'], before
     bpy.ops.wm.save_as_mainfile(filepath=str(area/'source.blend'))
+    checking = ext.preflight.environment(prefs)
+    assert checking.get('checking') and checking.get('backend') and not checking['ok'], checking
     after = wait_environment()
     assert after['ok'], after
     assert after['generation'] != before['generation']
     verify.assert_called_once()
+    # A different saved scene is checked again without hiding the training UI.
+    bpy.ops.wm.save_as_mainfile(filepath=str(area/'other-source.blend'))
+    checking = ext.preflight.environment(prefs)
+    assert checking.get('checking') and checking.get('backend') and not checking['ok'], checking
+    assert wait_environment()['ok']
+    verify.assert_called_once()
+    checking = ext.preflight.environment(prefs, force=True)
+    assert checking.get('checking') and checking.get('backend') and not checking['ok'], checking
+    assert wait_environment()['ok']
+    assert verify.call_count == 2
+# An explicit verification supersedes an in-flight cached check, including its callback.
+ext.preflight.clear()
+queued = []
+with patch.object(ext.ui_runtime, 'submit', side_effect=lambda *args: queued.append(args)):
+    ext.preflight.environment(prefs)
+    info = backend.stat()
+    identity = [info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns]
+    queued.pop(0)[1]({'ok': True, 'backend': True, 'folder': True, 'message': 'Verified backend',
+                      'backend_version': 'Verified backend', 'backend_identity': identity})
+    ext.preflight._save_generation += 1
+    ext.preflight.environment(prefs)
+    old_check = queued.pop(0)
+    assert ext.preflight.environment(prefs, force=True)['backend']
+    new_check = queued.pop(0)
+    assert ext.preflight.environment(prefs)['backend']
+    old_check[1]({'ok': True, 'backend': True, 'folder': True, 'message': 'Stale result'})
+    new_check[2]('Incompatible backend')
+    final = ext.preflight.environment(prefs)
+    assert not final['backend'] and final['message'] == 'Incompatible backend', final
+    ext.preflight.environment(prefs, capture_only=True)
+    stale_capture = queued.pop(0)
+    ext.preflight.environment(prefs, force=True)
+    forced_check = queued.pop(0)
+    stale_capture[1]({'ok': False, 'backend': True, 'folder': False, 'message': 'Stale folder error'})
+    assert ext.preflight.environment(prefs, capture_only=True)['checking']
+    assert queued  # Dataset-only validation was scheduled again.
+    forced_check[2]('Incompatible backend')
+ext.preflight.clear()
 prefs.backend_path = ''
 with patch.object(ext.preflight, 'environment') as environment, patch.object(ext.scene_render, 'tick'):
     ext.preflight.tick(bpy.context, prefs)

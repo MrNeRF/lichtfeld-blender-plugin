@@ -20,12 +20,25 @@ else:
 
 def verify_backend(path):
     flags = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
-    result = subprocess.run([path, "--version"], capture_output=True, timeout=20, **flags)
-    text = (result.stdout + result.stderr).decode("utf-8", errors="replace").strip()
-    if result.returncode or "LichtFeld" not in text:
-        raise ValueError("The selected LichtFeld executable cannot start")
-    version = next((line for line in text.splitlines() if line.startswith("LichtFeld")), text.splitlines()[-1])
-    return version + '. Executable starts; training APIs are checked when a job starts.'
+    try:
+        result = subprocess.run([path, "--version"], capture_output=True, timeout=20, **flags)
+        text = (result.stdout + result.stderr).decode("utf-8", errors="replace").strip()
+        if result.returncode or "LichtFeld" not in text:
+            raise ValueError("The selected LichtFeld Studio executable cannot start")
+        version = next((line for line in text.splitlines() if line.startswith("LichtFeld")), text.splitlines()[-1])
+        probe = subprocess.run([path, "plugin", "run", str(Path(__file__).with_name("bridge_core.py"))],
+                               capture_output=True, timeout=60, **flags)
+    except subprocess.TimeoutExpired:
+        raise ValueError("LichtFeld Studio took too long to verify. Check the selected installation and try again.") from None
+    if probe.returncode and b"Unknown plugin command: run" in probe.stdout + probe.stderr:
+        # Without the script runner the APIs could only be checked after capture.
+        raise ValueError("Update LichtFeld Studio: this installation cannot check its training APIs "
+                         "before capture because it lacks the 'plugin run' command.")
+    if probe.returncode or b"LFS_BLENDER_API_READY" not in probe.stdout:
+        from lichtfeld_portal.gallery_logging import safe_text
+        detail = safe_text((probe.stdout + probe.stderr).decode("utf-8", errors="replace"))[-700:].strip()
+        raise ValueError("The training API compatibility check failed. Update LichtFeld Studio or choose another installation." + (" " + detail if detail else ""))
+    return version + '. Training APIs verified.'
 
 
 def prepare_optimizer(job):
@@ -161,20 +174,34 @@ def open_folder(path):
         subprocess.Popen(["open" if os.sys.platform == "darwin" else "xdg-open", path])
 
 
-def check_environment(backend, directory, source="", require_backend=True, *, backend_version=None):
+def check_environment(backend, directory, source="", require_backend=True, *, backend_version=None, backend_identity=None):
     if require_backend and not backend:
         return {"ok":False,"backend":False,"folder":False,"message":"Choose the LichtFeld executable in Settings."}
-    version=(backend_version if backend_version is not None else verify_backend(backend)) if require_backend else "Dataset capture folder is writable"
-    root=Path(directory)
-    root.mkdir(mode=0o700,parents=True,exist_ok=True)
-    with tempfile.TemporaryFile(dir=root) as probe:probe.write(b"check")
-    result = {"ok":True,"backend":True,"folder":True,"message":version,"directory":str(root)}
-    if source:
-        path = Path(source)
-        info = path.stat()
-        with tempfile.TemporaryFile(dir=path.parent) as probe:
-            probe.write(b"capture")
-        result["source_identity"] = [info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns]
+    identity = None
+    if require_backend:
+        info = Path(backend).stat()
+        identity = [info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns]
+        version = backend_version if backend_version is not None and identity == backend_identity else verify_backend(backend)
+        info = Path(backend).stat()
+        if identity != [info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns]:
+            raise ValueError("LichtFeld Studio changed during verification. Check the installation again.")
+    else:
+        version = "Dataset capture folder is writable"
+    try:
+        root=Path(directory)
+        root.mkdir(mode=0o700,parents=True,exist_ok=True)
+        with tempfile.TemporaryFile(dir=root) as probe:probe.write(b"check")
+        result = {"ok":True,"backend":True,"folder":True,"message":version,"directory":str(root),
+                  "backend_version":version,"backend_identity":identity}
+        if source:
+            path = Path(source)
+            info = path.stat()
+            with tempfile.TemporaryFile(dir=path.parent) as probe:
+                probe.write(b"capture")
+            result["source_identity"] = [info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns]
+    except (OSError, ValueError) as error:
+        return {"ok":False,"backend":True,"folder":False,"message":str(error),
+                "backend_version":version,"backend_identity":identity}
     return result
 
 

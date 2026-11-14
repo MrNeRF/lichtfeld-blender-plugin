@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2026 LichtFeld Studio Authors
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Installable LichtFeld Training extension for Blender 5.3."""
+"""LichtFeld integration for Blender 5.3."""
 
 import math
 import json
@@ -26,7 +26,7 @@ from .visibility import set_hidden, source_steps
 from .ui_text import draw_paragraph
 from .session_geometry import source_model_transform
 from . import ui_runtime
-from . import jobs, preflight, workflow, rig_geometry, rig_path, rig_edit, training_options, preview_scene, capture_settings, capture_preview, scene_render, ui_help
+from . import jobs, preflight, workflow, rig_geometry, rig_path, rig_edit, training_options, preview_scene, capture_settings, capture_preview, scene_render, ui_help, portal_ui
 
 _PACKAGE = __package__
 _ROOT = Path(__file__).resolve().parent
@@ -197,19 +197,26 @@ class LichtFeldPreferences(bpy.types.AddonPreferences):
     bl_idname = _PACKAGE
 
     backend_path: StringProperty(name="LichtFeld executable", subtype="FILE_PATH",
-                                description="The LichtFeld Studio installation used for headless training")
+                                description="The LichtFeld Studio installation used for training and Portal asset preparation")
     jobs_directory: StringProperty(name="Training jobs", subtype="DIR_PATH",
                                   description="Permanent folder for datasets, checkpoints and results")
-    verification: StringProperty(options={"SKIP_SAVE"})
 
     def draw(self, context):
         layout = self.layout
+        layout.label(text="LichtFeld for Blender", icon_value=portal_ui.brand_icon())
         layout.prop(self, "backend_path")
+        box = layout.box()
+        box.label(text="Portal Gallery", icon="ASSET_MANAGER")
+        portal_ui.account_controls(box)
+        row = box.row()
+        row.operator_context = "INVOKE_DEFAULT"
+        row.operator("lichtfeld.portal_action", text="Clear Portal cache", icon="TRASH").action = "clear_cache"
         row = layout.row()
         row.enabled = bool(self.backend_path)
         row.operator("lichtfeld.verify_installation", icon="CHECKMARK")
-        if self.verification:
-            for line in textwrap.wrap(self.verification, width=70):
+        if self.backend_path:
+            installation = preflight.environment(self)
+            for line in textwrap.wrap(installation['message'], width=70):
                 layout.label(text=line)
         layout.prop(self, "jobs_directory")
         for line in textwrap.wrap("Jobs: " + preflight.jobs_folder(self), width=70):
@@ -388,7 +395,7 @@ class LichtFeldSettings(bpy.types.PropertyGroup):
     iterations: IntProperty(name="Training steps", default=2000, min=4, max=1000000, update=custom_changed)
     eval_interval: IntProperty(name="Evaluate every", default=500, min=1, max=100000, update=custom_changed,
                                description="Choose the best model using reserved views at this step interval")
-    max_points: IntProperty(name="Gaussian budget", default=250000, min=1000, max=10000000, update=custom_changed)
+    max_points: IntProperty(name="Gaussian budget", default=250000, min=1000, max=1000000000, update=custom_changed)
     sh_degree: IntProperty(name="SH degree", default=3, min=0, max=3)
     preview_mode: EnumProperty(name="Preview updates", items=[
         ("LIVE", "Live (adaptive)", "Frequent full-quality updates within a 5% capture-time budget"),
@@ -439,16 +446,10 @@ for _name in training_options.FIELDS:
 class LF_OT_verify(bpy.types.Operator):
     bl_idname = "lichtfeld.verify_installation"
     bl_label = "Verify installation"
-    bl_description = "Check that the executable starts; training API compatibility is checked when a job starts"
+    bl_description = "Verify the configured LichtFeld Studio executable and its training APIs in the background"
 
     def execute(self, context):
         prefs = preferences(context)
-        path = bpy.path.abspath(prefs.backend_path)
-        prefs.verification = "Checking installation…"
-        def done(text):
-            prefs.verification = text
-        directory = preflight.jobs_folder(prefs)
-        ui_runtime.submit(lambda: jobs.check_environment(path, directory)["message"], callback=done, failure=done)
         preflight.environment(prefs, force=True)
         return {"FINISHED"}
 
@@ -456,7 +457,7 @@ class LF_OT_verify(bpy.types.Operator):
 class LF_OT_setup(bpy.types.Operator):
     bl_idname = "lichtfeld.setup"
     bl_label = "Set up LichtFeld"
-    bl_description = "Choose the LichtFeld executable and training output folder"
+    bl_description = "Configure LichtFeld Studio, training output, Portal account and cached downloads"
 
     def execute(self, context):
         bpy.ops.screen.userpref_show()
@@ -774,6 +775,12 @@ def launch_supervisor(job):
     try:
         if job.get('capture_only'):
             jobs.check_export_destination(job)
+        else:
+            environment = jobs.check_environment(job.get("backend", ""), str(root.parent))
+            if not environment.get("ok"):
+                raise ValueError(environment.get("message", "Could not verify LichtFeld Studio"))
+            job["backend_version"] = environment.get("backend_version")
+            job["backend_identity"] = environment.get("backend_identity")
         if not job.get("resume") and not job.get("reuse_dataset"):
             jobs.freeze_source(job)
         atomic_json(root / "job.json", job)
@@ -1459,7 +1466,8 @@ class LF_OT_setup_view(bpy.types.Operator):
     bl_description = "Open capture setup, a saved job, or read-only trainer viewing without changing capture settings"
     mode: EnumProperty(items=[('NEW', 'Capture setup', 'Return to the current capture or saved-image setup'),
                               ('OPEN', 'Open job', 'Open a saved training job'),
-                              ('CONNECT', 'View trainer', 'Find active trainers for read-only viewing')])
+                              ('CONNECT', 'View trainer', 'Find active trainers for read-only viewing'),
+                              ('EXPORT', 'Generate dataset only', 'Capture images and cameras without installing or starting LichtFeld Studio')])
 
     @classmethod
     def poll(cls, context):
@@ -1471,10 +1479,14 @@ class LF_OT_setup_view(bpy.types.Operator):
     def description(cls, context, properties):
         return {'NEW': 'Return to capture or saved-image setup; your current settings are retained',
                 'OPEN': 'Choose a saved training job to reopen; capture settings are retained',
-                'CONNECT': 'Find active trainers for read-only viewing; this does not start or stop training'}.get(properties.mode, cls.bl_description)
+                'CONNECT': 'Find active trainers for read-only viewing; this does not start or stop training',
+                'EXPORT': 'Prepare a dataset with Blender without starting training or requiring LichtFeld Studio'}.get(properties.mode, cls.bl_description)
 
     def execute(self, context):
-        context.scene.lichtfeld_training.mode = self.mode
+        settings = context.scene.lichtfeld_training
+        settings.mode = 'NEW' if self.mode == 'EXPORT' else self.mode
+        if self.mode == 'EXPORT':
+            settings.dataset_mode = 'EXPORT'
         if self.mode == 'CONNECT':
             refresh_sessions()
         return {'FINISHED'}
@@ -2047,143 +2059,145 @@ def draw_capture_actions(setup, settings, ready, errors, capture_only, wrapped):
                  icon='EXPORT' if capture_only else 'PLAY')
 
 
-class LF_PT_training(bpy.types.Panel):
-    bl_label = "LichtFeld Training"
-    bl_idname = "LF_PT_training"
-    bl_space_type = "VIEW_3D"
-    bl_region_type = "UI"
-    bl_category = "LichtFeld"
-    bl_ui_units_x = 20
-
-    def draw(self, context):
-        layout = self.layout
-        scale = bpy.context.preferences.system.ui_scale
-        width = context.region.width
-        if getattr(self, 'is_popover', False):
-            width = min(width, LF_PT_training.bl_ui_units_x * 20 * scale)
-        def wrapped(container, text):
-            draw_paragraph(container, text, width, scale)
-        if capture_preview.is_preview(context.scene):
-            capture_source = capture_preview.source_scene(context.scene)
-            if capture_source:
-                capture_preview.draw(layout, context, capture_source, width=width)
-            else:
-                capture_preview.draw_orphaned(layout, context)
-            return
-        if preview_scene.is_preview(context.scene):
-            color_source = preview_scene.source_scene(context.scene)
-            if color_source:
-                box = layout.box()
-                box.label(text="Trainer colors", icon="SHADING_RENDERED")
-                box.operator("lichtfeld.trainer_color_view", text="Back to scene", icon="BACK")
-                source_look = context.scene.get("lichtfeld_source_transform", False)
-                box.operator("lichtfeld.color_view_look", text="Use trainer colors" if source_look else "Use source display transform")
-                current = ui_runtime.peek(color_source)
-                from . import job_panel
-                job_panel.draw(layout, context, color_source.lichtfeld_training, current.status if current else {},
-                               current.reader.error if current else "", wrapped, color_view=True)
-            else:
-                preview_scene.draw_orphaned(layout, context, wrapped)
-            return
-        settings = context.scene.lichtfeld_training
-        prefs = preferences(context)
-        current = ui_runtime.peek(context.scene)
-        status = current.status if current else {}
-        if settings.attached_session or settings.job_directory:
+def draw_training(self, context):
+    layout = self.layout
+    scale = bpy.context.preferences.system.ui_scale
+    width = context.region.width
+    if getattr(self, 'is_popover', False):
+        width = min(width, portal_ui.LF_PT_portal.bl_ui_units_x * 20 * scale)
+    def wrapped(container, text):
+        draw_paragraph(container, text, width, scale)
+    if capture_preview.is_preview(context.scene):
+        capture_source = capture_preview.source_scene(context.scene)
+        if capture_source:
+            capture_preview.draw(layout, context, capture_source, width=width)
+        else:
+            capture_preview.draw_orphaned(layout, context)
+        return
+    if preview_scene.is_preview(context.scene):
+        color_source = preview_scene.source_scene(context.scene)
+        if color_source:
+            box = layout.box()
+            box.label(text="Trainer colors", icon="SHADING_RENDERED")
+            box.operator("lichtfeld.trainer_color_view", text="Back to scene", icon="BACK")
+            source_look = context.scene.get("lichtfeld_source_transform", False)
+            box.operator("lichtfeld.color_view_look", text="Use trainer colors" if source_look else "Use source display transform")
+            current = ui_runtime.peek(color_source)
             from . import job_panel
-            job_panel.draw(layout, context, settings, status, current.reader.error if current else "", wrapped)
-            return
-        if settings.detail:
-            wrapped(layout.box(), settings.detail)
-        row = layout.row(align=True)
-        row.enabled = not settings.operation_busy
-        if settings.mode != 'NEW':
-            row.operator('lichtfeld.setup_view', text='Back to setup', icon='BACK').mode = 'NEW'
+            job_panel.draw(layout, context, color_source.lichtfeld_training, current.status if current else {},
+                           current.reader.error if current else "", wrapped, color_view=True)
         else:
-            row.operator('lichtfeld.setup_view', text='Open job', icon='FILEBROWSER').mode = 'OPEN'
-            row.operator('lichtfeld.setup_view', text='View trainer', icon='LINKED').mode = 'CONNECT'
-        row.operator('lichtfeld.setup', text='', icon='PREFERENCES')
-        row.operator('wm.url_open', text='', icon='QUESTION').url = 'https://github.com/MrNeRF/lichtfeld-blender-plugin/blob/main/docs/user-guide.md'
-        if settings.previous_job:
-            layout.operator('lichtfeld.previous_job', text='Return to previous job', icon='RECOVER_LAST')
-        if settings.mode == "OPEN":
-            layout.operator("lichtfeld.load_job", icon="FILEBROWSER")
+            preview_scene.draw_orphaned(layout, context, wrapped)
+        return
+    settings = context.scene.lichtfeld_training
+    prefs = preferences(context)
+    current = ui_runtime.peek(context.scene)
+    status = current.status if current else {}
+    if settings.attached_session or settings.job_directory:
+        from . import job_panel
+        job_panel.draw(layout, context, settings, status, current.reader.error if current else "", wrapped)
+        return
+    if settings.detail:
+        wrapped(layout.box(), settings.detail)
+    row = layout.row(align=True)
+    row.enabled = not settings.operation_busy
+    if settings.mode != 'NEW':
+        row.operator('lichtfeld.setup_view', text='Back to setup', icon='BACK').mode = 'NEW'
+    else:
+        row.operator('lichtfeld.setup_view', text='Open job', icon='FILEBROWSER').mode = 'OPEN'
+        row.operator('lichtfeld.setup_view', text='View trainer', icon='LINKED').mode = 'CONNECT'
+    row.operator('wm.url_open', text='', icon='QUESTION').url = 'https://github.com/MrNeRF/lichtfeld-blender-plugin/blob/main/docs/user-guide.md'
+    if settings.previous_job:
+        layout.operator('lichtfeld.previous_job', text='Return to previous job', icon='RECOVER_LAST')
+    if settings.mode == "OPEN":
+        layout.operator("lichtfeld.load_job", icon="FILEBROWSER")
+        return
+    if settings.mode == "CONNECT":
+        layout.label(text="View an active trainer", icon='LOCKED')
+        wrapped(layout, 'Read-only: view the model and cameras. Training stays under its owner’s control.')
+        layout.label(text='Searching for trainers…' if _session_scan_pending else 'Refresh to update the list',
+                     icon='TIME' if _session_scan_pending else 'INFO')
+        column = layout.column()
+        column.enabled = not _session_scan_pending
+        column.operator("lichtfeld.scan_sessions", icon="FILE_REFRESH")
+        column.prop(settings, "discovered_session", text="")
+        row = column.row()
+        row.enabled = settings.discovered_session not in {'NONE', ''}
+        row.operator("lichtfeld.attach_session", icon="LINKED")
+        return
+    if settings.dataset_mode != 'EXPORT':
+        installation = preflight.environment(prefs)
+        if not installation.get('backend'):
+            layout.label(text='Set up training', icon='PREFERENCES')
+            wrapped(layout, installation.get('message', 'Choose your LichtFeld Studio installation.'))
+            layout.operator('lichtfeld.setup', text='Configure LichtFeld Studio…', icon='FILE_FOLDER')
+            row = layout.row()
+            row.enabled = bool(prefs.backend_path) and not installation.get('checking')
+            row.operator('lichtfeld.verify_installation', text='Check installation again', icon='FILE_REFRESH')
+            layout.operator('lichtfeld.setup_view', text='Generate dataset only', icon='EXPORT').mode = 'EXPORT'
             return
-        if settings.mode == "CONNECT":
-            layout.label(text="View an active trainer", icon='LOCKED')
-            wrapped(layout, 'Read-only: view the model and cameras. Training stays under its owner’s control.')
-            layout.label(text='Searching for trainers…' if _session_scan_pending else 'Refresh to update the list',
-                         icon='TIME' if _session_scan_pending else 'INFO')
-            column = layout.column()
-            column.enabled = not _session_scan_pending
-            column.operator("lichtfeld.scan_sessions", icon="FILE_REFRESH")
-            column.prop(settings, "discovered_session", text="")
-            row = column.row()
-            row.enabled = settings.discovered_session not in {'NONE', ''}
-            row.operator("lichtfeld.attach_session", icon="LINKED")
-            return
-        setup = layout.column()
-        setup.enabled = not settings.operation_busy
-        setup.prop(settings, "dataset_mode", text="Activity")
-        if settings.dataset_mode == "REUSE":
-            box = setup.box()
-            box.label(text="Saved capture", icon="IMAGE_DATA")
-            box.prop(settings, "dataset_job_directory", text="Job folder")
-            box.operator("lichtfeld.inspect_dataset", icon="VIEWZOOM")
-            box.label(text=settings.dataset_summary)
-            box.label(text=settings.dataset_coverage)
-            wrapped(box, "Uses saved images and camera poses. Scene or rig edits require a new capture.")
-            wrapped(box, "Review the settings below, then start training. No images will be rendered again.")
-            row = setup.row()
-            row.scale_y = 1.4
-            row.operator("lichtfeld.restart_training", text="Train saved images from scratch", icon="PLAY")
-            box = draw_setup_section(layout, settings, 'training', 'Training and preview', 'MOD_PARTICLES')
-            if box is not None:
-                draw_training_controls(box, settings, wrapped)
-            return
-        capture_only = settings.dataset_mode == "EXPORT"
-        ready = preflight.cached(context, prefs, capture_only=capture_only)
-        errors = preflight.issues(ready)
-        rig = settings.camera_collection
-        pending = rig and rig.get('lichtfeld_generated') and (rig.get('lichtfeld_rig_recipe') != rig_recipe(settings) or ready.get('reference_changed', False))
-        box = draw_setup_section(layout, settings, 'content', '1 · Content and quality', 'SCENE_DATA', closed=False)
+    setup = layout.column()
+    setup.enabled = not settings.operation_busy
+    setup.prop(settings, "dataset_mode", text="Activity")
+    if settings.dataset_mode == "REUSE":
+        box = setup.box()
+        box.label(text="Saved capture", icon="IMAGE_DATA")
+        box.prop(settings, "dataset_job_directory", text="Job folder")
+        box.operator("lichtfeld.inspect_dataset", icon="VIEWZOOM")
+        box.label(text=settings.dataset_summary)
+        box.label(text=settings.dataset_coverage)
+        wrapped(box, "Uses saved images and camera poses. Scene or rig edits require a new capture.")
+        wrapped(box, "Review the settings below, then start training. No images will be rendered again.")
+        row = setup.row()
+        row.scale_y = 1.4
+        row.operator("lichtfeld.restart_training", text="Train saved images from scratch", icon="PLAY")
+        box = draw_setup_section(layout, settings, 'training', 'Training and preview', 'MOD_PARTICLES')
         if box is not None:
-            draw_capture_sources(box, context, settings)
-        header, box = layout.panel('lichtfeld_setup_cameras', default_closed=False)
-        header.enabled = not settings.operation_busy
-        header.label(text='Updating…' if settings.operation_busy else '2 · Cameras',
-                     icon='TIME' if settings.operation_busy else 'CAMERA_DATA')
-        if box is not None:
-            box.enabled = not settings.operation_busy
-            draw_capture_cameras(box, context, settings, ready, pending, wrapped)
-        else:
-            draw_rig_actions(header, settings, pending, compact=True)
-        box = draw_setup_section(layout, settings, 'output', 'Render and output', 'RENDER_STILL')
-        if box is not None:
-            draw_capture_options(box, context, settings, capture_only, wrapped)
-        if not capture_only:
-            box = draw_setup_section(layout, settings, 'training', 'Training and preview', 'MOD_PARTICLES')
-            if box is not None:
-                draw_training_controls(box, settings, wrapped)
-        if not rig:
-            return
-        start = layout.column()
-        start.enabled = not settings.operation_busy
-        start.label(text='3 · Generate dataset' if capture_only else '3 · Capture and train', icon='PLAY')
-        draw_capture_plan(start, context, settings, ready, pending)
-        draw_capture_actions(start, settings, ready, errors, capture_only, wrapped)
-        box = layout.box()
+            draw_training_controls(box, settings, wrapped)
+        return
+    capture_only = settings.dataset_mode == "EXPORT"
+    ready = preflight.cached(context, prefs, capture_only=capture_only)
+    errors = preflight.issues(ready)
+    rig = settings.camera_collection
+    pending = rig and rig.get('lichtfeld_generated') and (rig.get('lichtfeld_rig_recipe') != rig_recipe(settings) or ready.get('reference_changed', False))
+    box = draw_setup_section(layout, settings, 'content', '1 · Content and quality', 'SCENE_DATA', closed=False)
+    if box is not None:
+        draw_capture_sources(box, context, settings)
+    header, box = layout.panel('lichtfeld_setup_cameras', default_closed=False)
+    header.enabled = not settings.operation_busy
+    header.label(text='Updating…' if settings.operation_busy else '2 · Cameras',
+                 icon='TIME' if settings.operation_busy else 'CAMERA_DATA')
+    if box is not None:
         box.enabled = not settings.operation_busy
-        box.prop(settings, "validation_details", icon="TRIA_DOWN" if settings.validation_details else "TRIA_RIGHT", emboss=False)
-        if settings.validation_details:
-            for error in errors[:5]:
-                wrapped(box, error)
-                if name := ready.get('camera_issues', {}).get(error):
-                    box.operator('lichtfeld.inspect_capture_camera', icon='CAMERA_DATA').camera_name = name
-            if len(errors) > 5:
-                wrapped(box, f'{len(errors)-5:,} more issues; resolve the listed issues first.')
-            if not errors:
-                box.label(text="Capture setup is ready", icon="CHECKMARK")
+        draw_capture_cameras(box, context, settings, ready, pending, wrapped)
+    else:
+        draw_rig_actions(header, settings, pending, compact=True)
+    box = draw_setup_section(layout, settings, 'output', 'Render and output', 'RENDER_STILL')
+    if box is not None:
+        draw_capture_options(box, context, settings, capture_only, wrapped)
+    if not capture_only:
+        box = draw_setup_section(layout, settings, 'training', 'Training and preview', 'MOD_PARTICLES')
+        if box is not None:
+            draw_training_controls(box, settings, wrapped)
+    if not rig:
+        return
+    start = layout.column()
+    start.enabled = not settings.operation_busy
+    start.label(text='3 · Generate dataset' if capture_only else '3 · Capture and train', icon='PLAY')
+    draw_capture_plan(start, context, settings, ready, pending)
+    draw_capture_actions(start, settings, ready, errors, capture_only, wrapped)
+    box = layout.box()
+    box.enabled = not settings.operation_busy
+    box.prop(settings, "validation_details", icon="TRIA_DOWN" if settings.validation_details else "TRIA_RIGHT", emboss=False)
+    if settings.validation_details:
+        for error in errors[:5]:
+            wrapped(box, error)
+            if name := ready.get('camera_issues', {}).get(error):
+                box.operator('lichtfeld.inspect_capture_camera', icon='CAMERA_DATA').camera_name = name
+        if len(errors) > 5:
+            wrapped(box, f'{len(errors)-5:,} more issues; resolve the listed issues first.')
+        if not errors:
+            box.label(text="Capture setup is ready", icon="CHECKMARK")
 
 
 def poll_jobs():
@@ -2194,6 +2208,7 @@ def poll_jobs():
 
 @persistent
 def history_changing(_):
+    portal_ui.before_history()
     # RNA collection iterators cannot survive Blender replacing Main on Undo.
     # Close the cooperative scan while its datablocks are still valid.
     preflight.invalidate()
@@ -2221,6 +2236,7 @@ def saved(_):
 
 @persistent
 def unloading(_):
+    portal_ui.invalidate()
     global _session_scan_pending, _sessions, _session_items
     _session_scan_pending = False
     _sessions = []
@@ -2242,6 +2258,7 @@ def loaded(_):
     preflight.clear()
     ui_runtime.clear()
     _imported.clear()
+    portal_ui.select_workspace(bpy.context)
     source = bpy.data.filepath
     directory = preflight.connection_folder(preferences()) if source else None
     for scene in bpy.data.scenes:
@@ -2255,6 +2272,8 @@ def loaded(_):
                 settings = scene.lichtfeld_training
                 if root and bpy.data.filepath == source and not settings.job_directory and not settings.attached_session and not settings.running:
                     settings.job_directory = root
+                    if bpy.context.scene == scene:
+                        portal_ui.select_workspace(bpy.context)
             except ReferenceError:
                 pass
         ui_runtime.submit(lambda name=name: jobs.remembered_job(directory, source, name), done)
@@ -2263,7 +2282,7 @@ def loaded(_):
 _CLASSES = (LichtFeldPreferences, LichtFeldSourceRef, LichtFeldRigReference, LichtFeldSettings, LF_OT_notice, LF_OT_verify, LF_OT_setup, LF_OT_tight_framing, LF_OT_rig, LF_OT_live_rig, rig_edit.LF_GGT_live_rig,
             LF_OT_start, LF_OT_export_dataset, LF_OT_pick_sources, LF_OT_select_aim, LF_OT_inspect_camera, LF_OT_read_rig, LF_OT_command, LF_OT_import, LF_OT_resume, LF_OT_dataset, LF_OT_new_capture, LF_OT_inspect_dataset, LF_OT_restart, LF_OT_folder, LF_OT_reconnect, LF_OT_load_job, LF_OT_compare,
             LF_OT_setup_view, LF_OT_scan_sessions, LF_OT_attach_session, LF_OT_detach_session, LF_OT_previous_job, LF_OT_color_look, LF_OT_color_command, LF_OT_model_view, LF_OT_color_view, LF_OT_capture_lighting,
-            *capture_preview.CLASSES, *scene_render.CLASSES, LF_PT_training)
+            *capture_preview.CLASSES, *scene_render.CLASSES, *portal_ui.CLASSES)
 
 ui_help.apply(_CLASSES)
 
@@ -2273,6 +2292,7 @@ def register():
         bpy.utils.register_class(cls)
     bpy.types.Scene.lichtfeld_training = PointerProperty(type=LichtFeldSettings)
     bpy.types.Collection.lichtfeld_rig_reference = PointerProperty(type=LichtFeldRigReference)
+    portal_ui.register()
     bpy.app.handlers.undo_pre.append(history_changing)
     bpy.app.handlers.redo_pre.append(history_changing)
     bpy.app.handlers.undo_post.append(history_changed)
@@ -2284,6 +2304,7 @@ def register():
 
 
 def unregister():
+    portal_ui.unregister()
     # Blender unregisters native modal handlers. Release their owned datablocks
     # first, while the RNA settings and operator types still exist.
     manager = bpy.context.window_manager

@@ -8,6 +8,7 @@ parser.add_argument('backend',type=Path)
 parser.add_argument('--installed',action='store_true')
 options=parser.parse_args(sys.argv[sys.argv.index('--')+1:])
 ext=importlib.import_module('bl_ext.user_default.lichtfeld_training')
+bpy.context.window_manager.lichtfeld_workspace = 'TRAINING'
 area=options.area.resolve();area.mkdir(parents=True,exist_ok=True)
 bpy.context.preferences.view.show_splash=False
 s=bpy.context.scene.lichtfeld_training
@@ -19,7 +20,7 @@ bpy.ops.object.select_all(action='DESELECT');bpy.data.objects['Cube'].select_set
 view=max(bpy.context.window.screen.areas,key=lambda a:a.width*a.height);view.type='VIEW_3D'
 state={'step':-2,'start':time.monotonic(),'window':bpy.context.window}
 def popup():
- with bpy.context.temp_override(area=view,region=next(r for r in view.regions if r.type=='WINDOW')):bpy.ops.wm.call_panel(name='LF_PT_training',keep_open=True)
+ with bpy.context.temp_override(area=view,region=next(r for r in view.regions if r.type=='WINDOW')):bpy.ops.wm.call_panel(name='LF_PT_lichtfeld',keep_open=True)
 
 def snapshot(name):
  # Programmatic RNA changes do not necessarily invalidate the displayed region.

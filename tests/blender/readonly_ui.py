@@ -4,6 +4,7 @@ from pathlib import Path
 import bpy,importlib,sys,time,traceback
 import numpy as np
 ext=importlib.import_module('bl_ext.user_default.lichtfeld_training')
+bpy.context.window_manager.lichtfeld_workspace = 'TRAINING'
 area=Path(sys.argv[sys.argv.index('--')+1]);area.mkdir(parents=True,exist_ok=True)
 bpy.context.preferences.view.show_splash=False
 view=max(bpy.context.window.screen.areas,key=lambda a:a.width*a.height)
@@ -34,7 +35,7 @@ def tick():
    if not s.result_object or s.importing:return .1
    assert not any(ext.allowed(bpy.context,action) for action in ('pause','resume','stop','import_best','continue'))
    with bpy.context.temp_override(area=view,region=next(r for r in view.regions if r.type=='WINDOW')):
-    bpy.ops.wm.call_panel(name='LF_PT_training',keep_open=True)
+    bpy.ops.wm.call_panel(name='LF_PT_lichtfeld',keep_open=True)
    state['step']=2;return .5
   if step==2:
    bpy.ops.screen.screenshot(filepath=str(area/'08-readonly-popover.png'))
