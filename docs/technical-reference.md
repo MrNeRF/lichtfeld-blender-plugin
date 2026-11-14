@@ -22,8 +22,10 @@ Studio, and never in RNA properties or a `.blend` file.
 `.licht` assets are validated by the Portal client and materialized by
 LichtFeld Studio's `convert` command, which shares the closed-project export, in a
 cancellable child process. Before downloading, the extension requires the
-scene-aware `.licht` input listed by `convert --help`; older builds accept
-`.licht` only as a single model without scene transforms.
+`visible-project-splats-v1` identifier on its own line from `convert --capabilities`.
+Older builds that reject the option or omit the identifier are rejected before download.
+This exports supported visible splats, not the complete project scene: crop volumes
+are not applied and live RAD streams are omitted, with converter warnings.
 The shared Gaussian PLY reader and cooperative point-cloud builder then prepare
 and commit a new object; Portal assets never acquire a training job identity.
 

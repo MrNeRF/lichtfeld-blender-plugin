@@ -104,31 +104,58 @@ with TemporaryDirectory() as directory:
     bridge = import_module(NAME + ".bridge_core")
     record = bridge.write_splat(directory, parameters[0], 1, "test")
 
+    downloads = []
+
     def download(identifier, project, **options):
         assert options["checkpoint"] is None and options["reuse_completed"]
+        downloads.append(identifier)
         project.write_bytes(b"fake download; exporter is the boundary under test")
 
-    calls, scene_convert = [], []
+    client = SimpleNamespace(expected_session=identity, download=download)
+    canceled = threading.Event()
+    canceled.set()
+    with patch.object(runtime, "_client", return_value=client):
+        try:  # The real child supervisor stops before starting the probe.
+            runtime._download(account, identifier, str(executable), cancel=canceled)
+            raise AssertionError("A canceled import started the capability probe")
+        except InterruptedError:
+            assert not downloads
+
+    calls, older = [], [(2, b"Flag could not be matched: capabilities"),
+                        (0, b"Input: .licht (project)"),
+                        (0, b"Unsupported feature: visible-project-splats-v1\n")]
 
     def backend(arguments, log, cancel, timeout):
         calls.append(arguments[1:])
-        if arguments[-1] == "--help":
-            # Older builds list .licht input without scene-aware conversion.
-            log.write(import_module(NAME + ".portal_runtime").SCENE_CONVERT if scene_convert
-                      else b"Input: .licht (project)")
-        else:
-            shutil.copyfile(Path(directory) / record["path"], IOPath(arguments[-1]))
+        if arguments[-1] == "--capabilities":
+            # Older builds reject the option; a build ignoring it must not pass either.
+            code, text = older.pop(0) if older else (0, b"other-feature-v2\r\nvisible-project-splats-v1\r\n")
+            log.write(text)
+            return code
+        if exporter_fails:
+            log.write(b"Error: The project has no visible splats to export.")
+            return 1
+        shutil.copyfile(Path(directory) / record["path"], IOPath(arguments[-1]))
         return 0
 
+    exporter_fails = True
     try:
-        with patch.object(runtime, "_client", return_value=SimpleNamespace(expected_session=identity, download=download)), \
+        with patch.object(runtime, "_client", return_value=client), \
              patch.object(runtime, "_backend", side_effect=backend):
+            while older:
+                try:
+                    runtime._download(account, identifier, str(executable), cancel=runtime.cancel)
+                    raise AssertionError("An older convert was accepted for Portal projects")
+                except ValueError as error:
+                    assert "Update LichtFeld Studio" in str(error)
+                assert not downloads and calls[-1] == ["convert", "--capabilities"]
             try:
                 runtime._download(account, identifier, str(executable), cancel=runtime.cancel)
-                raise AssertionError("An older convert was accepted for Portal projects")
+                raise AssertionError("A failed export was imported")
             except ValueError as error:
-                assert "Update LichtFeld Studio" in str(error)
-            scene_convert.append(True)
+                assert "could not prepare this project" in str(error)
+                assert "no visible splats" in runtime.snapshot()["details"]
+            exporter_fails = False
             with locked_sidecar(cache / "download.lock"):
                 try:
                     runtime._download(account, identifier, str(executable), cancel=runtime.cancel)

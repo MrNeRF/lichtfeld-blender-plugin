@@ -15,7 +15,7 @@ import time
 import uuid
 
 
-SCENE_CONVERT = b".licht (visible project splats with their scene transforms)"
+VISIBLE_PROJECT_SPLATS = b"visible-project-splats-v1"  # Listed by `convert --capabilities`.
 
 
 class Runtime:
@@ -221,14 +221,14 @@ class Runtime:
         client = self._client(account)
         if not Path(executable).is_file():
             raise ValueError("Choose the LichtFeld Studio executable in Settings before importing.")
-        # Older builds also accept .licht in convert but reject multi-splat scenes
-        # and ignore scene transforms. Only the documented scene-aware input passes.
+        # Older builds also accept .licht in convert but reject multi-splat projects
+        # and ignore transforms; they fail on --capabilities instead of listing it.
         with tempfile.TemporaryFile() as probe:
-            code = self._backend([executable, "convert", "--help"], probe, cancel, 15)
+            code = self._backend([executable, "convert", "--capabilities"], probe, cancel, 15)
             probe.seek(0)
-            if code or SCENE_CONVERT not in probe.read():
+            if code or VISIBLE_PROJECT_SPLATS not in probe.read().splitlines():
                 raise ValueError("Update LichtFeld Studio: this installation's convert command cannot "
-                                 "export the visible scene of Portal projects.")
+                                 "export the visible splats of Portal projects.")
         owner = self.cache_owner(account, client.expected_session)
         cache = self.cache_directory / "assets" / owner / str(uuid.UUID(identifier))
         mkdir_private(cache, parents=True, exist_ok=True)
