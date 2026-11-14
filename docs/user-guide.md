@@ -317,9 +317,9 @@ The native Gaussian attributes, including the published SH detail, are retained.
 The current Blender
 scene's display transform remains in effect. Environment and project cameras
 are not imported.
-Crop volumes are not applied to the exported geometry, and live RAD streams are
-omitted. Apply crops to the geometry in LichtFeld Studio before importing when
-the imported splats must be cropped.
+Enabled crops are applied to their source splats before merging; they are not
+imported as editable Blender objects. External RAD sources are included at full
+detail and must be accessible to LichtFeld Studio and fit in memory.
 Imported assets use Blender's Z-up convention, matching LichtFeld Studio's native
 PLY drag-out into Blender. This generic orientation differs from returning a
 Blender-origin training result to its original capture scene.

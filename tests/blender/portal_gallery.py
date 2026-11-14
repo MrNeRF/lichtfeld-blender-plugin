@@ -123,13 +123,14 @@ with TemporaryDirectory() as directory:
 
     calls, older = [], [(2, b"Flag could not be matched: capabilities"),
                         (0, b"Input: .licht (project)"),
-                        (0, b"Unsupported feature: visible-project-splats-v1\n")]
+                        (0, b"Unsupported feature: visible-project-splats-v1\n"),
+                        (0, b"visible-project-splats-v1\n")]
 
     def backend(arguments, log, cancel, timeout):
         calls.append(arguments[1:])
         if arguments[-1] == "--capabilities":
             # Older builds reject the option; a build ignoring it must not pass either.
-            code, text = older.pop(0) if older else (0, b"other-feature-v2\r\nvisible-project-splats-v1\r\n")
+            code, text = older.pop(0) if older else (0, b"other-feature-v2\r\nvisible-project-splats-v1\r\nproject-crops-rad-v1\r\n")
             log.write(text)
             return code
         if exporter_fails:

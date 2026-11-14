@@ -15,7 +15,7 @@ import time
 import uuid
 
 
-VISIBLE_PROJECT_SPLATS = b"visible-project-splats-v1"  # Listed by `convert --capabilities`.
+PROJECT_IMPORT_CAPABILITIES = {b"visible-project-splats-v1", b"project-crops-rad-v1"}
 
 
 class Runtime:
@@ -226,9 +226,9 @@ class Runtime:
         with tempfile.TemporaryFile() as probe:
             code = self._backend([executable, "convert", "--capabilities"], probe, cancel, 15)
             probe.seek(0)
-            if code or VISIBLE_PROJECT_SPLATS not in probe.read().splitlines():
+            if code or not PROJECT_IMPORT_CAPABILITIES.issubset(probe.read().splitlines()):
                 raise ValueError("Update LichtFeld Studio: this installation's convert command cannot "
-                                 "export the visible splats of Portal projects.")
+                                 "export Portal project splats with their crops and RAD sources.")
         owner = self.cache_owner(account, client.expected_session)
         cache = self.cache_directory / "assets" / owner / str(uuid.UUID(identifier))
         mkdir_private(cache, parents=True, exist_ok=True)
