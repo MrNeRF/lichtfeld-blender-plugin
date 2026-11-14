@@ -47,8 +47,8 @@ the required APIs. **Verify installation** checks that the selected executable
 starts, verifies its native training APIs before any capture, and checks the jobs directory.
 An executable without `plugin run` cannot be verified and is reported as needing an update. The adapter repeats that API check when a job starts and validates its hook payload before optimization proceeds.
 First use may need network access to prepare the backend's isolated NumPy runtime.
-The ZIP bundles LichtFeld's pure Python training-protocol wheel. NumPy, native
-libraries and backend executables are supplied separately.
+The ZIP bundles LichtFeld's pure Python training-protocol and Portal client wheels.
+NumPy, native libraries and backend executables are supplied separately.
 
 The backend must expose `ScopedHandler.on_training_start`, `on_post_step`, and
 `on_training_end`, plus `SplatData.shN_rows` and the read-only
