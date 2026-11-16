@@ -206,7 +206,8 @@ class Runtime:
                 if action == 'thumbnail':
                     self.update(phase='idle')
                 else:
-                    self.update(phase='canceled' if cancel.is_set() else 'failed', message=str(error)[:700], details=str(error))
+                    values = {'account': None} if action == 'connect' and cancel.is_set() else {}
+                    self.update(phase='canceled' if cancel.is_set() else 'failed', message=str(error)[:700], details=str(error), **values)
 
     def _backend(self, arguments, log, cancel, timeout):
         """Supervise both capability probing and export on the worker thread."""

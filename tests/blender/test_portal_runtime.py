@@ -9,7 +9,7 @@ import json
 from pathlib import Path
 import tempfile
 import sys
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 import threading
 import unittest
 from unittest.mock import Mock, patch
@@ -154,6 +154,33 @@ class PortalRuntimeTests(unittest.TestCase):
                     self.assertTrue(runtime.events.empty())
             finally:
                 release.set(); finish.set(); runtime.close()
+
+    def test_canceled_connection_clears_the_code_and_can_be_retried(self):
+        with tempfile.TemporaryDirectory() as root:
+            runtime = module.Runtime(root)
+            entered, release = threading.Event(), threading.Event()
+            @contextmanager
+            def remote(action, values, cancel):
+                runtime.update(account=SimpleNamespace(signed_in=False, linking=True))
+                entered.set()
+                release.wait(timeout=5)
+                if cancel.is_set():
+                    raise InterruptedError("Connection canceled")
+                yield {}
+            try:
+                with patch.object(runtime, "_portal", remote):
+                    runtime.start("connect")
+                    self.assertTrue(entered.wait(timeout=5))
+                    runtime.stop()
+                    release.set()
+                    runtime.future.result(timeout=5)
+                    self.assertEqual(runtime.snapshot()["phase"], "canceled")
+                    self.assertIsNone(runtime.snapshot()["account"])
+                    self.assertTrue(runtime.start("connect"))
+                    runtime.future.result(timeout=5)
+                    self.assertEqual(runtime.snapshot()["phase"], "idle")
+            finally:
+                release.set(); runtime.close()
 
     def test_artifact_lease_stays_open_until_consumer_finishes(self):
         with tempfile.TemporaryDirectory() as root:

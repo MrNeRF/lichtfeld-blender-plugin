@@ -209,6 +209,7 @@ class LichtFeldPreferences(bpy.types.AddonPreferences):
         box.label(text="Portal Gallery", icon="ASSET_MANAGER")
         portal_ui.account_controls(box)
         row = box.row()
+        row.enabled = bool(self.backend_path.strip())
         row.operator_context = "INVOKE_DEFAULT"
         row.operator("lichtfeld.portal_action", text="Clear Portal cache", icon="TRASH").action = "clear_cache"
         row = layout.row()

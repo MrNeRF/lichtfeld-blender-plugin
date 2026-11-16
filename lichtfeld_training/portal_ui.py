@@ -526,7 +526,7 @@ class LF_OT_portal_action(bpy.types.Operator):
             bpy.ops.screen.userpref_show("INVOKE_DEFAULT")
             return {"FINISHED"}
         if self.action == "clear_cache":
-            if not runtime().start("clear_cache"):
+            if not runtime(initialize=False).start("clear_cache"):
                 self.report({"INFO"}, "Finish or cancel the active Portal operation before clearing its cache")
                 return {"CANCELLED"}
             return {"FINISHED"}
