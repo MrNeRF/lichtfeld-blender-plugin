@@ -228,7 +228,7 @@ def tick_steps():
     if online and _last_online is False:
         _thumbnail_attempted.clear()
         _refresh_wanted = True
-    if not online and _last_online is not False:
+    if not online and _last_online is True:
         _runtime.stop()
         cancel_import()
     _last_online = online
@@ -375,7 +375,10 @@ class LF_PortalState(bpy.types.PropertyGroup):
 
 def account_controls(layout):
     if not bpy.context.preferences.addons[__package__].preferences.backend_path.strip():
-        layout.label(text="Configure LichtFeld Studio to use Portal", icon="INFO")
+        from .ui_text import draw_paragraph
+        region = bpy.context.region_popup or bpy.context.region
+        draw_paragraph(layout, "Configure LichtFeld Studio to use Portal",
+                       region.width if region else GALLERY_WIDTH, bpy.context.preferences.system.ui_scale)
         layout.operator("lichtfeld.setup", text="Configure LichtFeld Studio…", icon="PREFERENCES")
         return False
     runtime()
@@ -392,11 +395,13 @@ def account_controls(layout):
         row.operator_context = "INVOKE_DEFAULT"
         row.operator("lichtfeld.portal_action", text="Open network preferences", icon="PREFERENCES").action = "network_preferences"
     if account and account.signed_in:
-        row = layout.split(factor=0.7)
+        row = layout.row()
         row.label(text=account.display_name, icon="USER")
-        row.enabled = snapshot["phase"] in ("idle", "failed", "canceled", "thumbnail")
-        row.operator_context = "INVOKE_DEFAULT"
-        row.operator("lichtfeld.portal_action", text="Sign out").action = "sign_out"
+        actions = row.row(align=True)
+        actions.alignment = "RIGHT"
+        actions.enabled = snapshot["phase"] in ("idle", "failed", "canceled", "thumbnail")
+        actions.operator_context = "INVOKE_DEFAULT"
+        actions.operator("lichtfeld.portal_action", text="Sign out").action = "sign_out"
     elif bpy.app.online_access and account and account.linking:
         layout.label(text="Approve the connection in your browser", icon="URL")
         layout.label(text="Code: " + account.user_code)
@@ -473,15 +478,15 @@ def gallery_controls(layout, context):
         phase = {"import": "Downloading", "checking": "Checking download", "converting": "Preparing asset", "decoding": "Preparing Blender data", "importing": "Adding to scene", "refresh": "Refreshing gallery", "ready": "Waiting to import"}.get(snapshot["phase"], "Working")
         layout.progress(factor=snapshot["progress"], type="BAR", text=phase)
         if snapshot["phase"] != "sign_out":
-            layout.operator("lichtfeld.portal_action", text="Cancel", icon="CANCEL").action = "cancel"
+            row = layout.row()
+            row.alignment = "LEFT"
+            row.operator("lichtfeld.portal_action", text="Cancel", icon="CANCEL").action = "cancel"
     if snapshot["message"]:
         draw_paragraph(layout, snapshot["message"], 850, context.preferences.system.ui_scale)
     if snapshot.get("total_bytes"):
         layout.label(text=f"Download size: {snapshot['total_bytes'] / (1024 * 1024):.1f} MiB")
     if snapshot.get("details"):
         layout.operator("lichtfeld.portal_action", text="Copy error details", icon="COPYDOWN").action = "copy_error"
-    if context.active_object and context.active_object.get("lichtfeld_portal_scene"):
-        layout.operator("lichtfeld.portal_frame", icon="VIEWZOOM")
 
 
 class LF_OT_portal_action(bpy.types.Operator):
@@ -591,27 +596,6 @@ class LF_OT_portal_browser(bpy.types.Operator):
         _popup_region = None
 
 
-class LF_OT_portal_frame(bpy.types.Operator):
-    bl_idname = "lichtfeld.portal_frame"
-    bl_label = "Frame imported asset"
-    bl_description = "Center a 3D viewport on the selected Portal splat"
-
-    @classmethod
-    def poll(cls, context):
-        return bool(context.active_object and context.active_object.get("lichtfeld_portal_scene"))
-
-    def execute(self, context):
-        area = context.area if context.area and context.area.type == "VIEW_3D" else next(
-            (area for area in context.window.screen.areas if area.type == "VIEW_3D"), None)
-        if area is None:
-            self.report({"WARNING"}, "Open a 3D viewport to frame this asset")
-            return {"CANCELLED"}
-        region = next(region for region in area.regions if region.type == "WINDOW")
-        with context.temp_override(area=area, region=region):
-            bpy.ops.view3d.view_selected(use_all_regions=False)
-        return {"FINISHED"}
-
-
 class LF_PT_portal(bpy.types.Panel):
     bl_idname = "LF_PT_lichtfeld"
     bl_label = "LichtFeld"
@@ -639,18 +623,19 @@ class LF_PT_portal(bpy.types.Panel):
         elif preview_scene.is_preview(context.scene):
             self.layout.label(text="Temporary trainer color view", icon="INFO")
             self.layout.operator("lichtfeld.trainer_color_view", text="Back to source scene", icon="BACK")
-        row = self.layout.row()
-        row.operator_context = "INVOKE_DEFAULT"
-        row.operator("lichtfeld.portal_gallery", text="Browse gallery…")
         account_controls(self.layout)
         snapshot = state()
         account = snapshot.get("account")
+        if account and account.signed_in:
+            row = self.layout.row()
+            row.operator_context = "INVOKE_DEFAULT"
+            row.operator("lichtfeld.portal_gallery", text="Browse gallery…")
         if snapshot["message"] and not (account and account.error):
             from .ui_text import draw_paragraph
             draw_paragraph(self.layout, snapshot["message"], context.region.width, context.preferences.system.ui_scale)
 
 
-CLASSES = (LF_PortalRow, LF_PortalState, LF_OT_portal_action, LF_OT_portal_browser, LF_OT_portal_frame, LF_PT_portal)
+CLASSES = (LF_PortalRow, LF_PortalState, LF_OT_portal_action, LF_OT_portal_browser, LF_PT_portal)
 
 
 def import_menu(self, context):

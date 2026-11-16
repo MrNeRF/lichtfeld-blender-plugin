@@ -150,6 +150,19 @@ with TemporaryDirectory() as directory:
 
 with TemporaryDirectory() as directory:
     portal._runtime = portal.Runtime(directory)
+    # Starting offline still reads local credentials. Revoking access later
+    # must cancel an operation that was running online.
+    with patch.object(portal, "bpy", SimpleNamespace(app=SimpleNamespace(online_access=False), context=bpy.context)):
+        portal._last_online = None
+        portal._runtime.update(phase="initialize")
+        with patch.object(portal._runtime, "stop") as stop:
+            portal.tick_steps()
+            stop.assert_not_called()
+            assert portal._runtime.snapshot()["phase"] == "initialize"
+            portal._last_online = True
+            portal.tick_steps()
+            stop.assert_called_once()
+    portal._runtime.update(phase="idle")
     identifier = "ef4cb85d-b868-4e51-a0de-bac3bfa269ed"
     portal._runtime.update(rows=({"id": identifier, "title": "Portal test", "description": ""},))
     identity = ("owner@example.test", "session")
