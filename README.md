@@ -34,10 +34,10 @@ the LichtFeld Studio observer interface is a separate feature.
 | Component | Requirement |
 | --- | --- |
 | Blender | 5.3.x, with native Gaussian point-cloud support |
-| Portal browsing | Online access enabled in Blender and a Portal account; no LichtFeld Studio installation needed |
+| Portal browsing | Online access enabled in Blender, a Portal account and a compatible LichtFeld Studio installation |
 | Portal import | LichtFeld Studio whose `convert` exports visible project splats with transforms, enabled crops and full-detail RAD sources, and the GPU required by that build |
 | Capture renderer | Cycles or EEVEE; a working device configuration for that engine |
-| Training backend | Headless LichtFeld with `plugin run` compatibility probing, the public `lichtfeld_sessions` package, camera principal-point properties, `SplatData.shN_rows`, and scoped training hooks with explicit progress/outcomes |
+| Training backend | Headless LichtFeld with `--headless --python-script` compatibility probing, the public `lichtfeld_sessions` package, camera principal-point properties, `SplatData.shN_rows`, and scoped training hooks with explicit progress/outcomes |
 | Training hardware | The CUDA/GPU requirements of the selected LichtFeld build |
 | Storage | A writable jobs directory with room for the captured project, images, maps, checkpoints, and splats |
 
@@ -45,9 +45,9 @@ Dataset-only capture does not require LichtFeld or a training GPU. Training and
 external viewing need a compatible backend; an older executable may not provide
 the required APIs. **Verify installation** checks that the selected executable
 starts, verifies its native training APIs before any capture, and checks the jobs directory.
-An executable without `plugin run` cannot be verified and is reported as needing an update. The adapter repeats that API check when a job starts and validates its hook payload before optimization proceeds.
+An executable without dataset-free `--headless --python-script` support cannot be verified and is reported as needing an update. The adapter repeats that API check when a job starts and validates its hook payload before optimization proceeds.
 First use may need network access to prepare the backend's isolated NumPy runtime.
-The ZIP bundles LichtFeld's pure Python training-protocol and Portal client wheels.
+The ZIP bundles LichtFeld's pure Python training-protocol wheel. Portal uses the account and gallery client in the configured LichtFeld Studio installation.
 NumPy, native libraries and backend executables are supplied separately.
 
 The backend must expose `ScopedHandler.on_training_start`, `on_post_step`, and

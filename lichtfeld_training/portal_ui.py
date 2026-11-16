@@ -11,7 +11,7 @@ from mathutils import Matrix
 from . import capture_preview, preview_scene, ui_runtime, rig_edit
 from .session_geometry import RDF_TO_BLENDER
 from .portal_runtime import Runtime
-from lichtfeld_portal.path_io import native_path
+from _lfs_path_io import native_path
 
 _runtime = None
 _icons = None
@@ -41,8 +41,8 @@ ACCOUNT_ERRORS = {
     "invalid_token": "Your Portal session has expired. Connect your account again.",
     "portal_origin_mismatch": "This account was connected to a different Portal. Connect again.",
     "unsafe_portal_url": "The Portal address is not trusted. Check your Portal configuration.",
-    "connection_storage_failed": "Blender could not save the Portal connection. Check configuration folder permissions.",
-    "local_credentials_removal_failed": "Blender could not remove the saved connection. Check configuration folder permissions and sign out again.",
+    "connection_storage_failed": "LichtFeld Studio could not save the Portal connection. Check configuration folder permissions.",
+    "local_credentials_removal_failed": "Could not remove the shared Portal connection. Check configuration folder permissions and sign out again.",
 }
 _view_signature = None
 _view = None
@@ -62,14 +62,20 @@ def clear_thumbnails():
             del _icons[key]
 
 
-def runtime():
+def runtime(*, initialize=True):
     global _runtime
+    preferences = bpy.context.preferences.addons[__package__].preferences
+    executable = bpy.path.abspath(preferences.backend_path) if preferences.backend_path else ""
+    if _runtime is not None and _runtime.executable != executable:
+        _runtime.close()
+        _runtime = None
     if _runtime is None:
         directory = Path(bpy.utils.user_resource("CONFIG")) / "lichtfeld_portal"
         data = (Path(bpy.utils.extension_path_user(__package__, path="portal", create=False))
                 if __package__.startswith("bl_ext.") else Path(bpy.utils.user_resource("DATAFILES")) / "lichtfeld_portal")
-        _runtime = Runtime(directory, data)
-        _runtime.start("initialize")
+        _runtime = Runtime(directory, data, executable=executable)
+        if initialize:
+            _runtime.start("initialize")
     return _runtime
 
 
@@ -205,8 +211,7 @@ def tick():
         return tick_steps()
     except Exception as error:
         import logging
-        from lichtfeld_portal.gallery_logging import safe_text
-        logging.getLogger(__name__).warning("Portal Gallery UI update failed: %s", safe_text(error))
+        logging.getLogger(__name__).warning("Portal Gallery UI update failed: %s", str(error))
         if _runtime:
             _runtime.update(phase="failed", message="The gallery view could not update. Reopen it to try again.")
         return 0.5
@@ -218,8 +223,7 @@ def tick_steps():
     global _last_online, _refresh_wanted, _frame
     if _runtime is None:
         select_workspace(bpy.context)
-        runtime()
-        return 0.2
+        return 0.5
     online = bpy.app.online_access
     if online and _last_online is False:
         _thumbnail_attempted.clear()
@@ -250,9 +254,6 @@ def tick_steps():
             current = _runtime.snapshot().get("account")
             if online and current and current.linking and current.verification_uri_complete == value:
                 bpy.ops.wm.url_open(url=value)
-        elif kind == "callback":
-            if online:
-                value()
         elif kind == "import":
             expected_identity, token, *payload = value
             if expected_identity == identity and token is _import_cancel and not token.is_set() and _destination is not None:
@@ -373,8 +374,17 @@ class LF_PortalState(bpy.types.PropertyGroup):
 
 
 def account_controls(layout):
+    if not bpy.context.preferences.addons[__package__].preferences.backend_path.strip():
+        layout.label(text="Configure LichtFeld Studio to use Portal", icon="INFO")
+        layout.operator("lichtfeld.setup", text="Configure LichtFeld Studio…", icon="PREFERENCES")
+        return False
+    runtime()
     snapshot = state()
     account = snapshot.get("account")
+    if snapshot["phase"] == "initialize":
+        layout.label(text="Reading LichtFeld account…", icon="TIME")
+        layout.operator("lichtfeld.portal_action", text="Cancel").action = "cancel"
+        return True
     if not bpy.app.online_access:
         layout.label(text="Blender online access is disabled", icon="INFO")
         row = layout.row()
@@ -402,6 +412,7 @@ def account_controls(layout):
                        region.width if region else GALLERY_WIDTH, bpy.context.preferences.system.ui_scale)
     if account and account.membership_required:
         layout.label(text="This account needs access to LichtFeld Portal", icon="INFO")
+    return True
 
 
 def gallery_controls(layout, context):
@@ -410,7 +421,8 @@ def gallery_controls(layout, context):
     heading.label(text="LichtFeld · Portal Gallery", icon_value=brand_icon())
     heading.operator_context = "INVOKE_DEFAULT"
     heading.operator("lichtfeld.setup", text="", icon="PREFERENCES")
-    account_controls(layout)
+    if not account_controls(layout):
+        return
     snapshot = state()
     account = snapshot.get("account")
     if not bpy.app.online_access or not account or not account.signed_in:
@@ -420,9 +432,6 @@ def gallery_controls(layout, context):
     busy = snapshot["phase"] not in ("idle", "failed", "canceled", "thumbnail")
     settings = context.window_manager.lichtfeld_portal
     configured = bool(context.preferences.addons[__package__].preferences.backend_path.strip())
-    if not configured:
-        layout.label(text="Choose LichtFeld Studio in Settings to import assets", icon="INFO")
-        layout.operator("lichtfeld.setup", text="Configure LichtFeld Studio…", icon="PREFERENCES")
     indices, total, page, pages = gallery_page(context)
     row = layout.row(align=True)
     row.prop(settings, "search", text="", icon="VIEWZOOM")
@@ -490,7 +499,7 @@ class LF_OT_portal_action(bpy.types.Operator):
             "cancel": "Cancel the pending connection or asset import; this does not stop training",
             "browser": "Open the Portal approval page in your browser",
             "copy": "Copy the device approval code to the clipboard",
-            "sign_out": "Sign out of the Portal in Blender; LichtFeld Studio and imported objects are unaffected. Offline sign-out removes local credentials only",
+            "sign_out": "Sign out of the shared LichtFeld Portal account. Imported objects stay in Blender. Offline sign-out removes local credentials only",
             "clear_cache": "Remove cached Portal downloads and thumbnails; imported objects, credentials and training jobs remain",
             "network_preferences": "Open Blender's network preferences; online access is never enabled automatically",
             "copy_error": "Copy redacted backend diagnostics to help investigate the import failure",
@@ -499,7 +508,7 @@ class LF_OT_portal_action(bpy.types.Operator):
     def invoke(self, context, event):
         if self.action in ("sign_out", "clear_cache"):
             title = "Sign out of Portal?" if self.action == "sign_out" else "Clear Portal cache?"
-            message = ("Forget Blender's authorization. LichtFeld Studio stays connected." if self.action == "sign_out"
+            message = ("Sign out of the account shared with LichtFeld Studio. Imported objects stay in Blender." if self.action == "sign_out"
                        else "Remove cached downloads and thumbnails. Imported objects and training jobs remain.")
             return context.window_manager.invoke_confirm(self, event, title=title, message=message)
         return self.execute(context)
@@ -536,6 +545,7 @@ class LF_OT_portal_action(bpy.types.Operator):
             else:
                 bpy.ops.wm.url_open(url=account.verification_uri_complete)
             return {"FINISHED"}
+        current = runtime(initialize=False)
         if self.action == "import":
             item = next((row for row in context.window_manager.lichtfeld_portal.rows if row.identifier == self.identifier), None)
             target = import_target(context.scene)
@@ -543,16 +553,16 @@ class LF_OT_portal_action(bpy.types.Operator):
                 self.report({"WARNING"}, "Select an asset and an available source scene; finish any pending import first")
                 return {"CANCELLED"}
             preferences = context.preferences.addons[__package__].preferences
-            if runtime().start("import", item.identifier, bpy.path.abspath(preferences.backend_path)):
+            if current.start("import", item.identifier, bpy.path.abspath(preferences.backend_path)):
                 _destination = target.session_uid
-                _import_cancel = runtime().cancel
+                _import_cancel = current.cancel
             else:
                 self.report({"INFO"}, "The previous operation is finishing; try again shortly")
         else:
             if self.action == "sign_out":
-                runtime().start(self.action, bpy.app.online_access)
+                current.start(self.action, bpy.app.online_access)
             else:
-                runtime().start(self.action)
+                current.start(self.action)
         return {"FINISHED"}
 
 
@@ -563,7 +573,8 @@ class LF_OT_portal_browser(bpy.types.Operator):
 
     def invoke(self, context, event):
         context.window_manager.lichtfeld_workspace = context.window_manager.lichtfeld_workspace
-        runtime()
+        if context.preferences.addons[__package__].preferences.backend_path.strip():
+            runtime()
         return context.window_manager.invoke_popup(self, width=GALLERY_WIDTH)
 
     def draw(self, context):

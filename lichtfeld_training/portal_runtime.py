@@ -2,28 +2,23 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Portal I/O and materialization. This module must never import bpy."""
 from concurrent.futures import Future
-from contextlib import ExitStack
+from contextlib import contextmanager
 import atexit
-from lichtfeld_portal.path_io import Path, TemporaryDirectory, native_path
-import hashlib
+from _lfs_path_io import Path, TemporaryDirectory, native_path
+from types import SimpleNamespace
+import json
 import queue
-import shutil
 import subprocess
 import tempfile
 import threading
 import time
-import uuid
 
 
-PROJECT_IMPORT_CAPABILITIES = {b"visible-project-splats-v1", b"project-crops-rad-v1"}
+PROJECT_IMPORT_CAPABILITIES = {b"visible-project-splats-v1"}
 
 
 class Runtime:
-    @staticmethod
-    def cache_owner(account, session):
-        return hashlib.sha256(repr((account.base_url, session[0])).encode("utf-8")).hexdigest()
-
-    def __init__(self, directory, cache_directory=None):
+    def __init__(self, directory, cache_directory=None, *, executable=''):
         self.directory = Path(directory)
         self.cache_directory = Path(cache_directory) if cache_directory is not None else self.directory / "cache"
         self.tasks = queue.Queue(maxsize=1)
@@ -31,7 +26,8 @@ class Runtime:
         self.lock = threading.Lock()
         self.cancel = threading.Event()
         self.events = queue.SimpleQueue()
-        self.account = None
+        self.executable = executable
+        self.portal_process = None
         self.closed = False
         self.future = None
         self.serial = 0
@@ -58,13 +54,13 @@ class Runtime:
     def _exit_process(self):
         """Only the owned export child is terminated; training stays independent."""
         self.cancel.set()
-        process = self.process
-        if process is not None:
-            try:
-                if process.poll() is None:
-                    process.terminate()
-            except OSError:
-                pass  # The child may have exited between poll and terminate.
+        for process in (self.process, self.portal_process):
+            if process is not None:
+                try:
+                    if process.poll() is None:
+                        process.terminate()
+                except OSError:
+                    pass  # The child may have exited between poll and terminate.
 
     def snapshot(self):
         with self.lock:
@@ -78,26 +74,81 @@ class Runtime:
                     self.state["generation"] += 1
                 self.state["revision"] += 1
 
-    def _account(self):
-        if self.account is None:
-            from lichtfeld_portal import PortalAccountService
-            from lichtfeld_portal.private_directory import mkdir_private
-            import tomllib
-            version = tomllib.loads(Path(__file__).with_name("blender_manifest.toml").read_text(encoding="utf-8"))["version"]
-            mkdir_private(self.directory, parents=True, exist_ok=True)
-            mkdir_private(self.cache_directory, parents=True, exist_ok=True)
-            account = PortalAccountService(
-                credentials_path=self.directory / "account" / "credentials.json",
-                client_name="LichtFeld Blender", client_version=version,
-                user_agent="LichtFeld-Blender/" + version,
-                open_browser=lambda url: self.events.put(("browser", url)),
-                dispatch=lambda callback: self.events.put(("callback", callback)),
-                publish_state=lambda value: self.update(account=value))
-            self.account = account
-            if self.closed:
-                account.cancel_device_flow()
-                raise InterruptedError("Portal closed")
-        return self.account
+    @contextmanager
+    def _portal(self, action, values, cancel):
+        if not self.executable:
+            raise ValueError('Choose a compatible LichtFeld Studio installation in Settings to use Portal.')
+        request = dict(values, action=action, cache_directory=str(self.cache_directory))
+        process = subprocess.Popen([self.executable, '--headless', '--python-script',
+            str(Path(__file__).with_name('portal_bridge.py'))], stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+        self.portal_process = process
+        packets = queue.Queue()
+        def read():
+            try:
+                for line in process.stdout:
+                    if line.startswith(b'LFS_PORTAL\t'):
+                        try:
+                            packets.put(json.loads(line[len(b'LFS_PORTAL\t'):]))
+                        except (ValueError, UnicodeError) as error:
+                            packets.put({'kind': 'error', 'value': str(error)})
+            except (OSError, ValueError):
+                pass  # Shutdown can close the pipe while the reader is waiting.
+            finally:
+                packets.put({'kind': 'eof'})
+        reader = threading.Thread(target=read, daemon=True, name='lichtfeld-portal-pipe')
+        reader.start()
+        try:
+            process.stdin.write((json.dumps(request)+'\n').encode('utf-8'))
+            process.stdin.flush()
+            while True:
+                if cancel.is_set():
+                    raise InterruptedError('Portal operation canceled')
+                try:
+                    packet = packets.get(timeout=.1)
+                except queue.Empty:
+                    continue
+                if cancel.is_set():
+                    raise InterruptedError('Portal operation canceled')
+                kind, value = packet['kind'], packet.get('value')
+                if kind == 'account':
+                    self.update(account=SimpleNamespace(**value))
+                elif kind == 'browser':
+                    self.events.put(('browser', value))
+                elif kind == 'progress':
+                    done, total = value['done'], value['total']
+                    checking = bool(total and done >= total)
+                    self.update(phase='checking' if checking else 'import',
+                        message='Checking downloaded project…' if checking else 'Downloading project…',
+                        progress=done/total if total else 0., total_bytes=total)
+                elif kind == 'message':
+                    self.update(message=value)
+                elif kind == 'error':
+                    raise ValueError(value)
+                elif kind == 'eof':
+                    raise ValueError('LichtFeld Studio could not run the Portal client. Update the selected installation.')
+                elif kind == 'result':
+                    yield value
+                    return
+        finally:
+            try:
+                process.stdin.close()  # Releases an artifact lease in the canonical cache owner.
+            except OSError:
+                pass
+            if cancel.is_set() and process.poll() is None:
+                process.terminate()
+            try:
+                process.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                process.terminate()
+                try:
+                    process.wait(timeout=3)
+                except subprocess.TimeoutExpired:
+                    process.kill(); process.wait()
+            process.stdout.close()
+            reader.join(timeout=1)
+            self.portal_process = None
 
     def start(self, action, *arguments):
         with self.lock:
@@ -122,72 +173,40 @@ class Runtime:
 
     def _run(self, action, arguments, cancel, serial):
         try:
-            account = self._account()
-            if cancel.is_set():
-                raise InterruptedError("Operation canceled")
-            if action == "connect":
-                account.start_device_flow()
-            elif action == "sign_out":
-                account.sign_out(revoke=arguments[0] if arguments else True)
-                self.update(rows=(), bump_generation=True)
-            elif action == "clear_cache":
-                self._clear_cache(cancel)
-            elif action == "refresh":
-                if not account.sync_profile():
-                    raise ValueError("Could not verify Portal access. Check your connection or reconnect your account.")
-                client = self._client(account)
-                rows = client.list_scenes(owner_wide=True) or []
-                if cancel.is_set():
-                    raise InterruptedError("Operation canceled")
-                # IDs cross filesystem and UI boundaries only after UUID validation.
-                rows = tuple({"id": str(uuid.UUID(row["id"])), "title": str(row.get("title") or "Untitled")[:256],
-                              "description": str(row.get("description") or "")[:4096]} for row in rows)
-                current = account.snapshot()
-                if (current.email, current.connected_since) != client.expected_session:
-                    raise ValueError("The Portal account changed. Refresh the gallery again.")
-                self.update(rows=rows, rows_identity=client.expected_session, bump_generation=True)
-            elif action == "thumbnail":
-                client = self._client(account)
-                _, _, data = client.thumbnail(arguments[0])
-                if cancel.is_set():
-                    raise InterruptedError("Thumbnail canceled")
-                owner = self.cache_owner(account, client.expected_session)
-                folder = self.cache_directory / "thumbnails" / owner
-                from lichtfeld_portal.private_directory import mkdir_private
-                mkdir_private(folder, parents=True, exist_ok=True)
-                path = folder / (str(uuid.UUID(arguments[0])) + ".png")
-                with tempfile.NamedTemporaryFile(dir=native_path(folder, force_extended=True), delete=False) as stream:
-                    temporary = Path(stream.name)
-                    try:
-                        stream.write(data)
-                        stream.close()
-                        temporary.replace(path)
-                    finally:
-                        temporary.unlink(missing_ok=True)
-                self.events.put(("thumbnail", (client.expected_session, arguments[0], str(path))))
-            elif action == "import":
-                self._download(account, *arguments, cancel=cancel)
+            if action == 'import':
+                self._download(*arguments, cancel=cancel)
                 return
+            snapshot = self.snapshot().get('account')
+            identity = (snapshot.email, snapshot.connected_since) if snapshot and snapshot.signed_in else None
+            values = {'identity': identity}
+            if action == 'sign_out':
+                values['online'] = arguments[0] if arguments else True
+            elif action == 'thumbnail':
+                values['identifier'] = arguments[0]
+            with self._portal(action, values, cancel) as response:
+                if cancel.is_set():
+                    raise InterruptedError('Operation canceled')
+                if serial != self.serial:
+                    return
+                if action == 'refresh':
+                    self.update(rows=tuple(response['rows']), rows_identity=tuple(response['identity']), bump_generation=True)
+                elif action == 'thumbnail':
+                    self.events.put(('thumbnail', (tuple(response['identity']), arguments[0], response['path'])))
+                elif action == 'sign_out':
+                    self.update(rows=(), bump_generation=True)
+                elif action == 'clear_cache':
+                    self.update(message=response['message'])
+                    self.events.put(('cache_cleared', None))
             if cancel.is_set():
-                raise InterruptedError("Operation canceled")
+                raise InterruptedError('Operation canceled')
             if serial == self.serial:
-                self.update(phase="idle")
+                self.update(phase='idle')
         except Exception as error:
-            from lichtfeld_portal.gallery_logging import safe_text
             if serial == self.serial:
-                if action == "thumbnail":
-                    self.update(phase="idle")
+                if action == 'thumbnail':
+                    self.update(phase='idle')
                 else:
-                    message = "Not enough memory to prepare this asset" if isinstance(error, MemoryError) else safe_text(error)
-                    self.update(phase="canceled" if cancel.is_set() else "failed", message=message[:700])
-
-    @staticmethod
-    def _client(account):
-        from lichtfeld_portal import PortalGalleryClient
-        snapshot = account.snapshot()
-        if not snapshot.signed_in or not snapshot.email or not snapshot.connected_since:
-            raise ValueError("Connect your Portal account first.")
-        return PortalGalleryClient(account, expected_session=(snapshot.email, snapshot.connected_since))
+                    self.update(phase='canceled' if cancel.is_set() else 'failed', message=str(error)[:700], details=str(error))
 
     def _backend(self, arguments, log, cancel, timeout):
         """Supervise both capability probing and export on the worker thread."""
@@ -196,10 +215,10 @@ class Runtime:
         process = subprocess.Popen(arguments, stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         self.process = process
-        deadline = time.monotonic() + timeout
+        deadline = time.monotonic() + timeout if timeout is not None else None
         try:
             while process.poll() is None:
-                if cancel.wait(0.1) or time.monotonic() > deadline:
+                if cancel.wait(0.1) or deadline is not None and time.monotonic() > deadline:
                     raise InterruptedError("Import canceled" if cancel.is_set() else "Asset preparation timed out")
             if cancel.is_set():
                 raise InterruptedError("Import canceled")
@@ -214,115 +233,41 @@ class Runtime:
                     process.wait()
             self.process = None
 
-    def _download(self, account, identifier, executable, *, cancel):
+    def _download(self, identifier, executable, *, cancel):
         from .session_reader import read_ply, blender_fields
-        from lichtfeld_sessions.transport import atomic_json, read_json
-        from lichtfeld_portal.private_directory import mkdir_private, locked_sidecar
-        client = self._client(account)
         if not Path(executable).is_file():
-            raise ValueError("Choose the LichtFeld Studio executable in Settings before importing.")
-        # Older builds also accept .licht in convert but reject multi-splat projects
-        # and ignore transforms; they fail on --capabilities instead of listing it.
+            raise ValueError('Choose the LichtFeld Studio executable in Settings before importing.')
         with tempfile.TemporaryFile() as probe:
-            code = self._backend([executable, "convert", "--capabilities"], probe, cancel, 15)
+            code = self._backend([executable, 'convert', '--capabilities'], probe, cancel, 20)
             probe.seek(0)
             if code or not PROJECT_IMPORT_CAPABILITIES.issubset(probe.read().splitlines()):
-                raise ValueError("Update LichtFeld Studio: this installation's convert command cannot "
-                                 "export Portal project splats with their crops and RAD sources.")
-        owner = self.cache_owner(account, client.expected_session)
-        cache = self.cache_directory / "assets" / owner / str(uuid.UUID(identifier))
-        mkdir_private(cache, parents=True, exist_ok=True)
-        with ExitStack() as ownership:
-            try:
-                ownership.enter_context(locked_sidecar(cache / "download.lock", blocking=False))
-            except OSError as error:
-                from lichtfeld_portal.gallery_logging import safe_text
-                self.update(details=safe_text(error))
-                raise ValueError("This asset's cache is in use or unavailable. Finish any import in another Blender session, or check cache folder permissions, then try again.") from error
-            project, checkpoint_path = cache / "asset.licht", cache / "download.json"
-            try:
-                checkpoint = read_json(checkpoint_path)
-            except (OSError, ValueError):
-                checkpoint = None
-            if not isinstance(checkpoint, dict):
-                checkpoint = None
-            def progress(done, total):
-                checking = bool(total and done >= total)
-                self.update(phase="checking" if checking else "import",
-                    message="Checking downloaded project…" if checking else "Downloading project…",
-                    progress=done / total if total else 0.0, total_bytes=total)
-            with TemporaryDirectory(prefix="prepare-", dir=native_path(cache, force_extended=True)) as directory:
-                root = Path(directory)
-                output = root / "asset.ply"
-                client.download(identifier, project, cancel=cancel,
-                    checkpoint=checkpoint, on_checkpoint=lambda value: atomic_json(checkpoint_path, value),
-                    reuse_completed=True,
-                    on_progress=progress,
-                    on_processing=lambda state: self.update(message="The Portal is preparing this asset…"),
-                    on_message=lambda message: self.update(message=str(message)))
-                if cancel.is_set():
-                    raise InterruptedError("Import canceled")
-                self.update(phase="converting", message="Preparing splats with LichtFeld Studio…", progress=0.0)
-                # convert shares the closed-project export: visibility, transforms and
-                # published SH. No scene is opened, no project scripts run, no training starts.
-                log_path = cache / "last-export.log"
-                with log_path.open("wb") as log:
-                    code = self._backend([executable, "convert", "--no-provenance", str(project), str(output)],
-                                         log, cancel, 900)
+                raise ValueError('Update LichtFeld Studio: convert cannot export visible Portal splats with crops and RAD sources.')
+        account = self.snapshot().get('account')
+        if not account or not account.signed_in:
+            raise ValueError('Connect your LichtFeld account first.')
+        identity = (account.email, account.connected_since)
+        with self._portal('download', {'identifier': identifier, 'identity': identity}, cancel) as response:
+            project = Path(response['project'])
+            with TemporaryDirectory(prefix='prepare-', dir=native_path(project.parent, force_extended=True)) as directory:
+                output = Path(directory) / 'asset.ply'
+                self.update(phase='converting', message='Preparing splats with LichtFeld Studio…', progress=0.)
+                with (project.parent / 'last-export.log').open('w+b') as log:
+                    code = self._backend([executable, 'convert', '--no-provenance', str(project), str(output)], log, cancel, None)
                     if code or not output.is_file():
-                        log.flush()
-                        with log_path.open("rb") as details:
-                            details.seek(max(0, log_path.stat().st_size - 1200))
-                            message = details.read(1200).decode("utf-8", errors="replace")
-                        from lichtfeld_portal.gallery_logging import safe_text
-                        self.update(details=safe_text(message))
-                        raise ValueError("LichtFeld Studio could not prepare this project. Copy error details for the backend's reason.")
-                self.update(phase="decoding", message="Preparing Blender data…")
-                with output.open("rb") as stream:
+                        raise ValueError(f'LichtFeld Studio could not convert this project. See {project.parent / "last-export.log"}')
+                self.update(phase='decoding', message='Preparing Blender data…')
+                with output.open('rb') as stream:
                     arrays, _ = read_ply(stream, cancel.is_set)
                 fields = blender_fields(arrays)
                 if cancel.is_set():
-                    raise InterruptedError("Import canceled")
-                current = account.snapshot()
-                if not current.signed_in or (current.email, current.connected_since) != client.expected_session:
-                    raise ValueError("The Portal account changed. Import the asset again.")
-            self.update(phase="ready", message="Ready to add to the scene")
-            self.events.put(("import", (client.expected_session, cancel, identifier, len(arrays["means"]), fields)))
-
-    def _clear_cache(self, cancel):
-        from lichtfeld_portal.private_directory import locked_sidecar
-        root = self.cache_directory.resolve()
-        skipped = False
-        for asset in self.cache_directory.glob("assets/*/*"):
-            if cancel.is_set():
-                raise InterruptedError("Cache cleanup canceled")
-            if not asset.resolve().is_relative_to(root) or not asset.is_dir():
-                continue
-            try:
-                with locked_sidecar(asset / "download.lock", blocking=False):
-                    for name in ("asset.licht", ".asset.licht.part", "download.json", "last-export.log"):
-                        (asset / name).unlink(missing_ok=True)
-                    for preparation in asset.glob("prepare-*"):
-                        if preparation.is_dir() and preparation.resolve().is_relative_to(root):
-                            shutil.rmtree(preparation)
-            except OSError:
-                skipped = True
-        for image in self.cache_directory.glob("thumbnails/*/*.png"):
-            if image.resolve().is_relative_to(root):
-                try:
-                    image.unlink(missing_ok=True)
-                except OSError:
-                    skipped = True
-        self.update(message="Some cached files are in use. Try again after other imports finish." if skipped else "Portal cache cleared")
-        self.events.put(("cache_cleared", None))
+                    raise InterruptedError('Import canceled')
+        self.update(phase='ready', message='Ready to add to the scene')
+        self.events.put(('import', (identity, cancel, identifier, len(arrays['means']), fields)))
 
     def stop(self, *, cancel_login=True):
         self.cancel.set()
         if (self.future is None or self.future.done()) and self.snapshot()["phase"] not in ("idle", "canceled", "failed"):
             self.update(phase="canceled", message="Operation canceled")
-        account = self.account
-        if account and cancel_login and account.snapshot().linking:
-            account.cancel_device_flow()
 
     def close(self):
         with self.lock:

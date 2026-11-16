@@ -283,14 +283,14 @@ Job and dataset metadata can contain local paths and scene-derived content;
 review them before sharing.
 # Portal Gallery
 
-The extension is named **LichtFeld**. Its sidebar has two tabs: **Portal** for your online assets, and **Capture / Train** for cameras, datasets and training. Only the selected workflow is shown. If no compatible LichtFeld Studio executable is configured, Capture / Train shows a compact setup view. **Generate dataset only** remains available without LichtFeld Studio, and existing jobs and read-only trainer connections remain accessible. The installation check verifies the required training APIs in LichtFeld Studio's own Python runtime without starting training or loading user plugins, through `plugin run`, before any images are rendered. An installation without `plugin run` cannot be verified and is reported as needing an update. The training adapter repeats the same check at job startup.
+The extension is named **LichtFeld**. Its sidebar has two tabs: **Portal** for your online assets, and **Capture / Train** for cameras, datasets and training. Only the selected workflow is shown. If no compatible LichtFeld Studio executable is configured, Capture / Train shows a compact setup view. **Generate dataset only** remains available without LichtFeld Studio, and existing jobs and read-only trainer connections remain accessible. The installation check verifies the required training APIs in LichtFeld Studio's own Python runtime without starting training or loading user plugins, through `--headless --python-script`, before any images are rendered. An installation without dataset-free headless script support cannot be verified and is reported as needing an update. The training adapter repeats the same check at job startup.
 
 Choose **Portal → Browse gallery…** in the LichtFeld sidebar, or use
 **File → Import → LichtFeld Portal Gallery…**. The gallery is independent of the
 training panel and does not change the selected training job.
 
-1. Enable Blender's online access if it is disabled.
-2. Choose **Connect account** and approve the connection in your browser. If the
+1. Configure a compatible LichtFeld Studio executable in Settings and enable Blender's online access if it is disabled.
+2. The gallery reuses your LichtFeld Studio account. If it is not connected, choose **Connect account** and approve the connection in your browser. If the
    browser does not open, use **Open browser** and **Copy code**. No password is
    entered or stored in the Blender scene.
 3. Browse the project cards in your Portal gallery. Search by title, or use **Page** when the catalog has more than six projects. This shows remote projects, not LichtFeld Studio's local Project Manager library.
@@ -324,7 +324,7 @@ Imported assets use Blender's Z-up convention, matching LichtFeld Studio's nativ
 PLY drag-out into Blender. This generic orientation differs from returning a
 Blender-origin training result to its original capture scene.
 
-Blender has its own Portal authorization. Use **Sign out** to forget that authorization and connect a different account; LichtFeld Studio stays connected. Offline sign-out only removes the local credentials and makes no network requests. Account controls are also available in the extension preferences. Use **Clear Portal cache** in the extension settings
+The Portal account is shared with LichtFeld Studio. **Sign out** removes that shared connection; imported objects remain in Blender. Offline sign-out only removes the local credentials and makes no network requests. Account controls are also available in the extension preferences. Use **Clear Portal cache** in the extension settings
 to remove retained downloads and thumbnails; files in use by another import are
 kept. Imported objects and training jobs are unaffected. Upload, automatic
 synchronization and installation from LichtFeld Studio are not part of this

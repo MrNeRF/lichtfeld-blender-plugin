@@ -17,7 +17,7 @@ Gaussian training backend and native renderer. Its authors and contributors also
 provide the shared external-session protocol implementation and native training
 defaults used by this integration.
 
-The Portal client wheel is generated from LichtFeld Studio's canonical Python account and gallery owners. The unmodified LichtFeld icon and light/dark wordmarks in `lichtfeld_training/assets` come from LichtFeld Studio's `src/visualizer/gui/assets` (`lichtfeld-icon.png`, `lichtfeld-splash-logo.png`, and `lichtfeld-splash-logo-dark.png`) and preserve its visual identity. They are covered by the upstream project's licensing and the LichtFeld Studio Authors attribution above.
+Portal account access and downloads use LichtFeld Studio's installed canonical Python account and gallery owners. The unmodified LichtFeld icon and light/dark wordmarks in `lichtfeld_training/assets` come from LichtFeld Studio's `src/visualizer/gui/assets` (`lichtfeld-icon.png`, `lichtfeld-splash-logo.png`, and `lichtfeld-splash-logo-dark.png`) and preserve its visual identity. They are covered by the upstream project's licensing and the LichtFeld Studio Authors attribution above.
 
 The shared session transport, coordinate geometry and bounded capture helpers
 are owned by LichtFeld Studio's public `lichtfeld_sessions` package. Its generated

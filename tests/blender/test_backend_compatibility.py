@@ -33,13 +33,13 @@ class NativeCompatibility(unittest.TestCase):
                 else:
                     with self.assertRaisesRegex(ValueError, 'compatibility check failed'):
                         jobs.verify_backend('selected-backend')
-                self.assertEqual(run.call_args.args[0], ['selected-backend', 'plugin', 'run', str(SOURCE / 'bridge_core.py')])
+                self.assertEqual(run.call_args.args[0], ['selected-backend', '--headless', '--python-script', str(SOURCE / 'bridge_core.py')])
 
     def test_installation_without_script_runner_is_not_verified(self):
         version = types.SimpleNamespace(returncode=0, stdout=b'LichtFeld Studio test', stderr=b'')
-        older = types.SimpleNamespace(returncode=1, stdout=b'', stderr=b'Error: Unknown plugin command: run')
+        older = types.SimpleNamespace(returncode=1, stdout=b'', stderr=b'Error: Headless mode requires a data source')
         with patch.object(jobs.subprocess, 'run', side_effect=[version, older]):
-            with self.assertRaisesRegex(ValueError, "Update LichtFeld Studio.*before capture.*'plugin run'"):
+            with self.assertRaisesRegex(ValueError, "Update LichtFeld Studio.*before capture.*headless Python"):
                 jobs.verify_backend('selected-backend')
         failing = types.SimpleNamespace(returncode=1, stdout=b'', stderr=b'RuntimeError: lacks required training-adapter APIs')
         with patch.object(jobs.subprocess, 'run', side_effect=[version, failing]):

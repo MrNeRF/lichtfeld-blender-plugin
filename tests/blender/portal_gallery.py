@@ -10,13 +10,8 @@ from unittest.mock import patch
 from pathlib import Path
 import bpy
 import numpy as np
-import ssl
-from lichtfeld_portal import http
-from lichtfeld_portal.path_io import Path as IOPath, TemporaryDirectory
-from lichtfeld_portal.private_directory import locked_sidecar
-
-context = http._system_ssl_context()
-assert context.check_hostname and context.verify_mode == ssl.CERT_REQUIRED
+from contextlib import contextmanager
+from _lfs_path_io import Path as IOPath, TemporaryDirectory
 
 NAME = "bl_ext.user_default.lichtfeld_training"
 bpy.ops.preferences.addon_enable(module=NAME)
@@ -86,85 +81,67 @@ worker = threading.Thread(target=fields_on_worker)
 worker.start()
 worker.join()  # Test setup; production only queues immutable worker results.
 
-# A malformed but valid JSON checkpoint must not bypass download/export/decode.
+# Materialization uses the canonical downloaded artifact while its lease is held.
 with TemporaryDirectory() as directory:
-    # Exercise the installed Blender host's Windows MAX_PATH boundary as well.
-    runtime = portal.Runtime(directory, Path(directory).joinpath(*(["nested-cache-" + "x" * 38] * 5)))
+    runtime = portal.Runtime(directory)
     identifier = "ef4cb85d-b868-4e51-a0de-bac3bfa269ed"
     identity = ("owner@example.test", "session")
-    account = SimpleNamespace(base_url="https://portal.lichtfeld.io",
-        snapshot=lambda: SimpleNamespace(email=identity[0], connected_since=identity[1], signed_in=True))
-    owner = runtime.cache_owner(account, identity)
-    cache = runtime.cache_directory / "assets" / owner / identifier
+    runtime.update(account=SimpleNamespace(email=identity[0], connected_since=identity[1], signed_in=True))
+    cache = IOPath(directory).joinpath(*(["nested-cache-" + "x" * 38] * 5))
     cache.mkdir(parents=True)
-    (cache / "download.json").write_text("[]")
+    project = cache / "asset.licht"
+    project.write_bytes(b"converter boundary fixture")
     executable = Path(directory) / "test-backend"
     executable.touch()
-    from importlib import import_module
-    bridge = import_module(NAME + ".bridge_core")
+    bridge = importlib.import_module(NAME + ".bridge_core")
     record = bridge.write_splat(directory, parameters[0], 1, "test")
+    downloads, calls = [], []
+    @contextmanager
+    def downloaded(action, values, cancel):
+        assert action == "download" and tuple(values["identity"]) == identity
+        downloads.append(values["identifier"])
+        yield {"project": str(project)}
 
-    downloads = []
-
-    def download(identifier, project, **options):
-        assert options["checkpoint"] is None and options["reuse_completed"]
-        downloads.append(identifier)
-        project.write_bytes(b"fake download; exporter is the boundary under test")
-
-    client = SimpleNamespace(expected_session=identity, download=download)
-    canceled = threading.Event()
-    canceled.set()
-    with patch.object(runtime, "_client", return_value=client):
-        try:  # The real child supervisor stops before starting the probe.
-            runtime._download(account, identifier, str(executable), cancel=canceled)
-            raise AssertionError("A canceled import started the capability probe")
-        except InterruptedError:
-            assert not downloads
-
-    calls, older = [], [(2, b"Flag could not be matched: capabilities"),
-                        (0, b"Input: .licht (project)"),
-                        (0, b"Unsupported feature: visible-project-splats-v1\n"),
-                        (0, b"visible-project-splats-v1\n")]
-
+    older = [(2, b"Flag could not be matched: capabilities"),
+             (0, b"Input: .licht (project)"),
+             (0, b"Unsupported feature: visible-project-splats-v1\n")]
+    exporter_fails = True
     def backend(arguments, log, cancel, timeout):
         calls.append(arguments[1:])
         if arguments[-1] == "--capabilities":
-            # Older builds reject the option; a build ignoring it must not pass either.
-            code, text = older.pop(0) if older else (0, b"other-feature-v2\r\nvisible-project-splats-v1\r\nproject-crops-rad-v1\r\n")
+            code, text = older.pop(0) if older else (0, b"visible-project-splats-v1\r\n")
             log.write(text)
             return code
         if exporter_fails:
             log.write(b"Error: The project has no visible splats to export.")
             return 1
-        shutil.copyfile(Path(directory) / record["path"], IOPath(arguments[-1]))
+        with (IOPath(directory) / record["path"]).open("rb") as source_file, IOPath(arguments[-1]).open("wb") as target_file:
+            shutil.copyfileobj(source_file, target_file)
         return 0
-
-    exporter_fails = True
     try:
-        with patch.object(runtime, "_client", return_value=client), \
-             patch.object(runtime, "_backend", side_effect=backend):
+        canceled = threading.Event(); canceled.set()
+        try:
+            runtime._download(identifier, str(executable), cancel=canceled)
+            raise AssertionError("A canceled import started")
+        except InterruptedError:
+            assert not downloads
+        with patch.object(runtime, "_portal", downloaded), patch.object(runtime, "_backend", side_effect=backend):
             while older:
                 try:
-                    runtime._download(account, identifier, str(executable), cancel=runtime.cancel)
-                    raise AssertionError("An older convert was accepted for Portal projects")
+                    runtime._download(identifier, str(executable), cancel=runtime.cancel)
+                    raise AssertionError("An older converter was accepted")
                 except ValueError as error:
                     assert "Update LichtFeld Studio" in str(error)
-                assert not downloads and calls[-1] == ["convert", "--capabilities"]
+                assert not downloads
             try:
-                runtime._download(account, identifier, str(executable), cancel=runtime.cancel)
-                raise AssertionError("A failed export was imported")
+                runtime._download(identifier, str(executable), cancel=runtime.cancel)
+                raise AssertionError("A failed conversion was imported")
             except ValueError as error:
-                assert "could not prepare this project" in str(error)
-                assert "no visible splats" in runtime.snapshot()["details"]
+                assert "could not convert this project" in str(error)
+                assert (cache / "last-export.log").is_file()
             exporter_fails = False
-            with locked_sidecar(cache / "download.lock"):
-                try:
-                    runtime._download(account, identifier, str(executable), cancel=runtime.cancel)
-                    raise AssertionError("A second import bypassed the existing asset lock")
-                except ValueError as error:
-                    assert "cache is in use or unavailable" in str(error)
-            runtime._download(account, identifier, str(executable), cancel=runtime.cancel)
-        assert calls[-1][:2] == ["convert", "--no-provenance"] and calls[-1][-1].endswith("asset.ply")
+            runtime._download(identifier, str(executable), cancel=runtime.cancel)
+        assert calls[-1][:2] == ["convert", "--no-provenance"]
         kind, payload = runtime.events.get_nowait()
         assert kind == "import" and payload[3] == 2
         assert runtime.snapshot()["phase"] == "ready"

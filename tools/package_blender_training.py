@@ -14,9 +14,8 @@ import tempfile
 import tomllib
 import zipfile
 
-WHEELS = tuple(path.removeprefix("./") for path in tomllib.loads((Path(__file__).resolve().parents[1] /
-                               "lichtfeld_training/blender_manifest.toml").read_text(encoding="utf-8"))["wheels"])
-PROTOCOL_WHEEL = next(name for name in WHEELS if "lichtfeld_training_protocol-" in name)
+PROTOCOL_WHEEL = tomllib.loads((Path(__file__).resolve().parents[1] /
+                               "lichtfeld_training/blender_manifest.toml").read_text(encoding="utf-8"))["wheels"][0].removeprefix("./")
 
 RUNTIME_FILES = frozenset("""
 __init__.py backend_hook.py blender_manifest.toml bridge_core.py
@@ -26,9 +25,9 @@ mrnf_defaults.json preflight.py preview_scene.py render_devices.py render_worker
 rig_edit.py rig_geometry.py rig_mesh.py rig_path.py scene_render.py
 scene_render_worker.py session_cameras.py session_geometry.py session_reader.py
 supervisor.py training_options.py training_profiles.json
-ui_help.py ui_runtime.py ui_text.py visibility.py workflow.py portal_runtime.py portal_ui.py
+ui_help.py ui_runtime.py ui_text.py visibility.py workflow.py portal_runtime.py portal_ui.py portal_bridge.py
 assets/lichtfeld-icon.png assets/lichtfeld-logo-white.png assets/lichtfeld-logo-black.png
-""".split()) | set(WHEELS)
+""".split()) | {PROTOCOL_WHEEL}
 DOCUMENT_FILES = ("LICENSE", "CREDITS.md", "README.md", "CONTRIBUTING.md",
                   "docs/user-guide.md", "docs/technical-reference.md")
 
@@ -43,8 +42,6 @@ def build_protocol(lichtfeld_source):
                         ignore=shutil.ignore_patterns("__pycache__"))
         for name in ("src/python/_lfs_path_io.py", "LICENSE"):
             shutil.copyfile(source / name, staging / Path(name).name)
-        for path in [*staging.rglob("*.py"), staging / "LICENSE"]:
-            path.write_text(path.read_text(encoding="utf-8"), encoding="utf-8", newline="\n")
         (staging / "pyproject.toml").write_text('''[build-system]
 requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
@@ -61,45 +58,32 @@ authors = [{name = "LichtFeld Studio Authors"}]
 [tool.setuptools]
 packages = ["lichtfeld_sessions"]
 py-modules = ["_lfs_path_io"]
-'''.replace("PROTOCOL_VERSION", Path(PROTOCOL_WHEEL).name.split("-")[1]), encoding="utf-8", newline="\n")
+'''.replace("PROTOCOL_VERSION", Path(PROTOCOL_WHEEL).name.split("-")[1]), encoding="utf-8")
         subprocess.run([sys.executable, "-m", "build", "--wheel", "--no-isolation",
                         "--outdir", str(staging / "dist")], cwd=staging, check=True,
                        env={**os.environ, "SOURCE_DATE_EPOCH": "315532800"})
         wheel = staging / "dist" / Path(PROTOCOL_WHEEL).name
-        subprocess.run([sys.executable, str(source / "tools/normalize_shared_wheel.py"), str(wheel)], check=True)
-        retain_wheel(wheel, destination)
-
-
-def retain_wheel(wheel, destination):
-    installed = destination / wheel.name
-    if installed.exists():
-        # Blender caches wheel distributions by name/version. Compare their
-        # payloads, not ZIP timestamps, ordering or compression settings.
-        with zipfile.ZipFile(installed) as previous, zipfile.ZipFile(wheel) as rebuilt:
-            names = set(previous.namelist())
-            if names != set(rebuilt.namelist()) or any(
-                    previous.read(name) != rebuilt.read(name) for name in names):
-                raise ValueError("Wheel contents changed under the same distribution version. "
-                                 "Update the dependency version in the manifest and reviewed wheel inventory.")
-        return
-    destination.mkdir(parents=True, exist_ok=True)
-    descriptor, filename = tempfile.mkstemp(prefix=wheel.name + "-", suffix=".tmp", dir=destination)
-    temporary = Path(filename)
-    try:
-        with os.fdopen(descriptor, "wb") as stream:
-            stream.write(wheel.read_bytes())
-        temporary.replace(destination / wheel.name)
-    finally:
-        temporary.unlink(missing_ok=True)
-
-
-def build_portal_client(lichtfeld_source):
-    destination = Path(__file__).resolve().parents[1] / "lichtfeld_training/wheels"
-    with tempfile.TemporaryDirectory() as directory:
-        wheel = next(name for name in WHEELS if "portal_client" in name)
-        subprocess.run([sys.executable, str(Path(lichtfeld_source) / "tools/package_portal_client.py"),
-                        "--output", directory, "--version", Path(wheel).name.split("-")[1]], check=True)
-        retain_wheel(Path(directory) / Path(wheel).name, destination)
+        installed = destination / wheel.name
+        if installed.exists():
+            # Preserve the existing archive across platform line endings. RECORD
+            # is generated from those bytes; compare the actual text payloads.
+            with zipfile.ZipFile(installed) as previous, zipfile.ZipFile(wheel) as rebuilt:
+                names = set(previous.namelist())
+                if names != set(rebuilt.namelist()) or any(
+                        previous.read(name).replace(b"\r\n", b"\n") != rebuilt.read(name).replace(b"\r\n", b"\n")
+                        for name in names if not name.endswith(".dist-info/RECORD")):
+                    raise ValueError("Protocol wheel contents changed under the same distribution version. "
+                                     "Update the protocol version in the manifest and reviewed wheel inventory.")
+            return
+        destination.mkdir(parents=True, exist_ok=True)
+        descriptor, filename = tempfile.mkstemp(prefix=wheel.name + "-", suffix=".tmp", dir=destination)
+        temporary = Path(filename)
+        try:
+            with os.fdopen(descriptor, "wb") as stream:
+                stream.write(wheel.read_bytes())
+            temporary.replace(destination / wheel.name)
+        finally:
+            temporary.unlink(missing_ok=True)
 
 
 def package(output, *, repository=None):
@@ -160,5 +144,4 @@ if __name__ == "__main__":
     arguments = parser.parse_args()
     if arguments.lichtfeld_source:
         build_protocol(arguments.lichtfeld_source)
-        build_portal_client(arguments.lichtfeld_source)
     print(package(arguments.output).resolve())

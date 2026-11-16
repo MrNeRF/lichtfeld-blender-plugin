@@ -21,8 +21,7 @@ and this extension's job-control protocol have distinct owners and release cycle
 
 The current development version remains `0.1.0`; change it only for an intentional
 release. Do not add source assets, downloaded scenes or native binaries to the
-installable archive. The reviewed pure Python protocol and Portal client wheels
-are shared LichtFeld dependencies.
+installable archive. The reviewed pure Python protocol wheel is a shared LichtFeld dependency. Portal uses the client in the configured LichtFeld Studio installation.
 
 Keep additions focused on concrete behavior. Reuse existing workflow owners and
 test suites; avoid duplicate protocol logic, redundant layers and test scaffolding
@@ -36,13 +35,12 @@ the existing extension packager, using a checkout at the intended LichtFeld Stud
 revision:
 
 ```sh
-python -m pip install "build==1.6.1" "setuptools==84.2.1" "wheel==0.46.3"
+python -m pip install "build==1.6.1" "setuptools==84.2.1"
 python tools/package_blender_training.py --lichtfeld-source /path/to/LichtFeld-Studio --output /path/outside/source/packages
 ```
 
-The packager builds both the training protocol and the Portal client from the
-specified LichtFeld Studio checkout. It uses the standard setuptools wheel
-generator in a temporary staging directory and writes the wheels in
+The packager builds the training protocol from the specified LichtFeld Studio checkout. It uses the standard setuptools wheel
+generator in a temporary staging directory and writes the wheel in
 `lichtfeld_training/wheels`. Use the versions above when regenerating: wheel
 metadata also depends on the build tools. An unchanged wheel payload keeps the
 existing archive. Changed payloads under an existing distribution name and
@@ -63,7 +61,7 @@ when the backend ships an older package.
 For source-mode tests, install that local dependency first:
 
 ```sh
-python -m pip install "numpy>=2,<3" lichtfeld_training/wheels/lichtfeld_training_protocol-0.1.3-py3-none-any.whl lichtfeld_training/wheels/lichtfeld_portal_client-0.1.3-py3-none-any.whl
+python -m pip install "numpy>=2,<3" lichtfeld_training/wheels/lichtfeld_training_protocol-0.1.2-py3-none-any.whl
 ```
 
 ## Build the extension

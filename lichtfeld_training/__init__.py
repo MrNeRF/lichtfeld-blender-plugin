@@ -395,7 +395,7 @@ class LichtFeldSettings(bpy.types.PropertyGroup):
     iterations: IntProperty(name="Training steps", default=2000, min=4, max=1000000, update=custom_changed)
     eval_interval: IntProperty(name="Evaluate every", default=500, min=1, max=100000, update=custom_changed,
                                description="Choose the best model using reserved views at this step interval")
-    max_points: IntProperty(name="Gaussian budget", default=250000, min=1000, max=1000000000, update=custom_changed)
+    max_points: IntProperty(name="Gaussian budget", default=250000, min=1000, max=10000000, update=custom_changed)
     sh_degree: IntProperty(name="SH degree", default=3, min=0, max=3)
     preview_mode: EnumProperty(name="Preview updates", items=[
         ("LIVE", "Live (adaptive)", "Frequent full-quality updates within a 5% capture-time budget"),

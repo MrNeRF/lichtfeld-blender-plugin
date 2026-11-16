@@ -11,19 +11,13 @@ render pipeline.
 
 ## Process boundaries
 
-Portal Gallery uses the `lichtfeld-portal-client` wheel generated from the
-canonical LichtFeld Studio Portal modules. It does not import modules from an
-installed executable's directory or add wheel paths to `sys.path`. Blender host
-callbacks provide browser dispatch and token-free UI state; credential storage,
-refresh, URL validation and downloads retain their canonical implementation.
-Credentials live in Blender's user configuration, separately from LichtFeld
-Studio, and never in RNA properties or a `.blend` file.
+Portal Gallery runs the canonical account and gallery client in the configured LichtFeld Studio installation through `--headless --python-script`. A plugin-owned local adapter exchanges token-free account state, catalog entries and artifact paths over a subprocess pipe. Blender does not import LichtFeld Studio modules or hold account tokens. Credentials remain in LichtFeld Studio's canonical account store and never enter RNA properties or a `.blend` file. Download and conversion run on workers; cancellation closes owned subprocesses. The download cache lock remains held until conversion and decoding finish.
 
 `.licht` assets are validated by the Portal client and materialized by
 LichtFeld Studio's `convert` command, which shares the closed-project export, in a
 cancellable child process. Before downloading, the extension requires the
-`visible-project-splats-v1` and `project-crops-rad-v1` identifiers on their own lines
-from `convert --capabilities`. Older builds that reject the option or omit either
+`visible-project-splats-v1` identifier on its own line
+from `convert --capabilities`. Older builds that reject the option or omit this
 identifier are rejected before download.
 This exports visible splats, not the complete project scene. Enabled crop volumes
 are applied to their source splats before merging. External RAD sources are loaded

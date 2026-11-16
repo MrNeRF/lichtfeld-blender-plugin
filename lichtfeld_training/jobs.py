@@ -26,17 +26,16 @@ def verify_backend(path):
         if result.returncode or "LichtFeld" not in text:
             raise ValueError("The selected LichtFeld Studio executable cannot start")
         version = next((line for line in text.splitlines() if line.startswith("LichtFeld")), text.splitlines()[-1])
-        probe = subprocess.run([path, "plugin", "run", str(Path(__file__).with_name("bridge_core.py"))],
+        probe = subprocess.run([path, "--headless", "--python-script", str(Path(__file__).with_name("bridge_core.py"))],
                                capture_output=True, timeout=60, **flags)
     except subprocess.TimeoutExpired:
         raise ValueError("LichtFeld Studio took too long to verify. Check the selected installation and try again.") from None
-    if probe.returncode and b"Unknown plugin command: run" in probe.stdout + probe.stderr:
+    if probe.returncode and b"Headless mode requires" in probe.stdout + probe.stderr:
         # Without the script runner the APIs could only be checked after capture.
         raise ValueError("Update LichtFeld Studio: this installation cannot check its training APIs "
-                         "before capture because it lacks the 'plugin run' command.")
+                         "before capture because it lacks headless Python script execution.")
     if probe.returncode or b"LFS_BLENDER_API_READY" not in probe.stdout:
-        from lichtfeld_portal.gallery_logging import safe_text
-        detail = safe_text((probe.stdout + probe.stderr).decode("utf-8", errors="replace"))[-700:].strip()
+        detail = (probe.stdout + probe.stderr).decode("utf-8", errors="replace")[-700:].strip()
         raise ValueError("The training API compatibility check failed. Update LichtFeld Studio or choose another installation." + (" " + detail if detail else ""))
     return version + '. Training APIs verified.'
 

@@ -66,11 +66,8 @@ class PackageContracts(unittest.TestCase):
                 payloads = {name: archive.read(name) for name in archive.namelist()}
 
             def generate(arguments, *, cwd=None, **kwargs):
-                if str(arguments[1]).endswith('normalize_shared_wheel.py'):
-                    return
                 for name in ('lichtfeld_sessions/__init__.py', '_lfs_path_io.py', 'LICENSE'):
-                    self.assertEqual((Path(cwd)/name).read_bytes(), b'# Protocol build fixture\n')
-                self.assertNotIn(b'\r\n', (Path(cwd)/'pyproject.toml').read_bytes())
+                    self.assertEqual((Path(cwd)/name).read_bytes(), b'# Protocol build fixture\r\n')
                 output = Path(cwd)/'dist'/wheel.name
                 output.parent.mkdir()
                 with zipfile.ZipFile(output, 'w', compression=zipfile.ZIP_STORED) as archive:
@@ -80,6 +77,11 @@ class PackageContracts(unittest.TestCase):
             with mock.patch.object(packager, '__file__', str(repository/'tools/package_blender_training.py')), \
                     mock.patch.object(packager.subprocess, 'run', side_effect=generate):
                 # Equivalent contents need no new identity despite ZIP changes.
+                packager.build_protocol(source)
+                self.assertEqual(wheel.read_bytes(), original)
+                payloads = {name: data.replace(b'\r\n', b'\n') for name, data in payloads.items()}
+                record = next(name for name in payloads if name.endswith('.dist-info/RECORD'))
+                payloads[record] = b'Checksums regenerated for platform line endings\n'
                 packager.build_protocol(source)
                 self.assertEqual(wheel.read_bytes(), original)
                 payloads['lichtfeld_sessions/__init__.py'] += b'\n# Changed implementation\n'
