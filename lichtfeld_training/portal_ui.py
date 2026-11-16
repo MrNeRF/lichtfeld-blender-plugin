@@ -381,10 +381,11 @@ def account_controls(layout):
     runtime()
     snapshot = state()
     account = snapshot.get("account")
-    if snapshot["phase"] == "initialize":
-        layout.label(text="Reading LichtFeld account…", icon="TIME")
-        layout.operator("lichtfeld.portal_action", text="Cancel").action = "cancel"
-        return True
+    if snapshot["phase"] in ("initialize", "canceling"):
+        layout.label(text="Canceling connection…" if snapshot["phase"] == "canceling" else "Reading LichtFeld account…", icon="TIME")
+        if snapshot["phase"] == "initialize":
+            layout.operator("lichtfeld.portal_action", text="Cancel").action = "cancel"
+        return snapshot["phase"] == "initialize"
     if not bpy.app.online_access:
         layout.label(text="Blender online access is disabled", icon="INFO")
         row = layout.row()

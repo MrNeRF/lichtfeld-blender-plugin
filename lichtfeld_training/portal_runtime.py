@@ -15,6 +15,7 @@ import time
 
 
 PROJECT_IMPORT_CAPABILITIES = {b"visible-project-splats-v1"}
+CONNECT_CANCEL_TIMEOUT = 10
 
 
 class Runtime:
@@ -40,6 +41,7 @@ class Runtime:
         while True:
             task = self.tasks.get()
             if task is None:
+                atexit.unregister(self._exit_process)
                 return
             future, action, arguments, cancel, serial = task
             if not future.set_running_or_notify_cancel():
@@ -51,10 +53,12 @@ class Runtime:
             else:
                 future.set_result(None)
 
-    def _exit_process(self):
-        """Only the owned export child is terminated; training stays independent."""
+    def _exit_process(self, *, cooperative=False):
+        """Stop owned Portal/converter children; training stays independent."""
         self.cancel.set()
         for process in (self.process, self.portal_process):
+            if cooperative and process is self.portal_process and self.snapshot()['phase'] in ('connect', 'canceling'):
+                continue  # The worker supervises graceful cancellation; atexit remains armed.
             if process is not None:
                 try:
                     if process.poll() is None:
@@ -76,6 +80,8 @@ class Runtime:
 
     @contextmanager
     def _portal(self, action, values, cancel):
+        if cancel.is_set():
+            raise InterruptedError('Portal operation canceled')
         if not self.executable:
             raise ValueError('Choose a compatible LichtFeld Studio installation in Settings to use Portal.')
         request = dict(values, action=action, cache_directory=str(self.cache_directory))
@@ -99,23 +105,37 @@ class Runtime:
                 packets.put({'kind': 'eof'})
         reader = threading.Thread(target=read, daemon=True, name='lichtfeld-portal-pipe')
         reader.start()
+        cancel_deadline = None
+        terminal = False
         try:
             process.stdin.write((json.dumps(request)+'\n').encode('utf-8'))
             process.stdin.flush()
             while True:
                 if cancel.is_set():
-                    raise InterruptedError('Portal operation canceled')
+                    if action != 'connect':
+                        raise InterruptedError('Portal operation canceled')
+                    if cancel_deadline is None:
+                        self.update(phase='canceling', message='')
+                        try:
+                            process.stdin.write(b'cancel\n')
+                            process.stdin.flush()
+                        except OSError:
+                            raise RuntimeError('Connection cancellation was not confirmed. Check the account in LichtFeld Studio.') from None
+                        cancel_deadline = time.monotonic() + CONNECT_CANCEL_TIMEOUT
+                    if time.monotonic() >= cancel_deadline:
+                        raise TimeoutError('Connection cancellation was not confirmed. Check the account in LichtFeld Studio.')
                 try:
                     packet = packets.get(timeout=.1)
                 except queue.Empty:
                     continue
-                if cancel.is_set():
+                if cancel.is_set() and action != 'connect':
                     raise InterruptedError('Portal operation canceled')
                 kind, value = packet['kind'], packet.get('value')
                 if kind == 'account':
                     self.update(account=SimpleNamespace(**value))
                 elif kind == 'browser':
-                    self.events.put(('browser', value))
+                    if not cancel.is_set():
+                        self.events.put(('browser', value))
                 elif kind == 'progress':
                     done, total = value['done'], value['total']
                     checking = bool(total and done >= total)
@@ -127,8 +147,14 @@ class Runtime:
                 elif kind == 'error':
                     raise ValueError(value)
                 elif kind == 'eof':
+                    if cancel_deadline is not None:
+                        raise RuntimeError('Connection cancellation was not confirmed. Check the account in LichtFeld Studio.')
                     raise ValueError('LichtFeld Studio could not run the Portal client. Update the selected installation.')
+                elif kind == 'canceled':
+                    terminal = True
+                    raise InterruptedError('Connection canceled')
                 elif kind == 'result':
+                    terminal = True
                     yield value
                     return
         finally:
@@ -136,7 +162,7 @@ class Runtime:
                 process.stdin.close()  # Releases an artifact lease in the canonical cache owner.
             except OSError:
                 pass
-            if cancel.is_set() and process.poll() is None:
+            if cancel.is_set() and not terminal and process.poll() is None:
                 process.terminate()
             try:
                 process.wait(timeout=3)
@@ -184,7 +210,7 @@ class Runtime:
             elif action == 'thumbnail':
                 values['identifier'] = arguments[0]
             with self._portal(action, values, cancel) as response:
-                if cancel.is_set():
+                if cancel.is_set() and action != 'connect':
                     raise InterruptedError('Operation canceled')
                 if serial != self.serial:
                     return
@@ -197,7 +223,7 @@ class Runtime:
                 elif action == 'clear_cache':
                     self.update(message=response['message'])
                     self.events.put(('cache_cleared', None))
-            if cancel.is_set():
+            if cancel.is_set() and action != 'connect':
                 raise InterruptedError('Operation canceled')
             if serial == self.serial:
                 self.update(phase='idle')
@@ -206,8 +232,10 @@ class Runtime:
                 if action == 'thumbnail':
                     self.update(phase='idle')
                 else:
-                    values = {'account': None} if action == 'connect' and cancel.is_set() else {}
-                    self.update(phase='canceled' if cancel.is_set() else 'failed', message=str(error)[:700], details=str(error), **values)
+                    snapshot = self.snapshot().get('account')
+                    values = {'account': None} if action == 'connect' and cancel.is_set() and snapshot and snapshot.linking else {}
+                    was_canceled = cancel.is_set() and (action != 'connect' or isinstance(error, InterruptedError))
+                    self.update(phase='canceled' if was_canceled else 'failed', message=str(error)[:700], details=str(error), **values)
 
     def _backend(self, arguments, log, cancel, timeout):
         """Supervise both capability probing and export on the worker thread."""
@@ -266,6 +294,8 @@ class Runtime:
         self.events.put(('import', (identity, cancel, identifier, len(arrays['means']), fields)))
 
     def stop(self, *, cancel_login=True):
+        if not cancel_login and self.snapshot()['phase'] in ('connect', 'canceling'):
+            return  # Account connections are independent of scene invalidation.
         self.cancel.set()
         if (self.future is None or self.future.done()) and self.snapshot()["phase"] not in ("idle", "canceled", "failed"):
             self.update(phase="canceled", message="Operation canceled")
@@ -274,7 +304,7 @@ class Runtime:
         with self.lock:
             self.closed = True
         self.stop()
-        self._exit_process()
+        self._exit_process(cooperative=True)
         try:
             queued = self.tasks.get_nowait()
             if queued is not None:
@@ -282,4 +312,3 @@ class Runtime:
         except queue.Empty:
             pass
         self.tasks.put_nowait(None)
-        atexit.unregister(self._exit_process)

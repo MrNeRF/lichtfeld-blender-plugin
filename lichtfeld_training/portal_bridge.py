@@ -5,6 +5,7 @@ import hashlib
 import inspect
 import json
 import sys
+import threading
 import time
 import uuid
 from dataclasses import asdict
@@ -42,19 +43,41 @@ def main():
             raise ValueError('Update the selected LichtFeld Studio installation: its Portal client is incompatible.')
         snapshot = publish()
         if action == 'connect':
+            canceled = threading.Event()
+            commands = sys.stdin
+            def watch_cancel():
+                try:
+                    for command in commands:
+                        if command.strip() == 'cancel':
+                            break
+                except (OSError, ValueError):
+                    pass  # Closing the control pipe also cancels an unfinished connection.
+                canceled.set()
+            threading.Thread(target=watch_cancel, daemon=True, name='lichtfeld-connect-control').start()
             account.start_device_flow()
             previous = None
             opened = None
             while True:
                 snapshot = account.snapshot()
+                # A completed connection wins a concurrent Cancel; never undo it.
+                if not snapshot.linking and not account.busy:
+                    publish()
+                    break
+                if canceled.is_set():
+                    account.cancel_device_flow()
+                    while account.busy:
+                        account.wait_for_idle(.1)
+                    snapshot = publish()
+                    if snapshot.error == 'connection_storage_failed':
+                        raise RuntimeError('Connection cancellation could not be saved. Check the account in LichtFeld Studio.')
+                    emit('canceled', {})
+                    return
                 if snapshot != previous:
                     publish()
                     previous = snapshot
                 if snapshot.linking and snapshot.verification_uri_complete and opened != snapshot.verification_uri_complete:
                     opened = checked_portal_url(account, snapshot.verification_uri_complete)
                     emit('browser', opened)
-                if not snapshot.linking and not account.busy:
-                    break
                 time.sleep(.2)
         elif action == 'sign_out':
             account.sign_out(revoke=bool(request.get('online', True)))

@@ -13,6 +13,8 @@ render pipeline.
 
 Portal Gallery runs the canonical account and gallery client in the configured LichtFeld Studio installation through `--headless --python-script`. A plugin-owned local adapter exchanges token-free account state, catalog entries and artifact paths over a subprocess pipe. Blender does not import LichtFeld Studio modules or hold account tokens. Credentials remain in LichtFeld Studio's canonical account store and never enter RNA properties or a `.blend` file. Download and conversion run on workers; cancellation closes owned subprocesses. The download cache lock remains held until conversion and decoding finish.
 
+Connection cancellation uses the same control pipe. The bridge calls `cancel_device_flow()`, waits for the canonical workers and publishes the resulting account state before acknowledging cancellation. Completion wins a simultaneous cancel. The host allows ten seconds for an acknowledgement before terminating an unresponsive process and reporting that cancellation was not confirmed. Waiting and cleanup run on the Portal worker; scene changes do not cancel account connections.
+
 `.licht` assets are validated by the Portal client and materialized by
 LichtFeld Studio's `convert` command, which shares the closed-project export, in a
 cancellable child process. Before downloading, the extension requires the

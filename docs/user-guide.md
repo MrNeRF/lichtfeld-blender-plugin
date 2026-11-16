@@ -305,6 +305,8 @@ same representation. A completed download is rechecked before reuse, so retrying
 asset preparation does not need another full transfer. Cached files belong to
 Blender's extension user storage and are separate from credentials and training jobs.
 
+**Cancel connection** waits for the account service to confirm cancellation. If the connection has already completed, it stays connected. If cancellation cannot be confirmed, the gallery reports it explicitly so you can check the account in LichtFeld Studio before retrying.
+
 Import requires a LichtFeld Studio installation whose `convert` command exports
 the visible splats of a `.licht` project with their scene transforms, configured
 in the extension's Settings. An older installation is reported before the
