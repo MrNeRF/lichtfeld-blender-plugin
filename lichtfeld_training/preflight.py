@@ -168,8 +168,10 @@ def synchronous(context,prefs):
  result['environment']=env
  return result
 
-def cached(context,prefs,capture_only=False):
- result=_cache.get(context.scene.as_pointer())
+def cached(context,prefs,capture_only=False,*,capture=None):
+ # A cooperative launch already collected a fresh snapshot. Busy-state polling
+ # may invalidate the display cache while that collection is in progress.
+ result=capture if capture is not None else _cache.get(context.scene.as_pointer())
  if not result or result['signature']!=signature(context):
   return {'errors':['Checking source and cameras…'],'sources':[],'cameras':[], 'checking':True,'environment':environment(prefs,capture_only=capture_only)}
  errors=list(result.get('capture_errors',result['errors']) if capture_only else result['errors'])

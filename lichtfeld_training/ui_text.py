@@ -1,6 +1,24 @@
 # SPDX-FileCopyrightText: 2026 LichtFeld Studio Authors
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Pixel-measured paragraphs; wrapping adapts to sidebar width and UI scale."""
+
+def draw_disclosure(layout, owner, name, title, *, nested=True):
+    """Expand within the existing surface without an overlapping panel background."""
+    if nested:
+        row = layout.split(factor=.04, align=True)
+        spacer = row.column()
+        spacer.label(text='')
+        layout = row.column()
+    opened = getattr(owner, name)
+    header = layout.row(align=True)
+    header.alignment = 'LEFT'
+    header.use_property_split = False
+    header.use_property_decorate = False
+    header.prop(owner, name, text=title, emboss=False,
+                icon='TRIA_DOWN' if opened else 'TRIA_RIGHT')
+    return layout.column() if opened else None
+
+
 def wrap_pixels(text, width, measure):
     width = max(1, width)
     lines = []

@@ -15,6 +15,7 @@ s.job_directory = ""
 s.running = False
 s.validation_details = False
 s.scope = "COLLECTION"
+s.setup_output = True
 s.camera_collection = bpy.data.collections.new("Stability cameras")
 s.camera_collection["lichtfeld_generated"] = True
 
@@ -22,8 +23,13 @@ class Layout:
     def __init__(self, closed=False): self.fields = []; self.rows = []; self.labels = []; self.operations = []; self.closed=closed
     def box(self): return self
     def row(self, **kw): return self
+    def split(self, **kw): return self
     def column(self, **kw): return self
+    def separator(self, **kw): self.rows.append('separator')
     def panel(self, *args, **kw): self.rows.append('section'); return self,None if self.closed else self
+    def panel_prop(self, owner, name):
+        self.rows.append('section')
+        return self, self if getattr(owner, name) and not self.closed else None
     def label(self, **kw): self.rows.append("label"); self.labels.append(kw.get('text',''))
     def prop(self, settings, name, **kw):
         self.fields.append((name, len(self.rows)))
@@ -47,6 +53,20 @@ assert all(order == orders[0] for order in orders), orders
 assert any(name == "iterations" for name, row in orders[0][0])
 print("WHOLE_SETUP_LAYOUT_STABLE_PASS", len(orders[0][1]))
 
+# Expert controls stay reachable while their active configuration remains visible.
+for advanced in (False, True):
+    s.training_advanced=advanced;s.use_depth_loss=True;s.use_normal_loss=True
+    layout=Layout()
+    ext.draw_training_controls(layout,s,lambda box,text:box.label(text=text))
+    fields=dict(layout.fields)
+    assert 'iterations' in fields and 'max_points' in fields
+    assert ('strategy' in fields)==advanced and 'sh_degree' in fields
+    assert sum(name=='sh_degree' for name,row in layout.fields)==1
+    assert ('depth_loss_weight' in fields)==advanced and ('normal_loss_weight' in fields)==advanced
+    assert 'Maps: Depth + Normals' in layout.labels
+s.training_advanced=False;s.use_depth_loss=False;s.use_normal_loss=False
+print('TRAINING_ADVANCED_CONTROLS_AND_ACTIVE_SUMMARY_PASS')
+
 # Modal Apply/source preparation changes enabled state, not panel geometry.
 # The old conditional Preparing scene box shifted every editable field.
 rig=s.camera_collection
@@ -55,6 +75,7 @@ for source in ('UNLOADED','LOADED','NEW'):
     s.camera_collection=None if source=='NEW' else rig
     s.rig_parameter_source=rig if source=='LOADED' else None
     for closed in (False,True):
+        s.setup_content = s.setup_cameras = s.setup_output = s.setup_training = not closed
         for edit in ((False,True) if source=='LOADED' and not closed else (False,)):
             s.rig_generator=edit
             busy_orders=[]
@@ -65,23 +86,24 @@ for source in ('UNLOADED','LOADED','NEW'):
                     ext.draw_training(SimpleNamespace(layout=layout),context)
                 busy_orders.append((layout.fields,layout.rows,layout.operations))
                 if busy:
-                    assert 'Updating…' in layout.labels
-                    if source!='NEW':
+                    assert 'setup_cameras' in dict(layout.fields)
+                    if source!='NEW' and not closed:
                         assert 'Updating setup…' in layout.labels
                         assert 'Rig/framing changes need Apply' not in layout.labels
                         assert 'Capture uses current cameras' not in layout.labels
                         assert 'Load selected rig before editing' not in layout.labels
-                elif source!='NEW':
+                elif source!='NEW' and not closed:
                     expected='Rig/framing changes need Apply' if source=='LOADED' else 'Load selected rig before editing'
                     assert expected in layout.labels
             assert all(order==busy_orders[0] for order in busy_orders),(source,closed,edit)
 s.camera_collection=rig;s.rig_generator=False
+s.setup_content = s.setup_cameras = s.setup_output = s.setup_training = True
 print('MODAL_APPLY_LAYOUT_STABLE_PASS')
 
 s.rig_parameter_source=s.camera_collection
 s.camera_collection['lichtfeld_rig_recipe']=ext.rig_recipe(s)
 for checking,pending,expected in ((False,True,'Rig/framing changes need Apply'),
-    (True,False,'Checking camera setup…'),(False,False,'Capture uses current cameras')):
+    (True,False,'Checking cameras…'),(False,False,'0 capture cameras')):
     ready={'checking':checking,'reference_changed':pending,'cameras':[],'environment':{}}
     layout=Layout()
     with patch.object(ext.preflight,'cached',return_value=ready),patch.object(ext.preflight,'issues',return_value=[]),patch.object(ext,'preferences',return_value=None), patch.object(ext.preflight, 'environment', return_value={'backend': True, 'ok': True}):
@@ -103,23 +125,25 @@ for task,operator in (('CAPTURE','lichtfeld.start_training'),('EXPORT','lichtfel
     assert operator in operations
     assert sum(name==operator for name,row in layout.operations)==1
     if task!='REUSE':
-        assert 'Rig reference: Cube' in layout.labels and '4 cameras · 576 × 1024 px' in layout.labels
+        assert 'Rig reference: Cube' in layout.labels
         assert 'Rig/framing changes need Apply' in layout.labels
         assert dict(layout.fields)['scope']<operations['lichtfeld.capture_framing']<operations[operator]
     assert ('iterations' in dict(layout.fields))==(task!='EXPORT')
     assert ('scope' in dict(layout.fields))==(task!='REUSE')
 s.dataset_mode='CAPTURE'
 layout=Layout(closed=True)
+s.setup_content = s.setup_cameras = s.setup_output = s.setup_training = False
 with patch.object(ext.preflight,'cached',return_value=ready),patch.object(ext.preflight,'issues',return_value=[]),patch.object(ext,'preferences',return_value=None), patch.object(ext.preflight, 'environment', return_value={'backend': True, 'ok': True}):
     ext.draw_training(SimpleNamespace(layout=layout),context)
-assert 'lichtfeld.start_training' in dict(layout.operations) and 'lichtfeld.capture_framing' in dict(layout.operations)
-assert 'lichtfeld.create_rig' in dict(layout.operations)
+assert 'lichtfeld.start_training' in dict(layout.operations)
+assert 'lichtfeld.capture_framing' not in dict(layout.operations)
+assert 'lichtfeld.create_rig' not in dict(layout.operations)
 assert 'iterations' not in dict(layout.fields) and 'scope' not in dict(layout.fields)
-# Collapsing camera controls keeps the relevant action and framing accessible,
-# without recreating the duplicate action site removed from the old setup.
+s.setup_content = s.setup_cameras = s.setup_output = s.setup_training = True
+# Rig actions live in the expanded section, never in its disclosure header.
 for loaded,action in ((False,'lichtfeld.read_rig'),(True,'lichtfeld.create_rig')):
     s.rig_parameter_source=s.camera_collection if loaded else None
-    layout=Layout(closed=True)
+    layout=Layout()
     with patch.object(ext.preflight,'cached',return_value=ready),patch.object(ext.preflight,'issues',return_value=[]),patch.object(ext,'preferences',return_value=None), patch.object(ext.preflight, 'environment', return_value={'backend': True, 'ok': True}):
         ext.draw_training(SimpleNamespace(layout=layout),context)
     assert sum(name==action for name,row in layout.operations)==1
@@ -162,4 +186,43 @@ with patch.object(pre, "bpy", fake_bpy), patch.object(pre, "environment"), patch
 assert area.tag_redraw.call_count == 1, area.tag_redraw.call_count
 print("UNCHANGED_VALIDATION_NO_REDRAW_PASS")
 pre.clear()
+# A launch owns a fresh validation even when busy-state polling has discarded
+# the display cache. A changed scene must still reject the collected snapshot.
+work=pre.collect(bpy.context)
+while True:
+    try:next(work)
+    except StopIteration as stop:
+        capture=stop.value
+        break
+pre.invalidate(bpy.context.scene)
+with patch.object(pre,'environment',return_value={'ok':True}), \
+     patch.object(ext.scene_render,'readiness',return_value={'ok':True}):
+    current=pre.cached(bpy.context,ext.preferences(),capture=capture)
+    assert current['cameras']==capture['cameras'] and current['sources']==capture['sources']
+    assert not current.get('checking')
+    bpy.context.scene.frame_set(bpy.context.scene.frame_current+1)
+    assert pre.cached(bpy.context,ext.preferences(),capture=capture)['checking']
+print('FRESH_CAPTURE_SURVIVES_DISPLAY_CACHE_INVALIDATION_PASS')
+
+# Every advanced group remains reachable after replacing the old disclosure
+# buttons. Preview quality and camera overrides are still job inputs.
+s.dataset_mode='CAPTURE';s.mode='NEW';s.camera_collection=rig;s.rig_parameter_source=rig
+s.rig_mode='HEMISPHERE';s.full_preview=False
+for name in ('rig_generator','rig_details','training_advanced','preview_advanced',
+             'capture_advanced','format_presets_open','camera_overrides_open',
+             'override_optics','override_shift','override_clipping'):
+    setattr(s,name,True)
+layout=Layout()
+with patch.object(ext.preflight,'cached',return_value=ready), \
+     patch.object(ext.preflight,'issues',return_value=[]), \
+     patch.object(ext.preflight,'environment',return_value={'backend':True}), \
+     patch.object(ext,'preferences',return_value=None):
+    ext.draw_training(SimpleNamespace(layout=layout),context)
+fields=dict(layout.fields)
+assert all(name in fields for name in ('rig_min','rig_max','rig_lens','rig_aim_offset',
+    'capture_lens','capture_shift_x','capture_clip_start','capture_aspect','seed_points',
+    'strategy','eval_interval','optimizer_file','preview_mode','preview_points',
+    'preview_sh_degree','preview_hold_seconds'))
+assert sum(name=='sh_degree' for name,row in layout.fields)==1
+print('NATIVE_DISCLOSURES_KEEP_ADVANCED_CAPTURE_TRAINING_AND_PREVIEW_REACHABLE_PASS')
 bpy.ops.preferences.addon_disable(module=module)

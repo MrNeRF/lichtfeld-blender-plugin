@@ -204,6 +204,7 @@ class Observer:
                             if frame.get("geometry_only"):
                                 self.last = None  # Restore a missing/replaced display from the immutable payload.
                             self.error = str(error)
+                            self.status_error = False
                             self.failures += 1
                             self.retry_at = time.monotonic() + min(30, 2 ** min(self.failures, 5))
                         else:

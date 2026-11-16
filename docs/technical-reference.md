@@ -1,13 +1,14 @@
 # Technical reference
 
-Setup uses native region-owned collapsible sections, without additional scene
-expansion properties or a separate workflow. Existing preflight results supply
-the plan's validated output format and render configuration; existing render
-readiness supplies effective device metadata. The plan keeps fixed rows during
-asynchronous checks and reports the selected rig's saved reference, not pending
-controls. Primary actions and validation details use the existing operators and
-checks. Framing remains the existing geometry/optics preview, not a second RGB
-render pipeline.
+Setup uses one native sidebar panel. Its internal sections use Blender boxes
+and RNA expansion flags; the shared disclosure helper keeps a consistent indent
+without adding overlapping panel-body backgrounds. Sidebar and popover share
+the same drawing functions. Existing preflight results supply the validated
+output format and render configuration; existing render readiness supplies
+effective device metadata. Status rows remain stable during asynchronous checks
+and report the selected rig's saved reference, not pending controls. Primary
+actions and validation details use the existing operators and checks. Framing
+remains the existing geometry/optics preview, not a second RGB render pipeline.
 
 ## Process boundaries
 

@@ -245,7 +245,8 @@ class Binding:
         assign(settings, "status", phase.replace("_", " ").capitalize())
         step = counter(status.get("iteration", 0))
         total = counter(status.get("iterations", status.get("job", {}).get("iterations", 0)))
-        details = [f"Training step {step:,}" + (f" / {total:,}" if total else "")]
+        details = ([f"Training step {step:,}" + (f" / {total:,}" if total else "")]
+                   if 'iteration' in status else [])
         if status.get("job", {}).get("capture_only"):
             details = [status.get("message", "Dataset capture only; no training")]
             if status.get("export_directory"):
@@ -253,8 +254,6 @@ class Binding:
                 details.append("Dataset: " + status["export_directory"])
         if status.get("supervision"):
             details.append(status["supervision"])
-        if status.get("preview_error"):
-            details.append("Preview: " + status["preview_error"])
         best = status.get("best") or status.get("result")
         if best:
             label = "Best evaluated" if best.get("score") else "Last/final valid"
@@ -289,9 +288,6 @@ class Binding:
             assign(settings, "progress", 1.0)
         if phase == "completed" and status.get("job", {}).get("capture_only"):
             assign(settings, "progress", 1.0)
-        error = self.reader.error or status.get("error")
-        if error:
-            details.append("Connection/import: " + str(error))
         assign(settings, "detail", "\n".join(details))
         # User-requested scene operations take priority. Keep monitoring and
         # trainer controls alive while the staged snapshot waits its turn.
@@ -498,7 +494,8 @@ def fail(scene, error):
         current = peek(scene)
         if current:
             current.close()
-            current.reader.error = error
+            current.reader.error = ""
+            current.reader.status_error = False
             current.reader.status = {"state": "failed", "error": error}
             current.status = current.reader.status
         scene.lichtfeld_training.operation_busy = False

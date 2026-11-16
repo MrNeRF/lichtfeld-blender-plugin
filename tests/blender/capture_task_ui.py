@@ -43,8 +43,11 @@ class Layout:
     def child(self): return Layout(self.records, self)
     def box(self): return self.child()
     def row(self, **kwargs): return self.child()
+    def split(self, **kwargs): return self.child()
     def column(self, **kwargs): return self.child()
+    def separator(self, **kwargs): pass
     def panel(self, *args, **kwargs): return self.child(),self.child()
+    def panel_prop(self, owner, name): return self.child(), self.child() if getattr(owner, name) else None
     def prop(self, owner, name, **kwargs): self.records.append(('prop', name))
     def label(self, **kwargs): self.records.append(('label',))
     def operator(self, name, **kwargs):
@@ -53,6 +56,12 @@ class Layout:
 
 context = SimpleNamespace(scene=scene, view_layer=bpy.context.view_layer, region=SimpleNamespace(width=300), preferences=bpy.context.preferences)
 ready = {'checking':False, 'errors':[], 'cameras':[1,2,3,4], 'environment':{'ok':True}}
+# A saved, clean file needs no extra Save button.
+layout = Layout()
+ext.draw_capture_actions(layout, s, ready, [], True, lambda box, text: box.label(text=text))
+assert ('operator', 'wm.save_mainfile') not in layout.records
+s.preview_advanced = True
+s.setup_output = True
 for task, action in [('CAPTURE','lichtfeld.start_training'), ('EXPORT','lichtfeld.export_dataset'),
                      ('REUSE','lichtfeld.restart_training')]:
     s.dataset_mode = task
@@ -72,14 +81,16 @@ for task, action in [('CAPTURE','lichtfeld.start_training'), ('EXPORT','lichtfel
         assert 'depth_loss_weight' not in fields and 'normal_loss_weight' not in fields
         assert all(call.kwargs.get('capture_only') is True for call in cached.call_args_list)
 
-# An unavailable backend exposes setup, not unusable training controls.
+# Backend configuration does not hide Task or the dataset-only path.
 s.dataset_mode = 'CAPTURE'
 layout = Layout()
 with patch.object(ext.preflight, 'environment', return_value={'backend':False, 'message':'Choose LichtFeld Studio'}):
     ext.draw_training(SimpleNamespace(layout=layout), context)
 assert ('operator', 'lichtfeld.setup') in layout.records
 assert ('operator', 'lichtfeld.start_training') not in layout.records
-assert not any(kind == 'prop' and name in {'iterations', 'camera_collection'} for kind, *items in layout.records for name in items)
+assert ('prop', 'dataset_mode') in layout.records
+assert ('prop', 'camera_collection') in layout.records
+assert ('prop', 'iterations') not in layout.records
 assert bpy.ops.lichtfeld.setup_view(mode='EXPORT') == {'FINISHED'}
 assert s.mode == 'NEW' and s.dataset_mode == 'EXPORT'
 

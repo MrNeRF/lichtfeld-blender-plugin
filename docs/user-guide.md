@@ -19,23 +19,27 @@ the open scene after launch does not change that job's images.
 
 ## Choose an operation
 
-Expand **Capture and training**, then choose the **Activity**: capture and train, generate a dataset only, or train saved images. **Open job** and **View trainer** open existing work without changing this setup; **Back to setup** returns to it. **Return to previous job** is available when a previous job was retained. The gear button opens configuration, and the question mark opens this guide.
+Open the **Capture / Train** tab, then choose the **Task**: capture and train, generate a dataset only, or train saved images. The secondary **Open job…** and **View trainer…** buttons below the setup open existing work without changing it; **Back to setup** returns to it. **Back to previous job** is available below Task when a previous job was retained. The header's gear button opens configuration, and its question mark opens this guide.
 
-Setup follows **1 · Content and quality → 2 · Cameras → 3 · Capture and train** (or **Generate dataset**). Choose what to render first, then select existing cameras or create a rig. Creating/updating has one action in the camera section. Distance is directly accessible; expand **Advanced rig settings** for elevation, lens and custom aiming. Choosing a center reference changes camera placement, not the captured content.
+**Quality** applies image size, render samples, training budget and the desired rig camera count. Existing cameras change only when the rig is applied. Individual controls remain available. Task stays available when LichtFeld Studio is not configured, so you can still choose dataset-only capture.
 
-When Cameras is collapsed, its header keeps the applicable Load/Create/Apply action and framing accessible. Pending rig settings can be reverted alongside Apply; this reloads the saved rig controls without moving cameras or restoring the capture format. The validation status uses one line so background checking does not move the start button; expand **Validation details** for full error text. **Advanced capture settings** contains render diagnostics and extra capture controls.
+Setup stays inside one **LichtFeld** panel: its header collapses or moves the complete workflow. **Capture**, **Cameras**, **Render and output**, and **Training** are sections within it. The panel starts expanded in a clean layout; Blender restores the saved expansion state when reopening a project. Choose what to render first, then select existing cameras or create a rig. Creating/updating has one action in the camera section. Expand **Rig settings** to adjust an existing rig; **Geometry and lens** contains elevation, lens and custom aiming. Choosing a center reference changes camera placement, not the captured content.
 
-During a setup operation, the Cameras header reads **Updating…**, including when collapsed. The capture summary also reports **Updating setup…** until the operation finishes; both replace existing lines without shifting the controls.
+Expand **Cameras** to load, create, apply or inspect a rig. Section headers only expand or collapse their settings; actions remain visible as buttons inside the section. Pending rig settings can be reverted alongside Apply; this reloads the saved rig controls without moving cameras or restoring the capture format. The camera status replaces its existing line during background checking and Apply. **Capture checks** provides full error text. **Capture details** inside **Render and output** contains render diagnostics and extra capture controls.
 
-Once a camera collection is chosen, the compact summary and capture/export action appear after the settings. Expand **Capture details** for the View Layer, applied rig reference, renderer, lens and static frame. Pending controls remain visible; they do not replace camera poses until Apply. Save is offered only when the scene needs saving, and framing is available after a camera collection has been chosen.
+During a setup operation, the camera status reports **Updating setup…** until the operation finishes. It replaces the existing status line without shifting the controls.
+
+The capture/export action remains after the settings, including before cameras are chosen. Its status explains what is missing; configure LichtFeld Studio there when the chosen task requires it. Save is offered only when the scene needs saving. The applied reference and camera status belong to **Cameras**, the static frame to **Capture**, and dimensions, devices, View Layer and optical overrides to **Render and output**. Pending controls do not replace camera poses until Apply. Framing is available after a camera collection has been chosen.
+
+**Training** exposes steps, Gaussian budget and SH degree directly. Its indented **Advanced** section contains the method and expert training controls. **Live preview** configures update timing, preview limits and settling; these settings do not reduce the quality of saved results. Hover over a section title or control for its explanation. Capture rules and technical details are kept in these tooltips rather than repeated as long paragraphs in the panel.
 
 Expand the content/camera sections, **Render and output**,
-or **Training and preview** to edit the corresponding controls. These are native
-Blender sections; closing them keeps the final capture/export action available. Dataset-only
+or **Training** to edit the corresponding controls. Closing these
+sections keeps the final capture/export action available. Dataset-only
 capture hides training controls. Training saved images hides scene capture controls
-and offers its own start action above the training settings.
+and offers its own start action after the training settings.
 
-**Check camera framing** opens the existing temporary framing scene. It checks
+**Check framing** opens the temporary framing scene. It checks
 camera selection, output size and optical overrides; it does not render an RGB
 test image. **Back to capture setup** restores the original scene.
 Changing **Camera number** updates the view automatically, reusing the same preview scene. **Update framing** applies output settings and optical overrides without rebuilding scene visibility. If you change capture content or replace the camera collection, return to setup and reopen framing. Source cameras stay unchanged.
@@ -45,8 +49,8 @@ Each update uses the source scene's capture frame, even if you moved the tempora
 | --- | --- |
 | Render the scene and train a new splat | Capture and train |
 | Produce calibrated images/maps for later use | Generate dataset only |
-| Try different optimization settings on the same capture | Train saved images / New training · same images |
-| Continue optimizing a saved model | Continue saved checkpoint… |
+| Try different optimization settings on the same capture | Train saved images / Train again · same images |
+| Continue optimizing a saved model | Continue from checkpoint… |
 
 Fresh training on saved images creates a new model and optimizer in a separate
 job. It does not restore the previous splat, even if a preview remains in the
@@ -95,7 +99,7 @@ For generated spheres, hemispheres and rings, **Edit live** opens immediate dist
 
 **Finish live editing** preserves the current camera poses, uses their exact radius instead of automatic fitting when distance was changed, and returns to the existing shape/count controls. Path and mesh rigs retain explicit Apply. Custom additional cameras are unaffected. Manually reparented, animated, linked or shared generated cameras must be made suitable or regenerated before live editing. Saving a live rig preserves native controller/driver evaluation without enabling Python autoexecution; Auto Key is unchanged and the extension does not insert keyframes.
 
-**Content and quality** chooses what is rendered. **Center** in the camera section chooses
+**Capture** chooses what is rendered. **Center** in the camera section chooses
 the surfaces used to position the cameras and calculate **Reference center**.
 These are independent: choose **Remembered objects** and **Use selected objects as center** on a character, then capture
 the **Entire scene** without changing the rig subject. Later viewport selections
@@ -161,7 +165,9 @@ including the image shape, pixel aspect and capture lens overrides. Disable it
 to choose the rig radius explicitly. It is a framing aid; occlusion, reflective
 surfaces and sufficient overlap still need inspection.
 
-**Last distance** is the radius recorded at the last successful rig generation, in the scene's units. If automatic fitting increased the minimum distance, the panel explains why; disable **Fit subject automatically** and set **Distance from center** for an exact radius. Apply updates camera positions. Manual camera moves do not change this historical value, and older rigs show it after their next generation. **Look at** and **Move aim target in viewport** are directly accessible; only the aim offset is under advanced rig settings.
+**Last distance** is the radius recorded at the last successful rig generation, in the scene's units. If automatic fitting increased the minimum distance, the panel explains why; disable **Auto fit** and set **Distance** for an exact radius. Apply updates camera positions. Manual camera moves do not change this historical value, and older rigs show it after their next generation. **Look at** and **Move aim target in viewport** are directly accessible; the aim offset is inside **Geometry and lens**.
+
+**Fit cameras closer**, beside the distance controls, enables **Auto fit** and sets **Distance factor** to 1.05. It changes the setup parameters only: use **Create camera rig** or **Apply rig changes** to move the cameras, then check framing. Automatic fitting can still increase the final distance to keep the reference in view.
 
 ## Images, renderer and devices
 
@@ -185,7 +191,7 @@ parents, animation and constraints are preserved. Framing preview and calibratio
 use the same pose as capture; you do not need to apply scale manually.
 
 Shear, mirrored frames, zero/near-zero scale and non-finite transforms cannot be
-represented by this calibrated camera model. **Validation details** names the
+represented by this calibrated camera model. **Capture checks** names the
 camera and offers **Select camera** to inspect it and its parents. This action
 does not apply transforms. Correct the source transform or use an independent
 camera with a valid pose; applying parent transforms automatically could change
@@ -218,17 +224,31 @@ an alternative when positive depth supervision is disabled.
 
 ## Training and previews
 
+New scenes use LichtFeld Studio's MRNF defaults: 30,000 steps, a 5,000,000-Gaussian budget, SH degree 3, 100,000 initial points and exposure correction enabled. Learning rates and refinement parameters come from the bundled native strategy profiles. Choosing a Quality preset explicitly replaces its listed budgets; stored scene settings are not reset on load. The plugin evaluates every 7,000 steps and at the final step to select the best evaluated result; this periodic schedule is separate from LichtFeld Studio's optional evaluation settings.
+
+Training setup keeps the step budget, maximum point count and SH degree directly accessible. The current method and enabled depth/normal supervision remain visible as a summary. Expand Advanced training for method, supervision and the remaining expert parameters.
+
 Choose the strategy, total steps, Gaussian budget and SH degree in the training
 settings. Advanced controls expose optimization and supervision options; expert
 JSON accepts supported scalar settings and rejects invalid or reserved fields.
-The job records the resulting configuration. Synthetic captures leave appearance
-correction off by default; incompatible appearance modes cannot be combined.
+The job records the resulting configuration. Appearance correction follows the
+selected native strategy defaults; incompatible appearance modes cannot be combined.
 
-During training, **Pause** pauses optimization and **Stop with checkpoint** asks
+During training, **Pause** pauses optimization and **Stop and save** asks
 the trainer to finish with a recoverable checkpoint. Commands remain available
 while a new preview is being prepared. **Freeze preview** holds the current view
 while optimization continues. Choose **Current** for the newest model or **Best
 evaluated** for the strongest evaluated candidate available so far.
+
+When a job ends, **Reached step** reports its recorded training progress, while
+**Shown: step** identifies the model currently in the viewport. The best evaluated
+model may come from an earlier step. Older jobs without recorded progress do not
+display an assumed final step. **Details and files** shows the settings recorded
+for that job, independently of edits to the current scene.
+
+Job errors, preview update errors and monitoring errors are reported separately.
+A preview problem does not mean optimization has failed. If opening another job
+or continuing a checkpoint fails, the previously displayed job remains available.
 
 The viewer receives Gaussian data through CPU shared memory, so it remains
 navigable. Full-quality preview requests all active points and SH coefficients.

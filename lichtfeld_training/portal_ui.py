@@ -610,9 +610,13 @@ class LF_PT_portal(bpy.types.Panel):
 
     def draw_header_preset(self, context):
         self.layout.operator("lichtfeld.setup", text="", icon="PREFERENCES")
+        self.layout.operator('wm.url_open', text='', icon='QUESTION').url = 'https://github.com/MrNeRF/lichtfeld-blender-plugin/blob/main/docs/user-guide.md'
 
     def draw(self, context):
-        self.layout.prop(context.window_manager, "lichtfeld_workspace", expand=True)
+        tabs = self.layout.row()
+        tabs.scale_y = 1.15
+        tabs.prop(context.window_manager, "lichtfeld_workspace", expand=True)
+        self.layout.separator(factor=0.5)
         if context.window_manager.lichtfeld_workspace != "PORTAL":
             from . import draw_training
             draw_training(self, context)
