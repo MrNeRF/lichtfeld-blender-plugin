@@ -18,6 +18,7 @@ processes, so the LichtFeld Studio window can remain closed.
 - Use existing perspective cameras or generate an editable sphere, hemisphere,
   ring, curve-path, or mesh-based camera rig.
 - Capture with Cycles or EEVEE using Blender's render settings and explicit devices.
+- Render one capture camera as an RGB test before generating the full dataset.
 - Export a dataset without starting a trainer, or capture and train in one operation.
 - Start a fresh training run on saved images, or continue a saved checkpoint.
 - Follow current or best-evaluated splats in a navigable viewport, with independent

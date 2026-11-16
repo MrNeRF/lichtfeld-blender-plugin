@@ -80,6 +80,12 @@ def remove(scene):
     bpy.data.scenes.remove(scene)
 
 
+def restore_source(window, preview, source):
+    layer = source.view_layers.get(preview.get('capture_source_layer', '')) or source.view_layers[0]
+    window.scene = source
+    window.view_layer = layer
+
+
 def cleanup():
     for scene in list(bpy.data.scenes):
         if not is_preview(scene):
@@ -88,7 +94,7 @@ def cleanup():
         for window in bpy.context.window_manager.windows:
             if window.scene == scene:
                 if source:
-                    window.scene = source
+                    restore_source(window, scene, source)
                 for area in window.screen.areas:
                     restore_window(window, area)
         remove(scene)
@@ -380,7 +386,7 @@ class LF_OT_close_capture_framing(bpy.types.Operator):
             return {'CANCELLED'}
         missing_source = source is None
         source = source or fallback_scene(scene, create=True)
-        context.window.scene = source
+        restore_source(context.window, scene, source)
         restore_window(context.window, context.area)
         remains_open = any(w.scene == scene for w in context.window_manager.windows)
         if not remains_open:
@@ -410,6 +416,20 @@ def draw(layout, context, source, *, width=None):
     draw_capture_overrides(box, s, wrapped)
     box.operator('lichtfeld.capture_framing', text='Update framing', icon='FILE_REFRESH')
     wrapped(layout, 'Camera changes are automatic. Update framing applies output settings and camera overrides. Source cameras stay unchanged.')
+    if s.test_render_active:
+        layout.label(text='Rendering test image…')
+    elif s.test_render_error:
+        wrapped(layout, s.test_render_error)
+    row = layout.row(align=True)
+    if s.test_render_active:
+        row.operator('lichtfeld.cancel_capture_test')
+    else:
+        if bpy.data.filepath:
+            row.operator('lichtfeld.render_capture_test', text='Save and render test image')
+        else:
+            row.operator('lichtfeld.save_capture_source', text='Save scene…')
+    if s.test_render_image:
+        row.operator('lichtfeld.show_test_image', text='View last')
 
 
 def draw_orphaned(layout, _context):
@@ -417,4 +437,214 @@ def draw_orphaned(layout, _context):
     layout.operator('lichtfeld.close_capture_framing', text='Close preview', icon='BACK')
 
 
-CLASSES = (LF_OT_capture_framing, LF_OT_close_capture_framing)
+def test_image_steps(context, *, source=None, window=None, area=None, framing=False):
+    """Use the capture supervisor without binding/replacing a training job."""
+    from . import preflight, capture_job, start_capture_test, finish_capture_test
+    source = source if source is not None else context.scene
+    settings = source.lichtfeld_training
+    launch = None
+    finish = None
+    work = preflight.collect(context, capture_only=True, single_render=True)
+    try:
+        # A UI save clears Main's dirty flag through Blender's notifier loop.
+        # Let that loop finish before freezing the validation signature; a
+        # True -> False transition is the save completing, not a source edit.
+        yield ui_runtime.WAIT
+        initial = preflight.signature(context)
+        if context.scene != source:
+            raise ValueError('The active scene changed. Return to capture setup and try again.')
+        while True:
+            if settings.test_render_cancel:
+                return
+            try:
+                next(work)
+            except StopIteration as stop:
+                capture = stop.value
+                break
+            yield
+        if bpy.data.is_dirty or context.scene != source or initial != preflight.signature(context):
+            raise ValueError('The capture setup changed. Save and try again.')
+        if capture['errors']:
+            raise ValueError(' '.join(capture['errors']))
+        settings.capture_preview_index = min(settings.capture_preview_index, capture['camera_count'])
+        job = capture_job(context, capture)
+        job.update(purpose='test_render', capture_only=True)
+        job.pop('connection_directory', None)
+        job.pop('dataset_root', None)
+        settings.test_render_active = True
+        launch = ui_runtime.submit(lambda: start_capture_test(job))
+        while not launch.done():
+            yield ui_runtime.DEFER
+        child, _ = launch.result()
+        if context.scene != source or initial != preflight.signature(context):
+            raise ValueError('The capture setup changed during launch. Save and try again.')
+        if framing and any(item == window for item in bpy.context.window_manager.windows):
+            try:
+                target_area = area if any(item == area for item in window.screen.areas) else None
+                yield from open_steps(source, window, target_area)
+            except (ValueError, ReferenceError, RuntimeError) as error:
+                ui_runtime.report_notice('WARNING', 'Could not restore framing: ' + str(error))
+            finally:
+                settings.operation_busy = True
+        while child.poll() is None and not settings.test_render_cancel:
+            yield ui_runtime.DEFER
+        finish = ui_runtime.submit(lambda: finish_capture_test(launch))
+        while not finish.done():
+            yield ui_runtime.DEFER
+        state = finish.result()
+        if state.get('state') == 'stopped':
+            return
+        if state.get('state') != 'completed':
+            raise RuntimeError(state.get('error', 'Test render failed. See render.log in ' + job['root']))
+        from pathlib import Path
+        path = str(Path(job['root']) / state['image'])
+        settings.test_render_image = path
+        if (not bpy.app.background and any(item == window for item in bpy.context.window_manager.windows)
+                and (window.scene == source or source_scene(window.scene) == source)
+                and any(item == area for item in window.screen.areas)):
+            with bpy.context.temp_override(window=window, area=area):
+                bpy.ops.lichtfeld.show_test_image('EXEC_DEFAULT')
+    except ReferenceError:
+        return  # Source removal is cancellation, not a StructRNA error notice.
+    finally:
+        if launch is not None and finish is None:
+            ui_runtime.submit(lambda: finish_capture_test(launch))
+        work.close()
+        try:
+            settings.operation_busy = False
+            settings.test_render_active = False
+            settings.test_render_cancel = False
+        except ReferenceError:
+            pass
+
+
+class LF_OT_render_capture_test(bpy.types.Operator):
+    bl_idname = 'lichtfeld.render_capture_test'
+    bl_label = 'Render test image'
+    bl_description = 'Save the source scene without temporary framing scenes, then render this camera with the dataset settings; no dataset or training is created'
+
+    @classmethod
+    def poll(cls, context):
+        from .rig_edit import render_busy
+        source = source_scene(context.scene)
+        if source is None:
+            return False
+        s = source.lichtfeld_training
+        if s.running or s.operation_busy or s.attached_session or render_busy(context):
+            return False
+        if not bpy.data.filepath:
+            cls.poll_message_set('Save the scene once before rendering a test image')
+            return False
+        return bool(s.camera_collection)
+
+    def execute(self, context):
+        if not self.poll(context):
+            return {'CANCELLED'}
+        source = source_scene(context.scene)
+        # Saving is explicit. Remove owned framing scenes first so the saved
+        # project contains the real setup, with no temporary camera or preview.
+        cleanup()
+        try:
+            with bpy.context.temp_override(window=context.window, scene=source):
+                if bpy.ops.wm.save_mainfile('EXEC_DEFAULT') != {'FINISHED'}:
+                    return {'CANCELLED'}
+        except RuntimeError as error:
+            self.report({'ERROR'}, str(error))
+            return {'CANCELLED'}
+        source.lichtfeld_training.operation_busy = True
+        source.lichtfeld_training.test_render_active = True
+        source.lichtfeld_training.test_render_cancel = False
+        source.lichtfeld_training.test_render_error = ''
+        def failed(error):
+            source.lichtfeld_training.test_render_error = str(error)
+            ui_runtime.report_notice('ERROR', error)
+        ui_runtime.schedule(test_image_steps(context, source=source, window=context.window, area=context.area, framing=True),
+                            failed)
+        return {'FINISHED'}
+
+
+class LF_OT_save_capture_source(bpy.types.Operator):
+    bl_idname = 'lichtfeld.save_capture_source'
+    bl_label = 'Save source scene'
+    bl_description = 'Return to the source scene and open Blender’s Save As dialog without saving temporary framing scenes'
+
+    @classmethod
+    def poll(cls, context):
+        return source_scene(context.scene) is not None and LF_OT_close_capture_framing.poll(context)
+
+    def execute(self, context):
+        cleanup()
+        result = bpy.ops.wm.save_as_mainfile('INVOKE_DEFAULT')
+        return {'CANCELLED'} if result == {'CANCELLED'} else {'FINISHED'}
+
+
+class LF_OT_cancel_capture_test(bpy.types.Operator):
+    bl_idname = 'lichtfeld.cancel_capture_test'
+    bl_label = 'Cancel test render'
+    bl_description = 'Stop only the single-view test render; keep previous training jobs and images'
+
+    @classmethod
+    def poll(cls, context):
+        source = source_scene(context.scene) or context.scene
+        return source is not None and source.lichtfeld_training.test_render_active
+
+    def execute(self, context):
+        source = source_scene(context.scene) or context.scene
+        source.lichtfeld_training.test_render_cancel = True
+        return {'FINISHED'}
+
+
+class LF_OT_show_test_image(bpy.types.Operator):
+    bl_idname = 'lichtfeld.show_test_image'
+    bl_label = 'View test image'
+    bl_description = 'Open the last rendered test PNG in Blender’s Image Editor'
+
+    @classmethod
+    def poll(cls, context):
+        source = source_scene(context.scene) or context.scene
+        return context.window is not None and context.area is not None and not bpy.app.background and bool(
+            source.lichtfeld_training.test_render_image)
+
+    def execute(self, context):
+        try:
+            source = source_scene(context.scene) or context.scene
+            path = source.lichtfeld_training.test_render_image
+            image = next((item for item in bpy.data.images if item.get('lichtfeld_test_image') and item.users <= 1), None)
+            if image is None:
+                image = bpy.data.images.load(path, check_existing=True)
+                image['lichtfeld_test_image'] = True
+            elif image.filepath != path:
+                image.filepath = path
+                image.reload()
+            image.use_view_as_render = False
+            window = next((item for item in context.window_manager.windows if item.screen.get('lichtfeld_test_viewer')), None)
+            if window != context.window:
+                if window is not None:
+                    with bpy.context.temp_override(window=window):
+                        bpy.ops.wm.window_close()
+                before = {window.as_pointer() for window in context.window_manager.windows}
+                # Area-duplicate windows inherit their parent's scene. A main
+                # window keeps the image viewer independent from framing.
+                bpy.ops.wm.window_new_main('EXEC_DEFAULT')
+                window = next((window for window in context.window_manager.windows if window.as_pointer() not in before), None)
+            if window is None:
+                raise RuntimeError('Blender could not open the Image Editor')
+            framing_source = source_scene(window.scene)
+            if framing_source is not None:
+                restore_source(window, window.scene, framing_source)
+            window.screen['lichtfeld_test_viewer'] = True
+            area = max(window.screen.areas, key=lambda area: area.width * area.height)
+            area.type = 'IMAGE_EDITOR'
+            area.spaces.active.image = image
+            if len(window.screen.areas) > 1:
+                with bpy.context.temp_override(window=window, area=area):
+                    bpy.ops.screen.screen_full_area(use_hide_panels=True)
+                window.screen['lichtfeld_test_viewer'] = True
+            return {'FINISHED'}
+        except (OSError, RuntimeError, KeyError) as error:
+            self.report({'ERROR'}, str(error))
+            return {'CANCELLED'}
+
+
+CLASSES = (LF_OT_capture_framing, LF_OT_close_capture_framing, LF_OT_render_capture_test,
+           LF_OT_save_capture_source, LF_OT_cancel_capture_test, LF_OT_show_test_image)

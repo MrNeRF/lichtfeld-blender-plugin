@@ -27,6 +27,14 @@ class CaptureSettings(unittest.TestCase):
         self.scene = NS(render=NS(resolution_x=1920, resolution_y=1080, resolution_percentage=50,
                                   pixel_aspect_x=1., pixel_aspect_y=1.3))
 
+    def test_single_rgb_render_does_not_relax_dataset_minimum(self):
+        capture.validate_view_count(1, single_render=True)
+        for count in (0, 2, True):
+            with self.subTest(count=count), self.assertRaises(ValueError):
+                capture.validate_view_count(count, single_render=True)
+        with self.assertRaises(ValueError):
+            capture.validate_view_count(1)
+
     def test_presets_portrait_rounding_and_square_pixels(self):
         for key, (x, y) in capture.ASPECTS.items():
             for orientation in ('LANDSCAPE', 'PORTRAIT'):

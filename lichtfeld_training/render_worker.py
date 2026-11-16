@@ -145,11 +145,12 @@ def render_dataset(job_path, reuse_images=False):
     # Blender's file-output nodes resolve plain relative paths differently from
     # Python. Resolve once before passing any path to either API.
     root = Path(job["root"]).resolve()
+    single_render = job.get('purpose') == 'test_render'
     requested_render = job.get('render_settings')
     if requested_render and not reuse_images:
         atomic_json(root / 'capture-render.json', {'requested': requested_render, 'state': 'initializing devices'})
-    depth_supervision = bool(job.get('use_depth_loss') and job.get('depth_loss_weight', 2) > 0)
-    visible_seed = job.get('seed_method', 'SURFACE') == 'VISIBLE' or depth_supervision and 'seed_method' in job
+    depth_supervision = not single_render and bool(job.get('use_depth_loss') and job.get('depth_loss_weight', 2) > 0)
+    visible_seed = not single_render and (job.get('seed_method', 'SURFACE') == 'VISIBLE' or depth_supervision and 'seed_method' in job)
     if not reuse_images and job.get("source_sha256") and digest(job.get("capture_staging_file",job["source_file"])) != job["source_sha256"]:
         raise ValueError("The saved scene changed while opening capture. Save it and retry.")
     if reuse_images:
@@ -157,16 +158,17 @@ def render_dataset(job_path, reuse_images=False):
             raise ValueError("Recovery must open this job's frozen capture.blend")
         if (job.get("use_depth_loss") or job.get("use_normal_loss")) and not visible_seed:
             raise ValueError("Legacy map-supervised recovery requires a capture with saved visible-point samples")
-    else:
+    elif not single_render:
         bpy.ops.wm.save_as_mainfile(filepath=str(root / "capture.blend"), copy=True,
                                    relative_remap=True, check_existing=False)
     output = root / "dataset"
-    (output / "images").mkdir(parents=True, exist_ok=True)
+    if not single_render:
+        (output / "images").mkdir(parents=True, exist_ok=True)
     scene = bpy.data.scenes.get(job.get("scene", "")) or bpy.context.scene
     bpy.context.window.scene = scene
     bpy.context.window.view_layer = scene.view_layers.get(job.get("view_layer", "")) or scene.view_layers[0]
     scene.frame_set(job["frame"])
-    from capture_settings import job_format, validate_camera, copy_camera, apply_format, validate_view_count, camera_pose
+    from capture_settings import job_format, validate_camera, copy_camera, apply_format, validate_view_count, camera_pose, TEST_IMAGE
     capture_format = job_format(job, scene)
     camera_overrides = validate_camera(job.get('capture_camera', {}))
     missing = []
@@ -184,7 +186,7 @@ def render_dataset(job_path, reuse_images=False):
     if len(sources) != len(job["sources"]):
         raise ValueError("A source object is missing from the capture")
     cameras = [bpy.data.objects[name] for name in job["cameras"] if name in bpy.data.objects]
-    validate_view_count(len(cameras))
+    validate_view_count(len(cameras), single_render=single_render)
     if len(cameras) != len(job["cameras"]):
         raise ValueError("A capture camera is missing")
     if visible_seed:
@@ -283,7 +285,7 @@ def render_dataset(job_path, reuse_images=False):
         raise ValueError('Saved camera calibration is incomplete or belongs to another capture. Existing images are preserved.')
     frames = []
     geometry = None
-    if not reuse_images and (visible_seed or job.get('use_depth_loss') or job.get('use_normal_loss')):
+    if not single_render and not reuse_images and (visible_seed or job.get('use_depth_loss') or job.get('use_normal_loss')):
         from capture_passes import GeometryPasses
         geometry = GeometryPasses(scene, bpy.context.view_layer, output, observations=depth_supervision and not visible_seed,
                                   seed_limit=job['seed_points'] if visible_seed else None, views=len(cameras),
@@ -299,11 +301,14 @@ def render_dataset(job_path, reuse_images=False):
             evaluated = camera.evaluated_get(depsgraph)
             matrix = camera_pose(camera, depsgraph)
             relative = f"images/view_{index:06d}.png"
-            scene.render.filepath = str(output / relative)
+            scene.render.filepath = str(root / TEST_IMAGE if single_render else output / relative)
             if geometry:
                 geometry.prepare(index)
             if not reuse_images:
                 bpy.ops.render.render(write_still=True)
+            if single_render:
+                atomic_json(root / 'capture-progress.json', {'done': 1, 'total': 1})
+                return  # RGB only: never publish masks, seeds or a reusable dataset.
             rgba = read_capture_rgba(output / relative, width, height) if geometry or isolated or reuse_images else None
             frame = {"file_path": relative, "transform_matrix": [list(row) for row in matrix],
                      "w": width, "h": height, **intrinsics(scene, evaluated, width, height)}

@@ -40,10 +40,12 @@ capture hides training controls. Training saved images hides scene capture contr
 and offers its own start action after the training settings.
 
 **Check framing** opens the temporary framing scene. It checks
-camera selection, output size and optical overrides; it does not render an RGB
-test image. **Back to capture setup** restores the original scene.
+camera selection, output size and optical overrides. Opening framing does not
+start a render; use **Save and render test image** for an RGB check. **Back to capture setup** restores the original scene.
 Changing **Camera number** updates the view automatically, reusing the same preview scene. **Update framing** applies output settings and optical overrides without rebuilding scene visibility. If you change capture content or replace the camera collection, return to setup and reopen framing. Source cameras stay unchanged.
 Each update uses the source scene's capture frame, even if you moved the temporary preview's timeline. Pending changes wait for rendering or setup work to finish and use the latest camera, output size and optical overrides.
+
+For an actual RGB check, choose the camera in framing and press **Save and render test image**. This explicitly saves the source project without temporary framing scenes, then restores framing while rendering that camera with the dataset settings. The PNG opens in Blender's Image Editor; **View last** reopens it from the same action row. **Cancel test render** replaces the render action while the test runs. If the project has never been saved, **Save scene…** first opens Blender's Save As dialog on the source scene; after saving, reopen **Check framing**. During preparation, the source setup briefly replaces framing and shows the running test with a Cancel action. If saving or capture validation fails, rendering does not start and the source setup remains open; validation errors stay visible in the panel so you can resolve them and retry through Check framing. The test also works with a single camera and does not need LichtFeld Studio. No reusable dataset, supervision maps, initial points or training is created, and previous training jobs remain unchanged.
 
 | You want to… | Choose… |
 | --- | --- |

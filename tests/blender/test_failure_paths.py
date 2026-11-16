@@ -279,6 +279,34 @@ class FailurePaths(unittest.TestCase):
         child.kill.assert_called_once()
         self.assertEqual(child.wait.call_count, 2)
 
+    def test_single_rgb_stops_before_dataset_or_backend_and_preserves_failure(self):
+        for outcome in ('completed', 'failed', 'stopped'):
+            with self.subTest(outcome=outcome), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                source = root / 'source.blend'
+                source.write_bytes(b'scene')
+                job = {'id':'rgb', 'root':str(root), 'blender':'blender', 'source_file':str(source),
+                       'purpose':'test_render', 'capture_only':True, 'cameras':['Camera']}
+                core.atomic_json(root/'job.json', job)
+                child = Mock(returncode=1 if outcome == 'failed' else 0)
+                child.poll.return_value = child.returncode
+                if outcome == 'failed':
+                    core.atomic_json(root/'capture-render.json', {'error':'Device unavailable'})
+                with patch.object(supervisor, 'check_environment') as backend, \
+                     patch.object(supervisor, 'captured_dataset') as dataset, \
+                     patch.object(supervisor.subprocess, 'Popen', return_value=child) as spawn, \
+                     patch.object(supervisor, 'stop_requested', side_effect=[False, outcome == 'stopped']):
+                    supervisor.supervise(root/'job.json')
+                state = core.read_json(root/'state.json')
+                self.assertEqual(state['state'], outcome)
+                if outcome == 'failed':
+                    self.assertEqual(state['error'], 'Device unavailable')
+                backend.assert_not_called()
+                dataset.assert_not_called()
+                self.assertEqual(spawn.call_count, 1)
+                self.assertNotIn('--finalize-capture', spawn.call_args.args[0])
+                self.assertFalse((root/'supervisor.lock').exists())
+
     def test_import_best_can_repeat_acknowledged_generation(self):
         with tempfile.TemporaryDirectory() as directory:
             root = previous_job(directory)
