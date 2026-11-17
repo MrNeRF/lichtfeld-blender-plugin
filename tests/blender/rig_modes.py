@@ -363,3 +363,147 @@ except RuntimeError as error:
     assert 'half field of view' in str(error)
 else:raise AssertionError('Accepted rotation outside the optical field of view')
 print('ROTATION_AUTOFIT_PORTRAIT_MARGIN_LONG_LENS_FAILURE_PASS',flush=True)
+
+# Multi-direction stations reuse curve sampling and perspective camera poses.
+s.rig_lens=35;s.rig_auto_fit=False;s.rig_position_variation=0;s.rig_rotation_variation=0
+s.rig_mode='PATH';s.rig_orientation='PANORAMA';s.rig_aim_mode='OBJECT';s.rig_target=None
+s.views=4;s.rig_station_views=8;s.rig_path_link=False;s.rig_path_sampling='COUNT';s.rig_phase=.2
+for kind in ('POLY','BEZIER','NURBS'):
+    curve=bpy.data.curves.new('Panorama '+kind,'CURVE');curve.dimensions='3D'
+    spline=curve.splines.new(kind)
+    coords=[(-3,0,1),(0,0,1),(3,0,1)]
+    if kind=='BEZIER':
+        spline.bezier_points.add(2)
+        for point,co in zip(spline.bezier_points,coords):
+            point.co=co;point.handle_left_type='VECTOR';point.handle_right_type='VECTOR'
+    else:
+        spline.points.add(2)
+        for point,co in zip(spline.points,coords):point.co=(*co,1)
+        if kind=='NURBS':spline.order_u=3;spline.use_endpoint_u=True
+    guide=bpy.data.objects.new('Panorama '+kind,curve);bpy.context.scene.collection.objects.link(guide)
+    guide.location=(1,2,.5);guide.rotation_euler=(.3,-.2,.4);guide.scale=(1.3,)*3
+    s.rig_curve=guide
+    for degrees in (120,180,270,360):
+        s.rig_station_sweep=math.radians(degrees)
+        assert bpy.ops.lichtfeld.create_rig()=={'FINISHED'}
+        bpy.context.view_layer.update()
+        cameras=generated()
+        stations=[Vector(p) for p in ext.rig_path.positions(bpy.context,guide,s.views) if p is not None]
+        assert len(cameras)==len(stations)*s.rig_station_views==32
+        axes=list(ext.rig_geometry.directions(8,'RINGS',0,0,1,s.rig_phase,sweep=s.rig_station_sweep))
+        rotation=guide.matrix_world.to_quaternion().normalized()
+        poses=[]
+        for index,camera in enumerate(cameras):
+            pose=ext.capture_settings.camera_pose(camera,bpy.context.evaluated_depsgraph_get())
+            assert (pose.translation-stations[index//8]).length<1e-5
+            assert (pose.to_3x3() @ Vector((0,0,-1))).dot(rotation @ Vector(axes[index%8]))>.99999
+            assert (pose.to_3x3() @ Vector((0,1,0))).dot(rotation @ Vector((0,0,1)))>.99999
+            assert camera.constraints.get(ext.rig_edit.AIM) is None
+            assert camera.constraints.get(ext.rig_edit.ROTATION) is None
+            poses.append(tuple(round(v,5) for row in pose for v in row))
+        assert len(set(poses))==32
+    s.rig_path_sampling='SPACING';s.rig_path_spacing=2
+    assert bpy.ops.lichtfeld.create_rig()=={'FINISHED'}
+    stations=[p for p in ext.rig_path.positions(bpy.context,guide,s.views,spacing=2) if p is not None]
+    assert len(generated())==len(stations)*8
+    s.rig_path_sampling='COUNT'
+    if kind=='POLY':
+        last=spline.points[-1].co.copy();spline.points[-1].co=spline.points[0].co
+        bpy.context.view_layer.update()
+        try:
+            bpy.ops.lichtfeld.create_rig()
+        except RuntimeError as error:
+            assert 'repeated camera positions' in str(error)
+        else:raise AssertionError('Accepted duplicate panorama stations')
+        spline.points[-1].co=last
+print('PANORAMA_POLY_BEZIER_NURBS_SECTORS_POSES_SPACING_PASS',flush=True)
+
+s.rig_path_link=True
+assert bpy.ops.lichtfeld.create_rig()=={'FINISHED'}
+bpy.context.view_layer.update()
+identities=[o.as_pointer() for o in generated()]
+guide.location.x+=1;guide.rotation_euler=(.6,.2,1);guide.scale=(2,)*3
+bpy.context.view_layer.update()
+linked=[ext.capture_settings.camera_pose(o,bpy.context.evaluated_depsgraph_get()) for o in generated()]
+frozen=ext.capture_settings.copy_camera(generated()[0],bpy.context.evaluated_depsgraph_get(),{})
+assert not frozen.constraints
+assert max(abs(a-b) for x,y in zip(frozen.matrix_world,linked[0]) for a,b in zip(x,y))<1e-5
+data=frozen.data;bpy.data.objects.remove(frozen);bpy.data.cameras.remove(data)
+assert bpy.ops.lichtfeld.create_rig()=={'FINISHED'}
+bpy.context.view_layer.update()
+assert [o.as_pointer() for o in generated()]==identities
+assert all(max(abs(a-b) for x,y in zip(ext.capture_settings.camera_pose(o,bpy.context.evaluated_depsgraph_get()),m) for a,b in zip(x,y))<1e-4 for o,m in zip(generated(),linked))
+print('PANORAMA_GUIDE_FRAME_LINK_MOVE_ROTATE_SCALE_REAPPLY_PASS',flush=True)
+# Frame extraction uses the same rigid-transform contract as capture calibration.
+saved_matrix=guide.matrix_world.copy()
+counts=(len(bpy.data.objects),len(bpy.data.cameras),len(bpy.data.collections))
+for link in (False,True):
+    s.rig_path_link=link
+    for scale in ((-1,1,1),(1,1,0)):
+        guide.scale=scale;bpy.context.view_layer.update()
+        try:
+            bpy.ops.lichtfeld.create_rig()
+        except RuntimeError as error:
+            assert 'Panorama guide' in str(error)
+            assert ('mirrored transform' if scale[0]<0 else 'zero or near-zero scale') in str(error)
+        else:raise AssertionError('Accepted a mirrored or singular panorama frame')
+        assert counts==(len(bpy.data.objects),len(bpy.data.cameras),len(bpy.data.collections))
+    guide.matrix_world=saved_matrix
+s.rig_path_link=True
+parent=bpy.data.objects.new('Sheared panorama parent',None);bpy.context.scene.collection.objects.link(parent)
+parent.scale=(2,1,1);guide.parent=parent;guide.rotation_euler=(0,0,.4)
+bpy.context.view_layer.update()
+try:
+    bpy.ops.lichtfeld.create_rig()
+except RuntimeError as error:
+    assert 'sheared transform' in str(error) and 'guide' in str(error)
+else:raise AssertionError('Accepted a sheared panorama frame')
+guide.parent=None;guide.matrix_world=saved_matrix;bpy.data.objects.remove(parent)
+bpy.context.view_layer.update()
+print('PANORAMA_SHARED_RIGID_FRAME_MIRROR_ZERO_SHEAR_REJECTED_PASS',flush=True)
+
+
+counts=(len(bpy.data.objects),len(bpy.data.cameras),len(bpy.data.collections))
+recipe=s.camera_collection['lichtfeld_rig_recipe']
+s.views=1000;s.rig_station_views=11
+try:
+    bpy.ops.lichtfeld.create_rig()
+except RuntimeError as error:
+    assert '10,000' in str(error)
+else:raise AssertionError('Expanded station count exceeded capture contract')
+assert counts==(len(bpy.data.objects),len(bpy.data.cameras),len(bpy.data.collections))
+assert s.camera_collection['lichtfeld_rig_recipe']==recipe
+s.views=4;s.rig_station_views=4
+for orientation in ('TARGET','PANORAMA','TANGENT'):
+    s.rig_orientation=orientation;s.rig_aim_mode='SOURCE'
+    assert bpy.ops.lichtfeld.create_rig()=={'FINISHED'}
+    assert generated()[0].as_pointer()==identities[0]
+    assert custom.name in s.camera_collection.objects
+    assert bool(generated()[0].constraints.get(ext.rig_edit.AIM))==(orientation=='TARGET')
+print('PANORAMA_COUNT_GUARD_TARGET_TANGENT_CUSTOM_IDENTITIES_PASS',flush=True)
+
+# A panorama update has the same cancellable transaction as all other rigs.
+s.rig_orientation='PANORAMA'
+assert bpy.ops.lichtfeld.create_rig()=={'FINISHED'}
+bpy.context.view_layer.update()
+baseline=[(o,o.data,o.matrix_world.copy()) for o in generated()]
+counts=(len(bpy.data.objects),len(bpy.data.cameras),len(bpy.data.collections))
+s.rig_station_sweep=math.pi
+for cut in range(500):
+    owner=SimpleNamespace(collection=None,rig_backup=[],committed=False,report=lambda *args:None)
+    work=ext.LF_OT_rig.generate(owner,bpy.context)
+    try:
+        for _ in range(cut):next(work)
+    except StopIteration:break
+    if owner.committed:
+        for _ in work:pass
+        break
+    work.close()
+    for _ in ext.LF_OT_rig.cleanup(owner):pass
+    bpy.context.view_layer.update()
+    assert counts==(len(bpy.data.objects),len(bpy.data.cameras),len(bpy.data.collections)),cut
+    for camera,data,matrix in baseline:
+        assert camera.data==data
+        assert max(abs(a-b) for x,y in zip(camera.matrix_world,matrix) for a,b in zip(x,y))<1e-5,cut
+else:raise AssertionError('Station update never committed')
+print('PANORAMA_CANCEL_EVERY_PRECOMMIT_YIELD_PASS',flush=True)

@@ -123,17 +123,22 @@ def camera_pose(camera, graph):
     evaluated = camera.evaluated_get(graph)
     if evaluated.data.type != 'PERSP':
         raise ValueError(f'Camera {camera.name}: capture requires a Perspective camera')
-    matrix = evaluated.matrix_world.copy()
+    return rigid_frame(evaluated.matrix_world.copy(), f'Camera {camera.name}',
+                       shear_hint='apply rig changes after guide scaling, or inspect camera parents')
+
+
+def rigid_frame(matrix, label, *, shear_hint):
+    """Scale-free, right-handed frame shared by capture cameras and rig guides."""
     if any(not math.isfinite(value) for row in matrix for value in row):
-        raise ValueError(f'Camera {camera.name}: transform contains non-finite values')
+        raise ValueError(f'{label}: transform contains non-finite values')
     axes = [matrix.to_3x3().col[index].copy() for index in range(3)]
     if any(not math.isfinite(axis.length) or axis.length < 1e-8 for axis in axes):
-        raise ValueError(f'Camera {camera.name}: zero or near-zero scale; inspect the camera and its parents')
+        raise ValueError(f'{label}: zero or near-zero scale; inspect scale and parents')
     axes = [axis.normalized() for axis in axes]
     if any(abs(axes[a].dot(axes[b])) > 1e-5 for a, b in ((0, 1), (0, 2), (1, 2))):
-        raise ValueError(f'Camera {camera.name}: sheared transform; apply rig changes after guide scaling, or inspect camera parents')
+        raise ValueError(f'{label}: sheared transform; {shear_hint}')
     if axes[0].cross(axes[1]).dot(axes[2]) < 0:
-        raise ValueError(f'Camera {camera.name}: mirrored transform; inspect the camera and its parents')
+        raise ValueError(f'{label}: mirrored transform; inspect scale and parents')
     return matrix.normalized()
 
 

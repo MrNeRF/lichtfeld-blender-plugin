@@ -253,5 +253,17 @@ for amount,rotation in ((0,0),(5,0),(0,.03),(5,.03)):
     names=dict(layout.fields)
     assert 'rig_position_variation' in names and 'rig_rotation_variation' in names
     assert ('rig_variation_seed' in names)==bool(amount or rotation)
+s.rig_mode='PATH';s.rig_orientation='PANORAMA';s.rig_path_sampling='COUNT';s.views=4;s.rig_station_views=8
+layout=Layout()
+ext.draw_capture_cameras(layout,context,s,ready,False,lambda *args:None)
+names=dict(layout.fields)
+assert all(name in names for name in ('rig_station_views','rig_station_sweep','rig_phase'))
+assert all(name not in names for name in ('rig_aim_mode','rig_aim_offset','rig_path_reverse','rig_position_variation','rig_rotation_variation'))
+assert '4 stations × 8 = 32 cameras' in layout.labels
+s.rig_path_sampling='SPACING'
+layout=Layout()
+ext.draw_capture_cameras(layout,context,s,ready,True,lambda *args:None)
+assert 'Station total updates on Apply' in layout.labels
+assert not any('= 32' in text for text in layout.labels)
 print('PATH_REVERSE_ONLY_SHOWN_FOR_PATH_VIEWING_PASS')
 bpy.ops.preferences.addon_disable(module=module)

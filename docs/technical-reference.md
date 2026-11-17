@@ -114,6 +114,16 @@ no rotation constraint or recipe key is added. Capture freezes the evaluated pos
 through the existing camera-copy path. Automatic fitting reserves the maximum
 angular deviation in the existing optical projection calculation.
 
+Path panorama stations reuse `rig_path.positions` for the distinct station
+positions and the `RINGS` branch of `rig_geometry.directions` for local optical
+axes. Its optional sweep includes partial-sector endpoints and excludes the
+full-turn seam. Orientations use the evaluated guide object's quaternion after the shared
+`capture_settings.rigid_frame` validation, without scale or per-station helpers. The generator checks duplicate station positions
+before expansion and validates the expanded view count through the existing
+capture contract before creating staging IDs. Generated indices are station-major:
+`station * views_per_station + direction`. Existing transaction and capture-pose
+normalization handle guide links, cancellation and calibration unchanged.
+
 `rig_edit.commit` validates generated indices and aim-helper uniqueness before
 mutating existing cameras, retaining the existing staged update/rollback path.
 `rig_reference` stores an independent Blender RNA group in the scene controls and

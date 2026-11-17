@@ -50,6 +50,24 @@ class GeometryTests(unittest.TestCase):
     def test_invalid_distributions(self):
         for args in ((8,'HEMISPHERE',80,0),(8,'RINGS',0,80,3),(8,'RINGS',0,0,2)):
             with self.assertRaises(ValueError):list(directions(*args))
+    def test_ring_sweep_sectors_and_full_turn_seam(self):
+        # The existing full-turn path retains its exact arithmetic.
+        for count in (4,8,16):
+            actual=list(directions(count,'RINGS',0,0,1,.3))
+            expected=[(math.cos(.3+2*math.pi*i/count),math.sin(.3+2*math.pi*i/count),0) for i in range(count)]
+            self.assertEqual(actual,expected)
+            for degrees in (120,180,270,360):
+                sweep=math.radians(degrees)
+                points=list(directions(count,'RINGS',0,0,1,.3,sweep=sweep))
+                self.assertEqual(len(set(points)),count)
+                divisor=count if degrees==360 else count-1
+                self.assertTrue(np.allclose(points,[(math.cos(.3+sweep*i/divisor),math.sin(.3+sweep*i/divisor),0) for i in range(count)]))
+        rounded=float(np.float32(2*math.pi))
+        self.assertEqual(list(directions(8,'RINGS',0,0,1,.3,sweep=rounded)),list(directions(8,'RINGS',0,0,1,.3)))
+        for sweep in (0,-1,float('nan'),float('inf'),7):
+            with self.subTest(sweep=sweep),self.assertRaises(ValueError):
+                list(directions(8,'RINGS',0,0,1,sweep=sweep))
+
     def test_arc_distance_and_closed_endpoint(self):
         result=list(sample_path([(0,0,0),(1,0,0),(1,9,0)],6))
         self.assertTrue(np.allclose(result,[(0,0,0),(1,1,0),(1,3,0),(1,5,0),(1,7,0),(1,9,0)]))

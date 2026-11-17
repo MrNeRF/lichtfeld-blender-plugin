@@ -363,18 +363,19 @@ def decode_recipe(encoded):
     properties = bpy.types.Scene.bl_rna.properties['lichtfeld_training'].fixed_type.properties
     for name in ('views', 'rig_rings', 'rig_min', 'rig_max', 'rig_distance',
                  'rig_lens', 'rig_radius', 'rig_mesh_offset', 'rig_phase', 'rig_path_spacing',
-                 'rig_position_variation', 'rig_rotation_variation', 'rig_variation_seed'):
+                 'rig_position_variation', 'rig_rotation_variation', 'rig_variation_seed',
+                 'rig_station_views', 'rig_station_sweep'):
         if name not in values:continue
         value=values[name]
         if type(value) not in (int,float) or not math.isfinite(value):raise ValueError("Invalid rig number: "+name)
-        if name in {"views","rig_rings","rig_variation_seed"} and type(value) is not int:raise ValueError("Invalid rig count or seed")
+        if name in {"views","rig_rings","rig_variation_seed","rig_station_views"} and type(value) is not int:raise ValueError("Invalid rig count or seed")
         # RNA owns both the bounds and their float32 representation. Metadata
         # must accept what the native controls write, without a second table.
         prop = properties[name]
         if not prop.hard_min <= value <= prop.hard_max:
             raise ValueError("Rig parameter outside its range: "+name)
     for name, valid in (("rig_mode",{"SPHERE","HEMISPHERE","RINGS","PATH","MESH"}),
-                        ("rig_orientation",{"TARGET","TANGENT"}),
+                        ("rig_orientation",{"TARGET","TANGENT","PANORAMA"}),
                         ('rig_path_sampling', {'COUNT', 'SPACING'}),
                         ("rig_mesh_distribution",{"SURFACE","FACES"}),
                         ("rig_mesh_orientation",{"INWARD","OUTWARD","TARGET"}),

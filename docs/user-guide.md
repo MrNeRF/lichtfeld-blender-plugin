@@ -188,6 +188,30 @@ Manual distance, moved aim targets and position jitter still require checking
 coverage with **Check framing**. Live aiming retains the angular offsets.
 Path and mesh rigs do not expose these controls. Per-camera aim variation is not included.
 
+For indoor routes, choose **Curve path → Orientation → Panorama stations**.
+Each sampled curve position becomes a station with several normal perspective
+cameras. **Stations** chooses positions, **Views/station** chooses directions,
+and the panel shows their product before Apply. With spacing-based sampling the
+station total is known only after Apply. Quality presets change the station
+count, not the views per station; for example, 144 stations × 8 views creates
+1,152 cameras. Custom cameras in the collection remain additional capture views.
+
+**Sweep** sets the horizontal range of optical axes: 360° omits the duplicate last
+direction, while partial sectors include both end directions. **Geometry and lens →
+Start azimuth** starts at the guide object's local +X axis and advances toward +Y, with
++Z as up. The guide frame must be non-mirrored, nondegenerate and free of shear. Apply
+guide scale or inspect its parents if the frame is rejected. Rotating the guide rotates
+this frame; bending the curve does not turn each station along its tangent. **Follow
+guide** also moves and rotates the cameras immediately; Apply updates changed curve
+geometry or counts. Changing station or direction counts retains camera identity by
+generated index, not by a persistent station identity.
+
+These are separate perspective images, not a stitched or equirectangular panorama.
+The sweep describes camera axes, not image coverage: lens, output aspect and
+obstacles still matter. Multiple views at one station add viewing directions but
+no translational baseline; the curve supplies the different station positions.
+This mode currently covers one band, not a full spherical set of directions.
+
 Enable **Follow guide** and apply the rig to link generated cameras
 to the guide's movement, rotation and uniform scaling in Object Mode. This uses
 Blender's native constraints, so it continues working after saving and reopening
