@@ -6,13 +6,13 @@ import math
 import random
 
 
-def position_offset(index, seed, amplitude, phase=0.0):
+def seeded_offset(index, seed, amplitude, phase=0.0, stream=0):
     """Static, index-stable displacement within a ball of the given radius."""
     if not math.isfinite(amplitude) or amplitude < 0:
-        raise ValueError('Position variation must be finite and nonnegative')
+        raise ValueError('Variation must be finite and nonnegative')
     if amplitude == 0:
         return (0.0, 0.0, 0.0)
-    rng = random.Random((seed << 32) + index)
+    rng = random.Random((stream << 96) + (seed << 32) + index)
     radius = amplitude * rng.random() ** (1/3)
     z = 2*rng.random()-1
     angle = 2*math.pi*rng.random() + phase

@@ -18,7 +18,7 @@ import bpy
 from bpy.app.handlers import persistent
 from bpy.props import (BoolProperty, CollectionProperty, EnumProperty, FloatProperty, IntProperty,
                        PointerProperty, StringProperty, FloatVectorProperty)
-from mathutils import Matrix, Vector
+from mathutils import Matrix, Quaternion, Vector
 
 from .bridge_core import (SCHEMA, TERMINAL, atomic_json, read_json, verify_artifact, process_alive)
 from lichtfeld_sessions.transport import read_snapshot, discover, SessionClient
@@ -175,6 +175,9 @@ def rig_recipe(settings, applied=None):
     if settings.rig_mode in {'SPHERE','HEMISPHERE','RINGS'} and settings.rig_position_variation:
         values.update(rig_position_variation=settings.rig_position_variation,
                       rig_variation_seed=settings.rig_variation_seed)
+    if settings.rig_mode in {'SPHERE','HEMISPHERE','RINGS'} and settings.rig_rotation_variation:
+        values.update(rig_rotation_variation=settings.rig_rotation_variation,
+                      rig_variation_seed=settings.rig_variation_seed)
     # Default path controls must leave existing recipes byte-for-byte unchanged,
     # including radial rigs whose live editor compares their applied recipe.
     if settings.rig_mode == 'PATH':
@@ -309,8 +312,11 @@ class LichtFeldSettings(bpy.types.PropertyGroup):
     rig_position_variation: FloatProperty(name="Position jitter", default=0, min=0, max=25,
         subtype='PERCENTAGE', soft_max=10,
         description="Maximum displacement as a percentage of radial rig radius; scales and rotates with the rig. Apply to update. Does not guarantee coverage or avoid obstacles")
+    rig_rotation_variation: FloatProperty(name="Rotation jitter", default=0, min=0, max=math.radians(15),
+        subtype="ANGLE", soft_max=math.radians(5),
+        description="Maximum angular deviation, including roll, after target aiming. Automatic framing reserves this angle; review coverage after applying")
     rig_variation_seed: IntProperty(name="Seed", default=0, min=0,
-        description="Reproduce the same displacement pattern by generated camera index; changing names or redrawing does not change the pattern")
+        description="Reproduce the same variation patterns by generated camera index; changing names or redrawing does not change the pattern")
     live_radius: FloatProperty(name="Distance from center", min=.01, max=1000000,
         subtype='DISTANCE', unit='LENGTH', options=set(), get=rig_edit.live_radius_get,
         set=rig_edit.live_radius_set, description="Move generated cameras radially now; drag to adjust, Escape cancels the gesture")
@@ -701,7 +707,7 @@ class LF_OT_rig(_RigOperation, bpy.types.Operator):
                     settings.rig_min, settings.rig_max, settings.rig_rings, settings.rig_phase)):
                 point = center + Vector(direction)*radius
                 if settings.rig_position_variation:
-                    point += Vector(rig_geometry.position_offset(index, settings.rig_variation_seed,
+                    point += Vector(rig_geometry.seeded_offset(index, settings.rig_variation_seed,
                         radius*settings.rig_position_variation/100, settings.rig_phase))
                 points.append(point)
                 yield
@@ -758,6 +764,11 @@ class LF_OT_rig(_RigOperation, bpy.types.Operator):
                                    path_inverse)
             if (settings.rig_mode != "PATH" or settings.rig_orientation != "TANGENT") and (settings.rig_mode != "MESH" or settings.rig_mesh_orientation == "TARGET"):
                 rig_edit.track(obj, target)
+            if settings.rig_mode in {'SPHERE','HEMISPHERE','RINGS'} and settings.rig_rotation_variation:
+                vector = Vector(rig_geometry.seeded_offset(index, settings.rig_variation_seed,
+                    settings.rig_rotation_variation, stream=1))
+                angles = Quaternion(vector.normalized(), vector.length).to_euler('XYZ') if vector.length else (0, 0, 0)
+                rig_edit.rotate_after_aim(obj, target, angles)
             yield
         for _ in rig_edit.commit(self, settings, previous, collection, target, recipe):
             yield
@@ -977,6 +988,7 @@ class LF_OT_read_rig(bpy.types.Operator):
             s.rig_path_spacing = values.get('rig_path_spacing', 1)
             s.rig_path_reverse = values.get('rig_path_reverse', False)
             s.rig_path_link = values.get('rig_path_link', False)
+            s.rig_rotation_variation = values.get('rig_rotation_variation', 0)
             s.rig_position_variation = values.get('rig_position_variation', 0)
             s.rig_variation_seed = values.get('rig_variation_seed', 0)
             s.rig_aim_mode = values.get("aim_mode", "OBJECT" if values.get("target") else "SOURCE")
@@ -2128,7 +2140,8 @@ def draw_capture_cameras(box, context, settings, ready, rig_changed, wrapped):
             box.prop(settings, 'rig_aim_offset')
         if settings.rig_mode in {'SPHERE','HEMISPHERE','RINGS'}:
             box.prop(settings, 'rig_position_variation')
-            if settings.rig_position_variation:
+            box.prop(settings, 'rig_rotation_variation')
+            if settings.rig_position_variation or settings.rig_rotation_variation:
                 box.prop(settings, 'rig_variation_seed', text='Seed')
         box = outer
     draw_rig_actions(box, settings, rig_changed, edit=True)

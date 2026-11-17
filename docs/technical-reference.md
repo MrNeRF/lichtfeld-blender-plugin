@@ -103,6 +103,17 @@ world translation. Non-finite, degenerate, sheared and negative-determinant fram
 are rejected with the camera name. Copy normalization never edits camera sources
 or parent objects; the validation action only selects the named camera.
 
+Radial position and rotation jitter share `rig_geometry.seeded_offset`, with
+separate deterministic streams indexed by generated camera number. Rotation uses
+a bounded axis-angle vector and a native Transformation constraint immediately
+after Track To. The existing aim helper supplies the required constraint target;
+constant output ranges keep the offset independent of its movement. No additional
+objects or Python evaluation callbacks are needed. Constraint changes
+on existing cameras occur after the rig transaction's commit boundary. At zero,
+no rotation constraint or recipe key is added. Capture freezes the evaluated pose
+through the existing camera-copy path. Automatic fitting reserves the maximum
+angular deviation in the existing optical projection calculation.
+
 `rig_edit.commit` validates generated indices and aim-helper uniqueness before
 mutating existing cameras, retaining the existing staged update/rollback path.
 `rig_reference` stores an independent Blender RNA group in the scene controls and

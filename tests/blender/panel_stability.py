@@ -235,7 +235,7 @@ assert all(name in fields for name in ('rig_min','rig_max','rig_lens','rig_aim_o
     'capture_lens','capture_shift_x','capture_clip_start','capture_aspect','seed_points',
     'strategy','eval_interval','optimizer_file','preview_mode','preview_points',
     'preview_sh_degree','preview_hold_seconds'))
-assert 'rig_position_variation' in fields and 'rig_variation_seed' not in fields
+assert 'rig_position_variation' in fields and 'rig_rotation_variation' in fields and 'rig_variation_seed' not in fields
 assert sum(name=='sh_degree' for name,row in layout.fields)==1
 print('NATIVE_DISCLOSURES_KEEP_ADVANCED_CAPTURE_TRAINING_AND_PREVIEW_REACHABLE_PASS')
 for mode in ('TARGET','TANGENT'):
@@ -245,13 +245,13 @@ for mode in ('TARGET','TANGENT'):
     names=dict(layout.fields)
     assert ('rig_path_reverse' in names)==(mode=='TANGENT')
     assert 'rig_path_link' in names
-    assert 'rig_position_variation' not in names
-for amount in (0,5):
-    s.rig_mode='RINGS';s.rig_position_variation=amount
+    assert 'rig_position_variation' not in names and 'rig_rotation_variation' not in names
+for amount,rotation in ((0,0),(5,0),(0,.03),(5,.03)):
+    s.rig_mode='RINGS';s.rig_position_variation=amount;s.rig_rotation_variation=rotation
     layout=Layout()
     ext.draw_capture_cameras(layout,context,s,ready,False,lambda *args:None)
     names=dict(layout.fields)
-    assert 'rig_position_variation' in names
-    assert ('rig_variation_seed' in names)==bool(amount)
+    assert 'rig_position_variation' in names and 'rig_rotation_variation' in names
+    assert ('rig_variation_seed' in names)==bool(amount or rotation)
 print('PATH_REVERSE_ONLY_SHOWN_FOR_PATH_VIEWING_PASS')
 bpy.ops.preferences.addon_disable(module=module)

@@ -36,13 +36,15 @@ s.scope = 'SELECTION'
 for _ in ext.preflight.remember_sources(s, [bpy.data.objects['Cube']]):
     pass
 capture_name='Camera';capture_index=1
-if '--linked-guide' in sys.argv or '--position-variation' in sys.argv:
+if '--linked-guide' in sys.argv or '--position-variation' in sys.argv or '--rotation-variation' in sys.argv:
     s.views=4
     if '--linked-guide' in sys.argv:
         s.rig_mode='PATH';s.rig_path_link=True
         assert bpy.ops.lichtfeld.create_path_guide(shape='ORBIT',radius=4)=={'FINISHED'}
     else:
-        s.rig_mode='SPHERE';s.rig_position_variation=5;s.rig_variation_seed=73
+        s.rig_mode='SPHERE';s.rig_position_variation=5 if '--position-variation' in sys.argv else 0;s.rig_variation_seed=73
+        if '--rotation-variation' in sys.argv:
+            s.rig_rotation_variation=.03
     assert bpy.ops.lichtfeld.create_rig()=={'FINISHED'}
     if '--linked-guide' in sys.argv:
         s.rig_curve.location.x+=.3;s.rig_curve.scale=(1.2,1.2,1.2)

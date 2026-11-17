@@ -11,6 +11,7 @@ from .visibility import object_steps
 AIM = "LichtFeld Aim"
 FOLLOW = "LichtFeld Follow"
 PATH_LINK = "LichtFeld Path Transform"
+ROTATION = "LichtFeld Rotation Variation"
 
 
 def copy_reference(source, destination):
@@ -136,6 +137,34 @@ def track(camera, target):
         camera.constraints.remove(constraint)
 
 
+def rotate_after_aim(camera, target, angles=None):
+    """Constant local angular offset after native tracking, without extra IDs."""
+    constraint = camera.constraints.get(ROTATION)
+    if constraint and constraint.type != 'TRANSFORM':
+        raise ValueError('Keep LichtFeld Rotation Variation reserved for rotation jitter')
+    if angles is None:
+        if constraint:
+            camera.constraints.remove(constraint)
+        return
+    constraint = constraint or camera.constraints.new('TRANSFORM')
+    constraint.name = ROTATION
+    constraint.target = target
+    constraint.map_from = 'LOCATION'
+    constraint.map_to = 'ROTATION'
+    constraint.mix_mode_rot = 'AFTER'
+    constraint.owner_space = 'LOCAL'
+    constraint.target_space = 'WORLD'
+    constraint.to_euler_order = 'XYZ'
+    for axis, value in zip('xyz', angles):
+        setattr(constraint, 'from_min_' + axis, -1)
+        setattr(constraint, 'from_max_' + axis, 1)
+        setattr(constraint, 'to_min_' + axis + '_rot', value)
+        setattr(constraint, 'to_max_' + axis + '_rot', value)
+    aim_index = list(camera.constraints).index(camera.constraints.get(AIM))
+    index = list(camera.constraints).index(constraint)
+    camera.constraints.move(index, aim_index + 1 - (index < aim_index))
+
+
 def path_link_state(camera):
     constraint = camera.constraints.get(PATH_LINK)
     return (constraint.target, constraint.inverse_matrix.copy(), list(camera.constraints).index(constraint)) if constraint else None
@@ -215,6 +244,9 @@ def managed_members(collection):
         indices[index] = obj.name
         constraint = obj.constraints.get(AIM)
         path = obj.constraints.get(PATH_LINK)
+        rotation = obj.constraints.get(ROTATION)
+        if rotation and rotation.type != 'TRANSFORM':
+            raise ValueError('Keep LichtFeld Rotation Variation reserved for rotation jitter')
         if obj.library or (constraint and constraint.type != "TRACK_TO") or (path and path.type != 'CHILD_OF'):
             raise ValueError("Make generated cameras local and keep LichtFeld Aim and Path Transform names reserved")
         yield
@@ -278,12 +310,18 @@ def commit(owner, settings, previous, staging, target, recipe):
             path = path_link_state(prepared)
             link_path(original, *(path if path else (None, None)))
             track(original, final_target if prepared.constraints.get(AIM) else None)
+            rotation = prepared.constraints.get(ROTATION)
+            rotate_after_aim(original, final_target,
+                tuple(getattr(rotation, 'to_min_' + axis + '_rot') for axis in 'xyz') if rotation else None)
             data = prepared.data
             bpy.data.objects.remove(prepared, do_unlink=True)
             if data.users == 0:
                 bpy.data.cameras.remove(data)
         else:
             track(prepared, final_target if prepared.constraints.get(AIM) else None)
+            rotation = prepared.constraints.get(ROTATION)
+            if rotation:
+                rotation.target = final_target
             previous.objects.link(prepared)
             staging.objects.unlink(prepared)
         yield
@@ -325,7 +363,7 @@ def decode_recipe(encoded):
     properties = bpy.types.Scene.bl_rna.properties['lichtfeld_training'].fixed_type.properties
     for name in ('views', 'rig_rings', 'rig_min', 'rig_max', 'rig_distance',
                  'rig_lens', 'rig_radius', 'rig_mesh_offset', 'rig_phase', 'rig_path_spacing',
-                 'rig_position_variation', 'rig_variation_seed'):
+                 'rig_position_variation', 'rig_rotation_variation', 'rig_variation_seed'):
         if name not in values:continue
         value=values[name]
         if type(value) not in (int,float) or not math.isfinite(value):raise ValueError("Invalid rig number: "+name)
@@ -470,9 +508,14 @@ def _live_members(settings, graph):
         raise ValueError('Live editing needs a local, unanimated aim helper with its original following constraint')
     for camera in cameras:
         aim = camera.constraints.get(AIM)
+        rotation = camera.constraints.get(ROTATION)
+        expected = [aim, rotation] if recipe.get('rig_rotation_variation', 0) else [aim]
+        if (list(camera.constraints) != expected or
+                rotation and (rotation.type != 'TRANSFORM' or rotation.target != target)):
+            raise ValueError('Apply the rig to restore its native aiming and rotation constraints before live editing')
         if (camera.override_library or camera.parent or camera.animation_data or
                 camera.data.library or camera.data.override_library or camera.data.animation_data or camera.data.users != 1 or
-                _shared_outside_preview(camera, settings.id_data) or len(camera.constraints) != 1 or not aim or aim.type != 'TRACK_TO' or aim.target != target):
+                _shared_outside_preview(camera, settings.id_data) or not aim or aim.type != 'TRACK_TO' or aim.target != target):
             raise ValueError('Live editing needs the original local generated cameras; keep custom cameras as additional cameras')
         yield
     count = recipe.get('views', 0)
@@ -484,7 +527,7 @@ def _live_members(settings, graph):
     for index, (camera, direction) in enumerate(zip(cameras, directions)):
         capture_settings.camera_pose(camera, graph)
         position = camera.matrix_world.translation
-        offset = Vector(direction) * radius + Vector(rig_geometry.position_offset(index,
+        offset = Vector(direction) * radius + Vector(rig_geometry.seeded_offset(index,
             recipe.get('rig_variation_seed', 0), radius*recipe.get('rig_position_variation', 0)/100, recipe.get('rig_phase', 0)))
         center = position - offset if center is None else center
         if ((position - center - offset).length > max(radius * 1e-5, 1e-5) or
