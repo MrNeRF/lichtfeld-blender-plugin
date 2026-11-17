@@ -6,11 +6,27 @@ import math
 import unittest
 import numpy as np
 sys.path.insert(0,str(Path(__file__).resolve().parents[2]/'lichtfeld_training'))
-from rig_geometry import directions, sample_path, guide_path
+from rig_geometry import directions, sample_path, guide_path, position_offset
 from geometry_maps import convert
 
 
 class GeometryTests(unittest.TestCase):
+    def test_position_variation_is_bounded_stable_and_independent(self):
+        import random
+        before = random.getstate()
+        pattern = [position_offset(i, 42, .5) for i in range(100)]
+        self.assertEqual(before, random.getstate())
+        self.assertEqual(pattern, [position_offset(i, 42, .5) for i in range(100)])
+        self.assertTrue(all(math.dist((0,0,0),p) <= .5 for p in pattern))
+        self.assertNotEqual(pattern, [position_offset(i, 43, .5) for i in range(100)])
+        for i,p in enumerate(pattern):
+            self.assertEqual(position_offset(i,42,0), (0,0,0))
+            self.assertTrue(np.allclose(position_offset(i,42,1), np.array(p)*2))
+            self.assertTrue(np.allclose(position_offset(i,42,.5,math.pi/2), (-p[1],p[0],p[2])))
+        for amplitude in (-1,float('nan'),float('inf')):
+            with self.subTest(amplitude=amplitude),self.assertRaises(ValueError):
+                position_offset(0,42,amplitude)
+
     def test_unique_every_count_including_old_overlap_counts(self):
         for mode in ('SPHERE','HEMISPHERE','RINGS'):
             for count in (4,8,9,16,48,96,144,1000):

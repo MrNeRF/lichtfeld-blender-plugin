@@ -23,6 +23,9 @@ state = {"ticks": 0, "max_gap_ms": 0}
 def start():
     bpy.ops.mesh.primitive_cube_add()
     bpy.context.scene.lichtfeld_training.views = 1000
+    if '--position-variation' in sys.argv:
+        bpy.context.scene.lichtfeld_training.rig_position_variation = 5
+        bpy.context.scene.lichtfeld_training.rig_variation_seed = 73
     assert bpy.ops.lichtfeld.create_rig() == {"RUNNING_MODAL"}
     state["started"] = state["last"] = time.perf_counter()
     bpy.app.timers.register(heartbeat, first_interval=.01)
@@ -47,8 +50,18 @@ def heartbeat():
         assert bpy.ops.ed.redo() == {'FINISHED'}
         settings = bpy.context.scene.lichtfeld_training
         assert settings.camera_collection.name == rig_name
+        if '--position-variation' in sys.argv:
+            assert settings.rig_position_variation == 5 and settings.rig_variation_seed == 73
         assert settings.rig_reference.objects[0].object is not None
         assert settings.camera_collection.lichtfeld_rig_reference.objects[0].object == settings.rig_reference.objects[0].object
+        if '--position-variation' in sys.argv:
+            path=str(output.with_suffix('.blend'))
+            bpy.ops.wm.save_as_mainfile(filepath=path)
+            bpy.ops.wm.open_mainfile(filepath=path,use_scripts=False)
+            settings=bpy.context.scene.lichtfeld_training
+            assert settings.rig_position_variation==5 and settings.rig_variation_seed==73
+            assert sum(o.type=='CAMERA' for o in settings.camera_collection.objects)==1000
+            state['variation_save_reload']=True
         state['reference_undo_redo'] = True
         output.write_text(json.dumps(state))
         print("RIG_EVENT_LOOP_HEARTBEAT_OK", state, flush=True)

@@ -222,3 +222,57 @@ work.close()
 for _ in ext.LF_OT_rig.cleanup(owner):pass
 assert [c.name for c in camera.constraints]==order
 print('PATH_LINK_USER_CONSTRAINT_ORDER_CANCEL_PASS',flush=True)
+
+# Small seeded displacements retain native aiming and the existing live owner.
+for mode in ('SPHERE','HEMISPHERE','RINGS'):
+    s.rig_mode=mode;s.views=12;s.rig_rings=2;s.rig_auto_fit=False;s.rig_radius=4
+    s.rig_aim_mode='SOURCE';s.rig_position_variation=0;s.rig_phase=.3
+    assert bpy.ops.lichtfeld.create_rig()=={'FINISHED'}
+    baseline=[tuple(o.location) for o in generated()]
+    identities=[o.as_pointer() for o in generated()]
+    assert 'rig_position_variation' not in ext.rig_edit.decode_recipe(ext.rig_recipe(s))
+    s.rig_position_variation=5;s.rig_variation_seed=73
+    assert bpy.ops.lichtfeld.create_rig()=={'FINISHED'}
+    varied=[tuple(o.location) for o in generated()]
+    assert varied!=baseline and [o.as_pointer() for o in generated()]==identities
+    assert all((Vector(a)-Vector(b)).length<=.2+1e-6 for a,b in zip(varied,baseline))
+    generated()[0].name='Renamed variation camera'
+    assert bpy.ops.lichtfeld.create_rig()=={'FINISHED'}
+    assert [tuple(o.location) for o in generated()]==varied
+    s.rig_variation_seed=74
+    assert bpy.ops.lichtfeld.create_rig()=={'FINISHED'}
+    assert [tuple(o.location) for o in generated()]!=varied
+    before=[tuple(o.location) for o in generated()]
+    assert bpy.ops.wm.context_set_float(data_path='scene.lichtfeld_training.rig_position_variation',value=0)=={'FINISHED'}
+    assert s.rig_variation_seed==74 and [tuple(o.location) for o in generated()]==before
+    assert bpy.ops.lichtfeld.create_rig()=={'FINISHED'}
+    assert [tuple(o.location) for o in generated()]==baseline
+    s.rig_position_variation=5
+    assert bpy.ops.lichtfeld.create_rig()=={'FINISHED'}
+    assert bpy.ops.lichtfeld.live_rig()=={'FINISHED'}
+    s.live_radius=6;s.live_phase=.8;s.live_aim=(.1,.2,.3)
+    bpy.context.view_layer.update()
+    live=[o.matrix_world.copy() for o in generated()]
+    assert bpy.ops.lichtfeld.live_rig()=={'FINISHED'}
+    assert s.rig_position_variation==5
+    assert bpy.ops.lichtfeld.create_rig()=={'FINISHED'}
+    bpy.context.view_layer.update()
+    for camera,matrix in zip(generated(),live):
+        assert max(abs(a-b) for x,y in zip(camera.matrix_world,matrix) for a,b in zip(x,y))<1e-4,mode
+        pose=ext.capture_settings.camera_pose(camera,bpy.context.evaluated_depsgraph_get())
+        desired=(s.rig_aim.matrix_world.translation-pose.translation).normalized()
+        assert desired.dot(pose.to_3x3() @ Vector((0,0,-1)))>.999
+    s.rig_position_variation=0;s.rig_variation_seed=0
+    assert bpy.ops.lichtfeld.read_rig()=={'FINISHED'}
+    assert s.rig_position_variation==5 and s.rig_variation_seed==74
+print('SEEDED_RADIAL_VARIATION_RESET_IDENTITIES_LIVE_REAPPLY_AIM_PASS',flush=True)
+before=[o.matrix_world.copy() for o in generated()]
+owner=SimpleNamespace(live_controller=None,live_backup=[],live_finishing=False,committed=False)
+work=ext.rig_edit.edit_live(owner,bpy.context)
+while len(owner.live_backup)<2:next(work)
+work.close()
+for _ in ext.rig_edit.rollback_live(owner):pass
+bpy.context.view_layer.update()
+assert ext.rig_edit.live_root(s) is None and s.rig_position_variation==5 and s.rig_variation_seed==74
+assert all(max(abs(a-b) for x,y in zip(o.matrix_world,m) for a,b in zip(x,y))<1e-5 for o,m in zip(generated(),before))
+print('SEEDED_VARIATION_LIVE_ENTRY_CANCEL_PASS',flush=True)

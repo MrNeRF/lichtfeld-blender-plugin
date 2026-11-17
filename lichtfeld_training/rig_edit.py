@@ -324,11 +324,12 @@ def decode_recipe(encoded):
         raise ValueError("Rig metadata must be an object")
     properties = bpy.types.Scene.bl_rna.properties['lichtfeld_training'].fixed_type.properties
     for name in ('views', 'rig_rings', 'rig_min', 'rig_max', 'rig_distance',
-                 'rig_lens', 'rig_radius', 'rig_mesh_offset', 'rig_phase', 'rig_path_spacing'):
+                 'rig_lens', 'rig_radius', 'rig_mesh_offset', 'rig_phase', 'rig_path_spacing',
+                 'rig_position_variation', 'rig_variation_seed'):
         if name not in values:continue
         value=values[name]
         if type(value) not in (int,float) or not math.isfinite(value):raise ValueError("Invalid rig number: "+name)
-        if name in {"views","rig_rings"} and type(value) is not int:raise ValueError("Invalid rig count")
+        if name in {"views","rig_rings","rig_variation_seed"} and type(value) is not int:raise ValueError("Invalid rig count or seed")
         # RNA owns both the bounds and their float32 representation. Metadata
         # must accept what the native controls write, without a second table.
         prop = properties[name]
@@ -480,10 +481,11 @@ def _live_members(settings, graph):
     directions = rig_geometry.directions(count, recipe['rig_mode'], recipe.get('rig_min', 0),
         recipe.get('rig_max', 85), recipe.get('rig_rings', 1), recipe.get('rig_phase', 0))
     center = None
-    for camera, direction in zip(cameras, directions):
+    for index, (camera, direction) in enumerate(zip(cameras, directions)):
         capture_settings.camera_pose(camera, graph)
         position = camera.matrix_world.translation
-        offset = Vector(direction) * radius
+        offset = Vector(direction) * radius + Vector(rig_geometry.position_offset(index,
+            recipe.get('rig_variation_seed', 0), radius*recipe.get('rig_position_variation', 0)/100, recipe.get('rig_phase', 0)))
         center = position - offset if center is None else center
         if ((position - center - offset).length > max(radius * 1e-5, 1e-5) or
                 any(abs(v - 1) > 1e-5 for v in camera.matrix_world.to_scale())):

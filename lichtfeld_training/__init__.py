@@ -172,6 +172,9 @@ def rig_recipe(settings, applied=None):
         'curve':settings.rig_curve.name_full if settings.rig_curve else '',
         'mesh':settings.rig_mesh.name_full if settings.rig_mesh else '',
         'capture_framing': capture_settings.framing_signature(settings.id_data, settings)}
+    if settings.rig_mode in {'SPHERE','HEMISPHERE','RINGS'} and settings.rig_position_variation:
+        values.update(rig_position_variation=settings.rig_position_variation,
+                      rig_variation_seed=settings.rig_variation_seed)
     # Default path controls must leave existing recipes byte-for-byte unchanged,
     # including radial rigs whose live editor compares their applied recipe.
     if settings.rig_mode == 'PATH':
@@ -303,6 +306,11 @@ class LichtFeldSettings(bpy.types.PropertyGroup):
     rig_distance: FloatProperty(name="Minimum distance multiplier", default=2.8, min=1.05, max=100,
         description="Multiply the reference bounding-sphere radius; automatic framing may move cameras farther away to fit the subject")
     rig_phase: FloatProperty(name="Azimuth offset", subtype="ANGLE", default=0)
+    rig_position_variation: FloatProperty(name="Position jitter", default=0, min=0, max=25,
+        subtype='PERCENTAGE', soft_max=10,
+        description="Maximum displacement as a percentage of radial rig radius; scales and rotates with the rig. Apply to update. Does not guarantee coverage or avoid obstacles")
+    rig_variation_seed: IntProperty(name="Seed", default=0, min=0,
+        description="Reproduce the same displacement pattern by generated camera index; changing names or redrawing does not change the pattern")
     live_radius: FloatProperty(name="Distance from center", min=.01, max=1000000,
         subtype='DISTANCE', unit='LENGTH', options=set(), get=rig_edit.live_radius_get,
         set=rig_edit.live_radius_set, description="Move generated cameras radially now; drag to adjust, Escape cancels the gesture")
@@ -689,9 +697,13 @@ class LF_OT_rig(_RigOperation, bpy.types.Operator):
                     points.append(Vector(point))
                 yield
         else:
-            for direction in rig_geometry.directions(settings.views, settings.rig_mode,
-                    settings.rig_min, settings.rig_max, settings.rig_rings, settings.rig_phase):
-                points.append(center + Vector(direction)*radius)
+            for index, direction in enumerate(rig_geometry.directions(settings.views, settings.rig_mode,
+                    settings.rig_min, settings.rig_max, settings.rig_rings, settings.rig_phase)):
+                point = center + Vector(direction)*radius
+                if settings.rig_position_variation:
+                    point += Vector(rig_geometry.position_offset(index, settings.rig_variation_seed,
+                        radius*settings.rig_position_variation/100, settings.rig_phase))
+                points.append(point)
                 yield
         if any(not math.isfinite(value) for point in points for value in point):
             raise ValueError("Camera positions must be finite")
@@ -965,6 +977,8 @@ class LF_OT_read_rig(bpy.types.Operator):
             s.rig_path_spacing = values.get('rig_path_spacing', 1)
             s.rig_path_reverse = values.get('rig_path_reverse', False)
             s.rig_path_link = values.get('rig_path_link', False)
+            s.rig_position_variation = values.get('rig_position_variation', 0)
+            s.rig_variation_seed = values.get('rig_variation_seed', 0)
             s.rig_aim_mode = values.get("aim_mode", "OBJECT" if values.get("target") else "SOURCE")
             s.rig_aim_position = values.get("aim_position", (0, 0, 0))
             s.rig_aim_offset = values.get("aim_offset", (0, 0, 0))
@@ -2112,6 +2126,10 @@ def draw_capture_cameras(box, context, settings, ready, rig_changed, wrapped):
         box.prop(settings, 'rig_lens')
         if uses_aim:
             box.prop(settings, 'rig_aim_offset')
+        if settings.rig_mode in {'SPHERE','HEMISPHERE','RINGS'}:
+            box.prop(settings, 'rig_position_variation')
+            if settings.rig_position_variation:
+                box.prop(settings, 'rig_variation_seed', text='Seed')
         box = outer
     draw_rig_actions(box, settings, rig_changed, edit=True)
 
