@@ -133,6 +133,35 @@ Curve paths support poly, Bézier and NURBS splines; a closed path avoids repeat
 the first endpoint. Mesh placement uses evaluated geometry and transformed normals;
 the offset and viewing direction control which side is observed.
 
+For **Curve path**, choose **Camera count** for a fixed number of views, or
+**Maximum spacing** for evenly spaced views no farther apart along the evaluated
+curve than the chosen distance. Open paths include both ends; closed paths do not
+duplicate the seam. Distances include the curve object's world scale. Spacing
+that would produce fewer than 4 or more than 1,000 generated cameras is rejected
+before changing the rig, with the proposed count in the error. The applied camera
+count appears in **Cameras**. **Reverse direction** reverses camera order and
+path-following direction; the start of a closed path stays in place.
+
+**Create path guide…** opens a small dialog for an orbit/arc, helix or spherical
+spiral. **Center** initially uses the 3D cursor, independently of the rig's
+reference center; set the center and radius to suit your subject. An orbit of
+360 degrees is closed; a smaller angle makes an open arc. Helices use nonzero total rise
+and turns. Spherical spirals use turns and elevation limits, advancing through
+equal spherical-area bands; neither that shape nor camera spacing guarantees
+visual overlap or complete scene coverage.
+
+The guide is an ordinary, unanimated Blender Curve: select **LichtFeld Path Guide**
+in the Outliner and use Blender's Object/Edit Mode tools to move, rotate, scale
+or reshape it. Creating another guide keeps the previous guide and existing
+cameras. The selected path is excluded from capture; generated guides remain
+helpers, excluded from subject bounds and capture even after another guide is
+chosen, and are disabled for rendering. Select the intended subject again when using a first
+rig's selection-based reference. Choose **Apply rig changes** after editing the
+curve, its transform, sampling or direction. Path edits do not move cameras live;
+Apply remains available even with the rig controls collapsed. Camera aiming is
+independent: choose the target or **Follow path**. Curve tilt does not control
+camera roll. Projection onto arbitrary meshes is not part of these guide tools.
+
 Select an existing generated rig and use **Load selected rig** before
 editing when its controls have not been loaded. Choosing a collection leaves the controls unchanged; **Apply rig changes**
 and the viewport aim action remain unavailable until that rig has been loaded.

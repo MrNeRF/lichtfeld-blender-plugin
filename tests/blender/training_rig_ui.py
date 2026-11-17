@@ -404,6 +404,59 @@ def history_interleave():
     bpy.app.timers.register(tick,first_interval=.02)
 
 
-bpy.app.timers.register(history_interleave if '--history-interleave' in sys.argv else
+def path_guides():
+    """Guide Undo and spacing cancellation use Blender's actual event loop."""
+    proof = {'phase': 'guide'}
+    try:
+        bpy.context.scene.lichtfeld_training.rig_mode = 'PATH'
+        bpy.ops.ed.undo_push(message='Before path guide')
+        assert bpy.ops.lichtfeld.create_path_guide(shape='ORBIT', radius=4) == {'FINISHED'}
+        name = bpy.context.scene.lichtfeld_training.rig_curve.name
+        # A Python timer does not create the UI event's automatic undo boundary.
+        bpy.ops.ed.undo_push(message='Create path guide')
+        assert bpy.ops.ed.undo() == {'FINISHED'}
+        assert bpy.data.objects.get(name) is None
+        assert bpy.context.scene.lichtfeld_training.rig_curve is None
+        assert bpy.ops.ed.redo() == {'FINISHED'}
+        assert bpy.context.scene.lichtfeld_training.rig_curve.name == name
+        s = bpy.context.scene.lichtfeld_training
+        s.scope = 'SCENE'; s.rig_path_sampling = 'SPACING'; s.rig_path_spacing = .03
+        assert bpy.ops.lichtfeld.create_rig() == {'RUNNING_MODAL'}
+    except Exception:
+        output.write_text(traceback.format_exc(), encoding='utf-8')
+        bpy.ops.wm.quit_blender(); return None
+    deadline = time.monotonic() + 60
+
+    def tick():
+        try:
+            assert time.monotonic() < deadline
+            s = bpy.context.scene.lichtfeld_training
+            op = next((op for op in bpy.context.window.modal_operators if isinstance(op, extension.LF_OT_rig)), None)
+            if proof['phase'] == 'guide' and op:
+                # Cancel during preparation through the operator's normal path.
+                op.cancel_requested = True
+                proof['phase'] = 'cancel'
+            elif proof['phase'] == 'cancel' and not s.operation_busy:
+                assert s.camera_collection is None
+                assert s.rig_curve and not any(c.get('lichtfeld_generated') for c in bpy.data.collections)
+                s.rig_path_spacing = 1
+                assert bpy.ops.lichtfeld.create_rig() == {'RUNNING_MODAL'}
+                proof['phase'] = 'apply'
+            elif proof['phase'] == 'apply' and not s.operation_busy:
+                assert s.camera_collection and sum(o.type == 'CAMERA' for o in s.camera_collection.objects) == 26
+                assert bpy.ops.lichtfeld.create_path_guide.poll()
+                proof['ok'] = True
+                output.write_text(json.dumps(proof), encoding='utf-8')
+                print('PATH_GUIDE_NATIVE_UNDO_REDO_MODAL_CANCEL_APPLY_PASS', flush=True)
+                bpy.ops.wm.quit_blender(); return None
+            return .02
+        except Exception:
+            output.write_text(traceback.format_exc(), encoding='utf-8')
+            bpy.ops.wm.quit_blender(); return None
+    bpy.app.timers.register(tick, first_interval=.02)
+
+
+bpy.app.timers.register(path_guides if '--path-guides' in sys.argv else
+    history_interleave if '--history-interleave' in sys.argv else
     live_controls if '--live' in sys.argv else
     render_interleave if '--render-interleave' in sys.argv else start, first_interval=1)

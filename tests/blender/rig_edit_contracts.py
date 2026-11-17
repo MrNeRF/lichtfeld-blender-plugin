@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2026 LichtFeld Studio Authors
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Real Blender: managed identity, target tracking and transaction cancellation."""
-import bpy, sys, math, importlib, tempfile, time
+import bpy, sys, math, importlib, tempfile, time, json
 from types import SimpleNamespace
 from unittest.mock import patch
 from pathlib import Path
@@ -163,7 +163,20 @@ print('GENERATED_DISTANCE_MANUAL_AUTOFIT_CANCEL_AND_PATH_PASS',flush=True)
 # Loaded recipes restore controls; invalid metadata must not partially edit them.
 assert bpy.ops.lichtfeld.read_rig()=={"FINISHED"}
 recipe=collection["lichtfeld_rig_recipe"]
+s.rig_path_sampling='SPACING';s.rig_path_spacing=2;s.rig_path_reverse=True
+assert bpy.ops.lichtfeld.read_rig()=={'FINISHED'}
+assert s.rig_path_sampling=='COUNT' and s.rig_path_spacing==1 and not s.rig_path_reverse
+assert ext.rig_recipe(s)==recipe
 saved_views=s.views
+for field, invalid in (('rig_path_sampling','UNKNOWN'),('rig_path_spacing',0),
+                       ('rig_path_spacing',float('nan')),('rig_path_reverse',1)):
+    values=json.loads(recipe);values[field]=invalid;values['views']=24
+    collection['lichtfeld_rig_recipe']=json.dumps(values)
+    try:
+        assert bpy.ops.lichtfeld.read_rig()=={'CANCELLED'}
+    except RuntimeError:
+        pass
+    assert s.views==saved_views and s.rig_path_sampling=='COUNT' and not s.rig_path_reverse
 collection["lichtfeld_rig_recipe"]='{"views":24,"rig_mode":"INVALID"}'
 try:
     result=bpy.ops.lichtfeld.read_rig()
@@ -417,7 +430,6 @@ assert ext.rig_edit.decode_recipe(rig['lichtfeld_rig_recipe'])['rig_distance']==
 s.rig_distance = 2.8
 assert bpy.ops.lichtfeld.read_rig()=={'FINISHED'}
 assert s.rig_distance < 1.05
-import json
 invalid=json.loads(rig['lichtfeld_rig_recipe']);invalid['rig_distance']=1.0
 try:
     ext.rig_edit.decode_recipe(json.dumps(invalid))

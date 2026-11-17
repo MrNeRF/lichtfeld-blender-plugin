@@ -275,7 +275,7 @@ def decode_recipe(encoded):
         raise ValueError("Rig metadata must be an object")
     properties = bpy.types.Scene.bl_rna.properties['lichtfeld_training'].fixed_type.properties
     for name in ('views', 'rig_rings', 'rig_min', 'rig_max', 'rig_distance',
-                 'rig_lens', 'rig_radius', 'rig_mesh_offset', 'rig_phase'):
+                 'rig_lens', 'rig_radius', 'rig_mesh_offset', 'rig_phase', 'rig_path_spacing'):
         if name not in values:continue
         value=values[name]
         if type(value) not in (int,float) or not math.isfinite(value):raise ValueError("Invalid rig number: "+name)
@@ -287,6 +287,7 @@ def decode_recipe(encoded):
             raise ValueError("Rig parameter outside its range: "+name)
     for name, valid in (("rig_mode",{"SPHERE","HEMISPHERE","RINGS","PATH","MESH"}),
                         ("rig_orientation",{"TARGET","TANGENT"}),
+                        ('rig_path_sampling', {'COUNT', 'SPACING'}),
                         ("rig_mesh_distribution",{"SURFACE","FACES"}),
                         ("rig_mesh_orientation",{"INWARD","OUTWARD","TARGET"}),
                         ("aim_mode",{"SOURCE","OBJECT","CURSOR","POSITION","VIEWPORT"})):
@@ -298,6 +299,8 @@ def decode_recipe(encoded):
     for name in ("target","curve","mesh"):
         if name in values and (not isinstance(values[name],str) or "\0" in values[name]):raise ValueError("Invalid rig object name")
     if "rig_auto_fit" in values and type(values["rig_auto_fit"]) is not bool:raise ValueError("Invalid framing mode")
+    if 'rig_path_reverse' in values and type(values['rig_path_reverse']) is not bool:
+        raise ValueError('Invalid path direction')
     return values
 
 # Native controller properties are the live state: Blender owns gestures, Undo,
