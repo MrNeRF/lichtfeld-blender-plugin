@@ -6,11 +6,23 @@ import math
 import unittest
 import numpy as np
 sys.path.insert(0,str(Path(__file__).resolve().parents[2]/'lichtfeld_training'))
-from rig_geometry import directions, sample_path, guide_path, seeded_offset, station_directions
+from rig_geometry import directions, sample_path, guide_path, seeded_offset, station_directions, repeated_poses
 from geometry_maps import convert
 
 
 class GeometryTests(unittest.TestCase):
+    def test_repeated_poses_keep_orientation_roll_and_first_representative(self):
+        def run(frames):
+            work=repeated_poses(frames)
+            while True:
+                try:next(work)
+                except StopIteration as done:return done.value
+        base=((1,0,0,0),(0,1,0,0),(0,0,1,0),(0,0,0,1))
+        rolled=((-1,0,0,0),(0,-1,0,0),(0,0,1,0),(0,0,0,1))
+        shifted=((1,0,0,.00001),(0,1,0,0),(0,0,1,0),(0,0,0,1))
+        self.assertEqual(run([base,rolled,base,shifted,base,rolled]),[(0,2),(0,4),(1,5)])
+        self.assertEqual(run([]),[])
+
     def test_ordered_station_rows_have_matching_azimuths(self):
         for rows in (1,2,3,7):
             for sweep in (math.pi,2*math.pi):

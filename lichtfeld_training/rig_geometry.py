@@ -158,3 +158,14 @@ def sample_path(points, count, cyclic=False, *, spacing=None):
         fraction = (position-distance[segment])/length if length else 0
         a, b = points[segment:segment+2]
         yield tuple(x + fraction*(y-x) for x, y in zip(a, b))
+
+
+def repeated_poses(frames):
+    """Find exact evaluated pose repetitions, yielding between cameras."""
+    seen={};matches=[]
+    for index,frame in enumerate(frames):
+        key=tuple(value for row in frame[:3] for value in row)
+        if key in seen:matches.append((seen[key],index))
+        else:seen[key]=index
+        yield
+    return matches

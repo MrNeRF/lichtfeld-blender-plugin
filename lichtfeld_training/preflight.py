@@ -101,11 +101,34 @@ def environment(prefs,force=False,capture_only=False):
   ui_runtime.submit(lambda:jobs.check_environment(*key,backend_version=version,backend_identity=identity),done,fail)
  return current if current.get('generation') == _save_generation else {**current,'backend':known_backend or bool(current.get('backend')),'ok':False,'message':'Checking installation and job folder…','checking':True}
 
+def camera_checks(context, *, single_render=False, poses=False):
+ """Canonical camera enumeration and evaluated-pose validation, on the UI thread."""
+ s=context.scene.lichtfeld_training
+ cameras=[];issues={};frames=[]
+ graph=context.evaluated_depsgraph_get()
+ if s.camera_collection:
+  for obj in object_steps(s.camera_collection.all_objects):
+   if obj.type=='CAMERA':cameras.append(obj)
+   yield
+ cameras.sort(key=lambda obj:obj.name)
+ count=len(cameras);generated=sum(bool(obj.get('lichtfeld_generated')) for obj in cameras)
+ if single_render:
+  index=min(s.capture_preview_index,count)-1
+  cameras=cameras[index:index+1] if cameras else []
+ for index,camera in enumerate(cameras):
+  try:
+   matrix=capture_settings.camera_pose(camera,graph)
+   if poses:frames.append((camera.name,tuple(tuple(row) for row in matrix)))
+  except ValueError as error:issues[str(error)]=camera.name
+  yield (index+1,len(cameras)) if poses else None
+ return {'cameras':[obj.name for obj in cameras],'camera_count':count,
+         'generated_cameras':generated,'camera_issues':issues,'poses':frames}
+
+
 def collect(context,capture_only=False,*,single_render=False):
  initial=signature(context)
  s=context.scene.lichtfeld_training
- sources=[];cameras=[];errors=[];visibility={};visibility_sources=[];generated_cameras=0;camera_issues={}
- graph=context.evaluated_depsgraph_get()
+ sources=[];errors=[];visibility={};visibility_sources=[]
  helpers=capture_helpers(s)
  capture_format=None;render=None
  members={}
@@ -122,22 +145,10 @@ def collect(context,capture_only=False,*,single_render=False):
    sources.append(obj.name);visibility[obj.name]=is_hidden(obj,context.view_layer,members=members)
   yield
  if not sources:errors.append('Choose at least one surface object.')
- if s.camera_collection:
-  for obj in object_steps(s.camera_collection.all_objects):
-   if obj.type=='CAMERA':
-    cameras.append(obj.name)
-    generated_cameras+=bool(obj.get('lichtfeld_generated'))
-   yield
- cameras.sort()
- camera_count=len(cameras)
- if single_render:
-  index=min(s.capture_preview_index,len(cameras))-1
-  cameras=cameras[index:index+1] if cameras else []
- for name in cameras:
-  try:capture_settings.camera_pose(bpy.data.objects[name],graph)
-  except ValueError as error:
-   message=str(error);errors.append(message);camera_issues[message]=name
-  yield
+ checks=yield from camera_checks(context,single_render=single_render)
+ cameras=checks['cameras'];camera_count=checks['camera_count']
+ generated_cameras=checks['generated_cameras'];camera_issues=checks['camera_issues']
+ errors.extend(camera_issues)
  reference_changed=False
  if s.camera_collection and s.camera_collection.get('lichtfeld_generated'):
   from . import rig_edit
@@ -194,6 +205,8 @@ def issues(result,require_saved=True):
  return errors
 
 def tick(context,prefs):
+ from . import rig_analysis
+ if rig_analysis.is_running():return
  global _work,_next
  if not context.scene:return
  if capture_preview.is_preview(context.scene):return
