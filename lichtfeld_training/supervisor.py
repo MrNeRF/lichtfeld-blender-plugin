@@ -15,6 +15,7 @@ from jobs import release_source, captured_dataset, check_environment
 from job_control import stop_requested, claim_training_start
 from bridge_core import atomic_json, read_json, read_job_json, training_config, training_command, verify_artifact, digest, verified_training_outcome
 from render_devices import arguments as render_arguments
+from capture_settings import TEST_IMAGE
 
 
 _GEOMETRY_TEMP = re.compile(r"^lf_[0-9a-f]{32}_(?:Depth|Normal)_\d{6}_.+\.exr$")
@@ -112,6 +113,7 @@ def supervise(job_path):
     os.write(descriptor, str(os.getpid()).encode("ascii"))
     os.close(descriptor)
     child = None
+    single_render = job.get('purpose') == 'test_render'
 
     def state(phase, **values):
         atomic_json(root / "state.json", {"job_id": job["id"], "control_protocol": 1, "state": phase,
@@ -145,7 +147,7 @@ def supervise(job_path):
             with (root / "render.log").open("wb") as log:
                 for recovering in (False, True):
                     if stop_requested(root, job['id']):
-                        state('stopped', message='Dataset capture stopped')
+                        state('stopped', message='Test render stopped' if single_render else 'Dataset capture stopped')
                         return
                     state('finalizing capture' if recovering else 'rendering',
                           message='Recovering completed images; no views will be rendered again' if recovering else '')
@@ -165,17 +167,19 @@ def supervise(job_path):
                                 state("finalizing capture", message="Images rendered; preparing initialization points and camera metadata")
                                 finalizing = True
                             if stop_requested(root, job["id"]):
-                                raise InterruptedError('Dataset capture stopped')
+                                raise InterruptedError('Test render stopped' if single_render else 'Dataset capture stopped')
                             time.sleep(0.2)
                         if not child.returncode:
                             break
                         progress = read_json(root / "capture-progress.json", {})
                         complete = bool(job.get('cameras')) and progress.get('done') == len(job['cameras'])
-                        if not recovering and complete and (root / 'capture.blend').is_file():
+                        if not single_render and not recovering and complete and (root / 'capture.blend').is_file():
                             continue  # The worker owns journal/image validation, not the supervisor.
                         render_error = read_json(root / 'capture-render.json', {}).get('error')
                         if render_error:
                             raise RuntimeError(render_error)
+                        if single_render:
+                            raise RuntimeError('Test rendering failed. See render.log.')
                         if complete:
                             raise RuntimeError("All images were rendered, but dataset finalization failed. Images are preserved; see render.log.")
                         raise RuntimeError("Dataset rendering failed. Completed images are preserved; see render.log.")
@@ -192,6 +196,11 @@ def supervise(job_path):
                                 # Never delete files while a renderer may still own them.
                                 pass
             release_source(job)
+            if single_render:
+                if stop_requested(root, job['id']):
+                    raise InterruptedError('Test render stopped')
+                state('completed', image=TEST_IMAGE, message='Test image ready. No dataset or training created.')
+                return
             captured_dataset(root, {name: job[name] for name in
                                    ('use_depth_loss', 'depth_loss_weight', 'use_normal_loss') if name in job})
         if stop_requested(root, job["id"]):

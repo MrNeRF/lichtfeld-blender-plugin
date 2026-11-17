@@ -101,7 +101,7 @@ def environment(prefs,force=False,capture_only=False):
   ui_runtime.submit(lambda:jobs.check_environment(*key,backend_version=version,backend_identity=identity),done,fail)
  return current if current.get('generation') == _save_generation else {**current,'backend':known_backend or bool(current.get('backend')),'ok':False,'message':'Checking installation and job folder…','checking':True}
 
-def collect(context,capture_only=False):
+def collect(context,capture_only=False,*,single_render=False):
  initial=signature(context)
  s=context.scene.lichtfeld_training
  sources=[];cameras=[];errors=[];visibility={};visibility_sources=[];generated_cameras=0;camera_issues={}
@@ -127,16 +127,22 @@ def collect(context,capture_only=False):
    if obj.type=='CAMERA':
     cameras.append(obj.name)
     generated_cameras+=bool(obj.get('lichtfeld_generated'))
-    try:capture_settings.camera_pose(obj,graph)
-    except ValueError as error:
-     message=str(error);errors.append(message);camera_issues[message]=obj.name
    yield
  cameras.sort()
+ camera_count=len(cameras)
+ if single_render:
+  index=min(s.capture_preview_index,len(cameras))-1
+  cameras=cameras[index:index+1] if cameras else []
+ for name in cameras:
+  try:capture_settings.camera_pose(bpy.data.objects[name],graph)
+  except ValueError as error:
+   message=str(error);errors.append(message);camera_issues[message]=name
+  yield
  reference_changed=False
  if s.camera_collection and s.camera_collection.get('lichtfeld_generated'):
   from . import rig_edit
   reference_changed=yield from rig_edit.reference_changed(s.rig_reference,s.camera_collection.lichtfeld_rig_reference)
- try:capture_settings.validate_view_count(len(cameras))
+ try:capture_settings.validate_view_count(len(cameras),single_render=single_render)
  except ValueError as error:errors.append(str(error))
  if s.scope=='SCENE':
   for obj in object_steps(context.scene.objects):
@@ -156,7 +162,7 @@ def collect(context,capture_only=False):
  if s.refine_start>=s.refine_end:errors.append('Refinement start must be before its end.')
  if s.growth_end>s.refine_end:errors.append('Growth must end before refinement ends.')
  if s.use_normal_loss and s.normal_start_fraction>=s.normal_end_fraction:errors.append('Normal supervision start must be before its end.')
- return {'sources':sources,'cameras':cameras,'generated_cameras':generated_cameras,'camera_issues':camera_issues,'visibility':visibility,'visibility_sources':visibility_sources or sources,'capture_errors':capture_errors,'errors':capture_errors if capture_only else list(dict.fromkeys(errors)),
+ return {'sources':sources,'cameras':cameras,'camera_count':camera_count,'generated_cameras':generated_cameras,'camera_issues':camera_issues,'visibility':visibility,'visibility_sources':visibility_sources or sources,'capture_errors':capture_errors,'errors':capture_errors if capture_only else list(dict.fromkeys(errors)),
          'signature':initial,'frame':context.scene.frame_current,'reference_changed':reference_changed,'format':capture_format,'render':render}
 
 def synchronous(context,prefs):

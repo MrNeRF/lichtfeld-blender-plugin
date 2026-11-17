@@ -362,13 +362,13 @@ def tick_steps():
 
 
 class LF_PortalRow(bpy.types.PropertyGroup):
-    identifier: StringProperty(options={"SKIP_SAVE"})
-    title: StringProperty(options={"SKIP_SAVE"})
-    description: StringProperty(options={"SKIP_SAVE"})
+    identifier: StringProperty(description="Portal project identifier used to select the asset for import", options={"SKIP_SAVE"})
+    title: StringProperty(description="Project title shown in the Portal gallery", options={"SKIP_SAVE"})
+    description: StringProperty(description="Project details supplied by the Portal", options={"SKIP_SAVE"})
 
 
 class LF_PortalState(bpy.types.PropertyGroup):
-    rows: CollectionProperty(type=LF_PortalRow, options={"SKIP_SAVE"})
+    rows: CollectionProperty(type=LF_PortalRow, description="Projects available in your Portal gallery", options={"SKIP_SAVE"})
     search: StringProperty(name="Search projects", description="Filter your Portal projects by title", update=search_changed, options={"SKIP_SAVE"})
     page: IntProperty(name="Gallery page", description="Browse another page of your Portal projects", min=1, default=1, update=page_changed, options={"SKIP_SAVE"})
 
@@ -493,7 +493,7 @@ class LF_OT_portal_action(bpy.types.Operator):
     bl_idname = "lichtfeld.portal_action"
     bl_label = "Portal Gallery action"
     bl_description = "Connect, browse or import from your LichtFeld Portal gallery without changing the training job"
-    action: StringProperty(options={"SKIP_SAVE"})
+    action: StringProperty(description="Portal operation requested by this control", options={"SKIP_SAVE"})
     identifier: StringProperty(name="Portal project", description="The project chosen for import", options={"SKIP_SAVE"})
 
     @classmethod

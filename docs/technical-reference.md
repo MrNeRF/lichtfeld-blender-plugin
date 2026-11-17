@@ -82,6 +82,20 @@ capture, initialization and saved-dataset validation. The supported range is
 4–10,000 views. Readiness, job creation and framing use name order, including
 cameras in nested collections.
 
+Single-view RGB tests use the same recipe builder, immutable source snapshot,
+supervisor and render worker with `purpose: test_render`. The shared view-count
+owner requires exactly one selected camera for this purpose without changing the
+dataset minimum. The worker exits after PNG output, before geometry passes,
+masks, seeds and dataset publication. The test writes `test-render.png` in its
+own root and is never registered as the scene's training job or reusable dataset.
+Its transient UI action uses the existing cooperative queue and worker executor;
+closing that action on history/load signals cancellation through the existing
+job controller. The framing action explicitly saves the source after removing
+owned framing scenes, preserves its view layer and reopens framing through the
+existing owner. Reopening is display-only: failure does not cancel the render.
+Test images use ordinary sRGB image display, not the source
+scene's render display transform.
+
 `capture_settings.camera_pose` owns evaluated camera-transform validation for
 readiness, job creation, framing copies and render calibration. It normalizes
 orthogonal axes using Blender's scale-free camera-frame convention, preserving

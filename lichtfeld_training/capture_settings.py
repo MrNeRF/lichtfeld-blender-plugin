@@ -5,6 +5,7 @@ import math
 
 MIN_VIEWS = 4
 MAX_VIEWS = 10000
+TEST_IMAGE = 'test-render.png'
 
 
 ASPECTS = {'SQUARE': (1, 1), 'FOUR_THREE': (4, 3), 'THREE_TWO': (3, 2),
@@ -16,9 +17,10 @@ CAMERA_FIELDS = ('override_optics', 'capture_lens', 'capture_sensor_width', 'cap
                  'override_clipping', 'capture_clip_start', 'capture_clip_end')
 
 
-def validate_view_count(count):
-    if type(count) is not int or not MIN_VIEWS <= count <= MAX_VIEWS:
-        raise ValueError(f'Capture needs {MIN_VIEWS}–{MAX_VIEWS:,} views')
+def validate_view_count(count, *, single_render=False):
+    minimum, maximum = (1, 1) if single_render else (MIN_VIEWS, MAX_VIEWS)
+    if type(count) is not int or not minimum <= count <= maximum:
+        raise ValueError('Choose one capture camera' if single_render else f'Capture needs {MIN_VIEWS}–{MAX_VIEWS:,} views')
 
 
 def validate_format(value):

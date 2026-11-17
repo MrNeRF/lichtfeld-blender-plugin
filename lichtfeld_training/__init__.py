@@ -253,6 +253,10 @@ class LichtFeldSettings(bpy.types.PropertyGroup):
     dataset_summary: StringProperty(default="Choose a saved job or reuse the current job", options={"SKIP_SAVE"})
     previous_job: StringProperty(subtype="DIR_PATH")
     operation_busy: BoolProperty(default=False, options={"SKIP_SAVE"})
+    test_render_active: BoolProperty(description='A single-view RGB test is running', options={'SKIP_SAVE'})
+    test_render_cancel: BoolProperty(description='Cancel the current single-view RGB test', options={'SKIP_SAVE'})
+    test_render_image: StringProperty(description='Last successful single-view RGB image in this session', options={'SKIP_SAVE'})
+    test_render_error: StringProperty(description='Last single-view RGB test failure', options={'SKIP_SAVE'})
     importing: BoolProperty(default=False, options={"SKIP_SAVE"})
     ui_max_ms: FloatProperty(default=0, options={"SKIP_SAVE"})
     result_object: PointerProperty(type=bpy.types.Object)
@@ -775,7 +779,9 @@ def launch_supervisor(job):
     root = Path(job["root"])
     root.mkdir(mode=0o700, parents=True, exist_ok=True)
     try:
-        if job.get('capture_only'):
+        if job.get('purpose') == 'test_render':
+            pass
+        elif job.get('capture_only'):
             jobs.check_export_destination(job)
         else:
             environment = jobs.check_environment(job.get("backend", ""), str(root.parent))
@@ -789,10 +795,10 @@ def launch_supervisor(job):
         if not job.get("capture_only"):
             jobs.prepare_optimizer(job)
         atomic_json(root / "job.json", job)
-        if job.get("connection_directory"):
+        if job.get("connection_directory") and job.get('purpose') != 'test_render':
             jobs.remember_job(job["connection_directory"], job)
         with (root / "supervisor-console.log").open("wb") as log:
-            subprocess.Popen([python_binary(), str(_ROOT / "supervisor.py"), str(root / "job.json")],
+            return subprocess.Popen([python_binary(), str(_ROOT / "supervisor.py"), str(root / "job.json")],
                              stdout=log, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
                              **process_options(detach=True))
     except Exception as error:
@@ -802,6 +808,43 @@ def launch_supervisor(job):
         except OSError:
             pass
         raise
+
+
+def start_capture_test(job):
+    """Worker-only launch; the UI polls the detached supervisor without waiting."""
+    from .job_control import Controller
+    root = Path(job['root'])
+    environment = jobs.check_environment('', str(root.parent), job['source_file'], require_backend=False)
+    if not environment.get('ok'):
+        raise ValueError(environment.get('message', 'Could not prepare the test render'))
+    job['source_identity'] = environment['source_identity']
+    root.mkdir(mode=0o700, parents=True, exist_ok=True)
+    controller = Controller(root)
+    try:
+        if not controller.acquire():
+            raise RuntimeError('Could not control the test render')
+        return launch_supervisor(job), controller
+    except BaseException:
+        controller.close()
+        raise
+
+
+def finish_capture_test(launch):
+    """Read a finished test, or stop/reap one whose UI action was canceled."""
+    child, controller = launch.result()
+    try:
+        next_stop = 0
+        job_id = None
+        while child.poll() is None:
+            if time.monotonic() >= next_stop:
+                if job_id is None:
+                    job_id = jobs.read_job(controller.root / 'job.json')['id']
+                atomic_json(controller.root / 'command.json', controller.command(job_id, 'stop'))
+                next_stop = time.monotonic() + 5
+            time.sleep(.2)
+        return read_json(controller.root / 'state.json', {})
+    finally:
+        controller.close()
 
 
 def allowed(context, action):
@@ -970,6 +1013,46 @@ class LF_OT_notice(bpy.types.Operator):
         return {"FINISHED"}
 
 
+def capture_job(context, capture):
+    """Freeze one capture recipe for dataset runs and single-view RGB tests."""
+    settings = context.scene.lichtfeld_training
+    prefs = preferences(context)
+    backend = Path(bpy.path.abspath(prefs.backend_path))
+    sources = capture["sources"]
+    cameras = capture["cameras"]
+    render_settings = scene_render.snapshot(context.scene)
+    directory = (Path(bpy.path.abspath(prefs.jobs_directory)) if prefs.jobs_directory else
+                 Path(bpy.utils.user_resource("DATAFILES", path="lichtfeld/jobs", create=False)))
+    job_id = uuid.uuid4().hex
+    root = directory / job_id
+    job = {"schema": SCHEMA, "id": job_id, "root": str(root),
+           "backend": str(backend), "blender": bpy.app.binary_path, "dataset_root":str(root/"dataset"),
+           "blender_version": bpy.app.version_string,
+           "blender_hash": bpy.app.build_hash.decode(), "source_file": bpy.data.filepath,
+           "frame": context.scene.frame_current, "scope": settings.scope, "view_layer": context.view_layer.name,
+           "scene": context.scene.name, "connection_directory": preflight.connection_folder(prefs),
+           "sources": sources, "cameras": cameras,
+           "source_visibility": capture["visibility"], "visibility_sources":capture.get("visibility_sources", sources),
+           "test_every": 8 if len(cameras) >= 16 else 4, "seed_points": min(settings.seed_points, settings.max_points),
+           "seed_method": 'VISIBLE' if settings.use_depth_loss and settings.depth_loss_weight > 0 else settings.seed_method,
+           "capture_helpers": [obj.name for obj in preflight.capture_helpers(settings)],
+           "capture_format": capture_settings.format_for(context.scene, settings),
+           "render_settings": render_settings,
+           "capture_camera": capture_settings.camera_for(settings),
+           **{name: getattr(settings, name) for name in (
+               "iterations", "eval_interval", "max_points", "sh_degree", "preview_seconds",
+               "preview_points", "preview_sh_degree", "full_preview", "preview_mode", "resolution", "samples", "engine", "cycles_device",
+               "strategy", "mask_mode", "use_depth_loss", "use_normal_loss", "depth_loss_weight",
+               "normal_loss_weight", "normal_start_fraction", "normal_end_fraction", "reuse_render_data")},
+           "optimizer_file": bpy.path.abspath(settings.optimizer_file) if settings.optimizer_file else "",
+           "optimizer": training_options.optimizer_values(settings),
+           "optimizer_schedule": {name:getattr(settings,name) for name in ("refine_start","refine_end","growth_end")}}
+    job.update(engine=render_settings['engine'], samples=render_settings['samples'],
+               cycles_device=render_settings['device'],
+               resolution=max(job['capture_format']['width'], job['capture_format']['height']))
+    return job
+
+
 class LF_OT_start(bpy.types.Operator):
     bl_idname = "lichtfeld.start_training"
     bl_label = "Start training"
@@ -1011,7 +1094,6 @@ class LF_OT_start(bpy.types.Operator):
         try:
             settings = context.scene.lichtfeld_training
             prefs = preferences(context)
-            backend = Path(bpy.path.abspath(prefs.backend_path))
             if not bpy.data.filepath or bpy.data.is_dirty:
                 raise ValueError("Save the .blend first. Background capture uses that exact saved revision.")
             if capture["errors"]:
@@ -1025,38 +1107,9 @@ class LF_OT_start(bpy.types.Operator):
                 raise ValueError(" ".join(errors))
             if not export_directory and settings.use_normal_loss and not settings.normal_start_fraction < settings.normal_end_fraction:
                 raise ValueError("Normal supervision start must be before its end")
-            sources = capture["sources"]
-            cameras = capture["cameras"]
-            render_settings = scene_render.snapshot(context.scene)
-            directory = (Path(bpy.path.abspath(prefs.jobs_directory)) if prefs.jobs_directory else
-                         Path(bpy.utils.user_resource("DATAFILES", path="lichtfeld/jobs", create=False)))
-            job_id = uuid.uuid4().hex
-            root = directory / job_id
-            job = {"schema": SCHEMA, "id": job_id, "root": str(root),
-                   "backend": str(backend), "blender": bpy.app.binary_path, "dataset_root":str(root/"dataset"),
-                   "blender_version": bpy.app.version_string,
-                   "blender_hash": bpy.app.build_hash.decode(), "source_file": bpy.data.filepath,
-                   "frame": context.scene.frame_current, "scope": settings.scope, "view_layer": context.view_layer.name,
-                   "scene": context.scene.name, "connection_directory": preflight.connection_folder(prefs),
-                   "sources": sources, "cameras": cameras,
-                   "source_visibility": capture["visibility"], "visibility_sources":capture.get("visibility_sources", sources),
-                   "test_every": 8 if len(cameras) >= 16 else 4, "seed_points": min(settings.seed_points, settings.max_points),
-                   "seed_method": 'VISIBLE' if settings.use_depth_loss and settings.depth_loss_weight > 0 else settings.seed_method,
-                   "capture_helpers": [obj.name for obj in preflight.capture_helpers(settings)],
-                   "capture_format": capture_settings.format_for(context.scene, settings),
-                   "render_settings": render_settings,
-                   "capture_camera": capture_settings.camera_for(settings),
-                   **{name: getattr(settings, name) for name in (
-                       "iterations", "eval_interval", "max_points", "sh_degree", "preview_seconds",
-                       "preview_points", "preview_sh_degree", "full_preview", "preview_mode", "resolution", "samples", "engine", "cycles_device",
-                       "strategy", "mask_mode", "use_depth_loss", "use_normal_loss", "depth_loss_weight",
-                       "normal_loss_weight", "normal_start_fraction", "normal_end_fraction", "reuse_render_data")},
-                   "optimizer_file": bpy.path.abspath(settings.optimizer_file) if settings.optimizer_file else "",
-                   "optimizer": training_options.optimizer_values(settings),
-                   "optimizer_schedule": {name:getattr(settings,name) for name in ("refine_start","refine_end","growth_end")}}
-            job.update(engine=render_settings['engine'], samples=render_settings['samples'],
-                       cycles_device=render_settings['device'],
-                       resolution=max(job['capture_format']['width'], job['capture_format']['height']))
+            job = capture_job(context, capture)
+            root = Path(job["root"])
+            job_id = job["id"]
             if export_directory:
                 job.update(capture_only=True, export_parent=export_directory)
             if not bpy.app.background:
@@ -2117,6 +2170,11 @@ def draw_training(self, context):
         return
     if settings.detail:
         wrapped(layout, settings.detail)
+    if settings.test_render_active:
+        layout.label(text='Rendering test image…')
+        layout.operator('lichtfeld.cancel_capture_test')
+    elif settings.test_render_error:
+        wrapped(layout, settings.test_render_error)
     if settings.mode != 'NEW':
         row = layout.row()
         row.enabled = not settings.operation_busy
@@ -2230,6 +2288,8 @@ def history_changed(_):
     for scene in bpy.data.scenes:
         scene.lichtfeld_training.operation_busy = False
         scene.lichtfeld_training.importing = False
+        scene.lichtfeld_training.test_render_active = False
+        scene.lichtfeld_training.test_render_cancel = False
         source = capture_preview.source_scene(scene)
         if source:
             capture_preview.camera_changed(source.lichtfeld_training, None)
@@ -2269,6 +2329,8 @@ def loaded(_):
     directory = preflight.connection_folder(preferences()) if source else None
     for scene in bpy.data.scenes:
         settings = scene.lichtfeld_training
+        settings.test_render_active = False
+        settings.test_render_cancel = False
         capture_preview.camera_changed(settings, None)
         if not source or settings.job_directory or settings.attached_session:
             continue
