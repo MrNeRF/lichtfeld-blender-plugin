@@ -5,6 +5,45 @@ import bisect
 import math
 
 
+def guide_path(shape, radius, start, sweep, turns, minimum, maximum, height):
+    """Regular editable paths; spherical bands advance uniformly in sin(elevation)."""
+    if shape not in {'ORBIT', 'HELIX', 'SPIRAL'}:
+        raise ValueError('Unknown path guide shape')
+    if not all(math.isfinite(v) for v in (radius, start, sweep, turns, minimum, maximum, height)) or radius <= 0:
+        raise ValueError('Guide dimensions must be finite and radius positive')
+    # Blender stores RNA angles as float32, including the 360/90 degree bounds.
+    if math.isclose(sweep, 2 * math.pi, rel_tol=0, abs_tol=1e-6):
+        sweep = 2 * math.pi
+    if not 0 < sweep <= 2 * math.pi or turns <= 0:
+        raise ValueError('Use a positive sweep and number of turns')
+    if math.isclose(minimum, -math.pi/2, rel_tol=0, abs_tol=1e-6):
+        minimum = -math.pi/2
+    if math.isclose(maximum, math.pi/2, rel_tol=0, abs_tol=1e-6):
+        maximum = math.pi/2
+    if shape == 'SPIRAL' and not -math.pi / 2 <= minimum < maximum <= math.pi / 2:
+        raise ValueError('Minimum elevation must be below maximum elevation')
+    if shape == 'HELIX' and abs(height) < 1e-8:
+        raise ValueError('A helix needs a nonzero rise; use Orbit / arc for a flat path')
+    closed = shape == 'ORBIT' and math.isclose(sweep, 2 * math.pi, abs_tol=1e-6)
+    angle_range = sweep if shape == 'ORBIT' else 2 * math.pi * turns
+    segments = max(4, math.ceil(angle_range / math.radians(5)))
+    if shape == 'SPIRAL':
+        # Bound the elevation step even close to the poles, where linear z
+        # produces a much larger angular step than at the equator.
+        segments = max(segments, math.ceil((math.sin(maximum)-math.sin(minimum)) /
+                                         (1-math.cos(math.radians(5)))))
+    points = []
+    for index in range(segments + (not closed)):
+        t = index / segments
+        angle = start + angle_range * t
+        z = (math.sin(minimum) + (math.sin(maximum) - math.sin(minimum)) * t
+             if shape == 'SPIRAL' else 0)
+        r = radius * math.sqrt(max(0, 1 - z*z)) if shape == 'SPIRAL' else radius
+        points.append((r * math.cos(angle), r * math.sin(angle),
+                       radius*z if shape == 'SPIRAL' else height*t if shape == 'HELIX' else 0))
+    return points, closed
+
+
 def directions(count, mode, minimum=0.0, maximum=90.0, rings=3, phase=0.0):
     if count < 4:
         raise ValueError("Use at least four cameras")
@@ -38,8 +77,8 @@ def directions(count, mode, minimum=0.0, maximum=90.0, rings=3, phase=0.0):
         raise ValueError("Unknown camera distribution")
 
 
-def sample_path(points, count, cyclic=False):
-    if count < 2:
+def sample_path(points, count, cyclic=False, *, spacing=None):
+    if spacing is None and count < 2:
         raise ValueError("The path needs at least two samples")
     if any(not math.isfinite(value) for point in points for value in point):
         raise ValueError("Path coordinates must be finite")
@@ -53,6 +92,15 @@ def sample_path(points, count, cyclic=False):
         distance.append(distance[-1] + math.dist(a, b))
     if distance[-1] < 1e-8:
         raise ValueError("The path has zero length")
+    if spacing is not None:
+        if not math.isfinite(spacing) or spacing <= 0:
+            raise ValueError("Camera spacing must be positive and finite")
+        intervals = distance[-1] / spacing
+        if not math.isfinite(intervals):
+            raise ValueError('Spacing would exceed 1,000 cameras; increase the spacing')
+        count = math.ceil(intervals) + (not cyclic)
+        if not 4 <= count <= 1000:
+            raise ValueError(f"Spacing would create {count:,} cameras; adjust it to create 4–1,000 cameras")
     for index in range(count):
         position = distance[-1] * index / (count if cyclic else count - 1)
         segment = min(len(points)-2, max(0, bisect.bisect_right(distance, position)-1))

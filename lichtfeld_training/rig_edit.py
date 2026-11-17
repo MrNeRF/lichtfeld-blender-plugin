@@ -10,6 +10,7 @@ from .visibility import object_steps
 
 AIM = "LichtFeld Aim"
 FOLLOW = "LichtFeld Follow"
+PATH_LINK = "LichtFeld Path Transform"
 
 
 def copy_reference(source, destination):
@@ -135,13 +136,56 @@ def track(camera, target):
         camera.constraints.remove(constraint)
 
 
+def path_link_state(camera):
+    constraint = camera.constraints.get(PATH_LINK)
+    return (constraint.target, constraint.inverse_matrix.copy(), list(camera.constraints).index(constraint)) if constraint else None
+
+
+def link_path(camera, curve, inverse=None, index=0):
+    """Native transform relationship, evaluated before independent target aiming."""
+    constraint = camera.constraints.get(PATH_LINK)
+    if constraint and constraint.type != 'CHILD_OF':
+        raise ValueError('Keep LichtFeld Path Transform reserved for the guide link')
+    if inverse is None:
+        if constraint:
+            camera.constraints.remove(constraint)
+        return
+    constraint = constraint or camera.constraints.new('CHILD_OF')
+    constraint.name = PATH_LINK
+    constraint.target = curve
+    constraint.inverse_matrix = inverse
+    constraint.set_inverse_pending = False
+    camera.constraints.move(list(camera.constraints).index(constraint), index)
+
+
+def validate_path_link(curve, collection, graph):
+    if curve is None:
+        raise ValueError('Choose a path curve before linking cameras')
+    try:
+        inverse = curve.evaluated_get(graph).matrix_world.inverted()
+    except ValueError:
+        raise ValueError('The path transform is singular. Use a nonzero guide scale before linking cameras') from None
+    if not all(math.isfinite(v) for row in inverse for v in row):
+        raise ValueError('The path transform must be finite')
+    parent = curve.parent
+    while parent:
+        if collection and collection.objects.get(parent.name) == parent and parent.get('lichtfeld_generated'):
+            raise ValueError('The path cannot be parented to one of its generated cameras')
+        parent = parent.parent
+    return inverse
+
+
 def rollback(owner):
-    for obj, data, matrix, constraint_target, had_constraint in reversed(getattr(owner, "rig_backup", [])):
+    for obj, data, matrix, constraint_target, constraint_index in reversed(getattr(owner, "rig_backup", [])):
         try:
             if obj.name in bpy.data.objects:
                 obj.data = data
-                obj.matrix_world = matrix
-                track(obj, constraint_target if had_constraint else None)
+                obj.matrix_world = matrix[0]
+                obj.matrix_basis = matrix[1]
+                track(obj, constraint_target if constraint_index >= 0 else None)
+                constraint = obj.constraints.get(AIM)
+                if constraint:
+                    obj.constraints.move(list(obj.constraints).index(constraint), constraint_index)
         except ReferenceError:
             pass  # A native deletion by the user must not strand other backups.
         yield
@@ -170,8 +214,9 @@ def managed_members(collection):
             raise ValueError(f'Duplicated generated cameras: {indices[index]} and {obj.name}. Remove the duplicate from the rig collection before updating')
         indices[index] = obj.name
         constraint = obj.constraints.get(AIM)
-        if obj.library or (constraint and constraint.type != "TRACK_TO"):
-            raise ValueError("Make generated cameras local and keep LichtFeld Aim reserved")
+        path = obj.constraints.get(PATH_LINK)
+        if obj.library or (constraint and constraint.type != "TRACK_TO") or (path and path.type != 'CHILD_OF'):
+            raise ValueError("Make generated cameras local and keep LichtFeld Aim and Path Transform names reserved")
         yield
     old.sort(key=lambda obj: obj['lichtfeld_camera_index'])
     return old, targets[0] if targets else None
@@ -203,8 +248,8 @@ def commit(owner, settings, previous, staging, target, recipe):
     owner.rig_backup = []
     for index, (original, prepared) in enumerate(zip(old, new)):
         constraint = original.constraints.get(AIM)
-        owner.rig_backup.append((original, original.data, original.matrix_world.copy(),
-                                 constraint.target if constraint else None, bool(constraint)))
+        owner.rig_backup.append((original, original.data, (original.matrix_world.copy(), original.matrix_basis.copy()),
+                                 constraint.target if constraint else None, list(original.constraints).index(constraint) if constraint else -1))
         original.data = prepared.data
         original.matrix_world = prepared.matrix_basis
         track(original, target if prepared.constraints.get(AIM) else None)
@@ -228,6 +273,10 @@ def commit(owner, settings, previous, staging, target, recipe):
             if LIVE in original:
                 _bake_live_camera(original, prepared.matrix_basis,
                                   original.data.clip_start, original.data.clip_end)
+            # Keep the applied link intact until the transaction commits, so
+            # cancellation needs no second constraint snapshot/history.
+            path = path_link_state(prepared)
+            link_path(original, *(path if path else (None, None)))
             track(original, final_target if prepared.constraints.get(AIM) else None)
             data = prepared.data
             bpy.data.objects.remove(prepared, do_unlink=True)
@@ -238,7 +287,7 @@ def commit(owner, settings, previous, staging, target, recipe):
             previous.objects.link(prepared)
             staging.objects.unlink(prepared)
         yield
-    unused = {data.as_pointer(): data for obj, data, matrix, constraint_target, had_constraint in owner.rig_backup}
+    unused = {data.as_pointer(): data for obj, data, matrix, constraint_target, constraint_index in owner.rig_backup}
     for obj in old[len(new):]:
         unused[obj.data.as_pointer()] = obj.data
         bpy.data.objects.remove(obj, do_unlink=True)
@@ -275,7 +324,7 @@ def decode_recipe(encoded):
         raise ValueError("Rig metadata must be an object")
     properties = bpy.types.Scene.bl_rna.properties['lichtfeld_training'].fixed_type.properties
     for name in ('views', 'rig_rings', 'rig_min', 'rig_max', 'rig_distance',
-                 'rig_lens', 'rig_radius', 'rig_mesh_offset', 'rig_phase'):
+                 'rig_lens', 'rig_radius', 'rig_mesh_offset', 'rig_phase', 'rig_path_spacing'):
         if name not in values:continue
         value=values[name]
         if type(value) not in (int,float) or not math.isfinite(value):raise ValueError("Invalid rig number: "+name)
@@ -287,6 +336,7 @@ def decode_recipe(encoded):
             raise ValueError("Rig parameter outside its range: "+name)
     for name, valid in (("rig_mode",{"SPHERE","HEMISPHERE","RINGS","PATH","MESH"}),
                         ("rig_orientation",{"TARGET","TANGENT"}),
+                        ('rig_path_sampling', {'COUNT', 'SPACING'}),
                         ("rig_mesh_distribution",{"SURFACE","FACES"}),
                         ("rig_mesh_orientation",{"INWARD","OUTWARD","TARGET"}),
                         ("aim_mode",{"SOURCE","OBJECT","CURSOR","POSITION","VIEWPORT"})):
@@ -298,6 +348,10 @@ def decode_recipe(encoded):
     for name in ("target","curve","mesh"):
         if name in values and (not isinstance(values[name],str) or "\0" in values[name]):raise ValueError("Invalid rig object name")
     if "rig_auto_fit" in values and type(values["rig_auto_fit"]) is not bool:raise ValueError("Invalid framing mode")
+    if 'rig_path_reverse' in values and type(values['rig_path_reverse']) is not bool:
+        raise ValueError('Invalid path direction')
+    if 'rig_path_link' in values and type(values['rig_path_link']) is not bool:
+        raise ValueError('Invalid path link mode')
     return values
 
 # Native controller properties are the live state: Blender owns gestures, Undo,

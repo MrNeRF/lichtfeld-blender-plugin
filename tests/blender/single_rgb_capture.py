@@ -35,6 +35,15 @@ s.camera_collection = bpy.data.collections['Collection']
 s.scope = 'SELECTION'
 for _ in ext.preflight.remember_sources(s, [bpy.data.objects['Cube']]):
     pass
+capture_name='Camera';capture_index=1
+if '--linked-guide' in sys.argv:
+    s.rig_mode='PATH';s.views=4;s.rig_path_link=True
+    assert bpy.ops.lichtfeld.create_path_guide(shape='ORBIT',radius=4)=={'FINISHED'}
+    assert bpy.ops.lichtfeld.create_rig()=={'FINISHED'}
+    s.rig_curve.location.x+=.3;s.rig_curve.scale=(1.2,1.2,1.2)
+    bpy.context.view_layer.update()
+    capture_name=sorted(o.name for o in s.camera_collection.objects if o.type=='CAMERA')[-1]
+    capture_index=4
 s.use_depth_loss = True  # A test image never generates supervision maps.
 s.use_normal_loss = True
 s.refine_start = s.refine_end  # Training validation must not block RGB.
@@ -85,10 +94,10 @@ assert not (job/'training.json').exists()
 assert not (job/'capture.blend').exists()
 assert not (job/'supervisor.lock').exists()
 config = ext.read_json(job/'job.json')
-assert config['cameras'] == ['Camera']
+assert config['cameras'] == [capture_name]
 assert config['view_layer'] == 'Capture layer'
 assert config['frame'] == 3
-assert s.capture_preview_index == 1
+assert s.capture_preview_index == capture_index
 assert config['capture_camera']['lens'] == 40
 assert not config.get('connection_directory')
 assert not Path(config['capture_staging_file']).exists()

@@ -20,7 +20,7 @@ def jobs_folder(prefs):
 def connection_folder(prefs): return str(Path(jobs_folder(prefs)) / '.connections')
 
 def is_surface(obj, helpers=()):
- return obj is not None and obj.type in {'MESH','CURVE','SURFACE','FONT','META'} and not obj.get('lichtfeld_result') and obj not in helpers
+ return obj is not None and obj.type in {'MESH','CURVE','SURFACE','FONT','META'} and not obj.get('lichtfeld_result') and not obj.get('lichtfeld_path_guide') and obj not in helpers
 
 def selection_objects(context):
  s=context.scene.lichtfeld_training

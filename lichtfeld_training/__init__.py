@@ -172,6 +172,16 @@ def rig_recipe(settings, applied=None):
         'curve':settings.rig_curve.name_full if settings.rig_curve else '',
         'mesh':settings.rig_mesh.name_full if settings.rig_mesh else '',
         'capture_framing': capture_settings.framing_signature(settings.id_data, settings)}
+    # Default path controls must leave existing recipes byte-for-byte unchanged,
+    # including radial rigs whose live editor compares their applied recipe.
+    if settings.rig_mode == 'PATH':
+        if settings.rig_path_sampling != 'COUNT':
+            values.pop('views')
+            values.update(rig_path_sampling=settings.rig_path_sampling, rig_path_spacing=settings.rig_path_spacing)
+        if settings.rig_orientation == 'TANGENT' and settings.rig_path_reverse:
+            values['rig_path_reverse'] = True
+        if settings.rig_path_link:
+            values['rig_path_link'] = True
     if applied is not None:
         values.update(applied)
     return json.dumps(values, sort_keys=True)
@@ -316,6 +326,13 @@ class LichtFeldSettings(bpy.types.PropertyGroup):
         description="World-space offset from the chosen aim point; camera distribution stays centered on the source")
     rig_curve: PointerProperty(name="Path curve", type=bpy.types.Object,
         poll=lambda self,obj: obj.type == 'CURVE')
+    rig_path_sampling: EnumProperty(name="Sampling", description="Place cameras by total count or maximum world-space distance along the curve", items=[
+        ('COUNT', 'Camera count', 'Choose the total number of evenly spaced cameras'),
+        ('SPACING', 'Maximum spacing', 'Choose the largest interval along the evaluated curve in world units; endpoints are included on open paths')])
+    rig_path_spacing: FloatProperty(name="Maximum spacing", default=1, min=.0001,
+        subtype='DISTANCE', unit='LENGTH', description="Even intervals no larger than this distance along the curve; requires 4–1,000 cameras")
+    rig_path_reverse: BoolProperty(name="Reverse viewing direction", description="Look toward the previous camera along the path without changing positions; applies only to Follow path")
+    rig_path_link: BoolProperty(name="Follow guide transforms", description="After Apply, cameras follow guide movement, rotation and uniform scaling in Object Mode. Curve edits, spacing/count changes and nonuniform scaling need Apply")
     rig_mesh: PointerProperty(name="Placement mesh", type=bpy.types.Object, poll=lambda self,obj: obj.type == 'MESH')
     rig_mesh_distribution: EnumProperty(name="Placement", items=[("SURFACE", "Even surface coverage", "Area-weighted deterministic camera positions; choose camera count"), ("FACES", "One camera per face", "Use every face center, with 4–1,000 faces")])
     rig_mesh_orientation: EnumProperty(name="Look", items=[("INWARD", "Inward", "Look opposite the outward face normals"), ("OUTWARD", "Outward", "Look along the face normals"), ("TARGET", "Look at target", "Use the aim target controls")])
@@ -654,6 +671,7 @@ class LF_OT_rig(_RigOperation, bpy.types.Operator):
                   if settings.rig_auto_fit else settings.rig_radius)
         points = []
         mesh_directions = []
+        path_inverse = None
         if settings.rig_mode == "MESH":
             from . import rig_mesh
             for item in rig_mesh.positions(context, settings.rig_mesh, settings.views, settings.rig_mesh_distribution, settings.rig_mesh_orientation, settings.rig_mesh_offset):
@@ -662,7 +680,11 @@ class LF_OT_rig(_RigOperation, bpy.types.Operator):
                     mesh_directions.append(Vector(item[1]))
                 yield
         elif settings.rig_mode == 'PATH':
-            for point in rig_path.positions(context, settings.rig_curve, settings.views):
+            path_curve = settings.rig_curve
+            if settings.rig_path_link:
+                path_inverse = rig_edit.validate_path_link(path_curve, settings.camera_collection, depsgraph)
+            for point in rig_path.positions(context, path_curve, settings.views,
+                    spacing=settings.rig_path_spacing if settings.rig_path_sampling == 'SPACING' else None):
                 if point is not None:
                     points.append(Vector(point))
                 yield
@@ -714,9 +736,14 @@ class LF_OT_rig(_RigOperation, bpy.types.Operator):
             if settings.rig_mode == 'PATH' and settings.rig_orientation == 'TANGENT':
                 cyclic = settings.rig_curve.data.splines[0].use_cyclic_u
                 direction = points[index+1]-position if index+1<len(points) else (points[0]-position if cyclic else position-points[index-1])
+                if settings.rig_path_reverse:
+                    direction = points[index-1]-position if index or cyclic else position-points[1]
             if direction.length < 1e-8:
                 raise ValueError("A camera coincides with its target or a duplicate path sample; adjust the rig")
             obj.rotation_euler = direction.to_track_quat("-Z", "Y").to_euler()
+            if settings.rig_mode == 'PATH' and settings.rig_path_link:
+                rig_edit.link_path(obj, path_curve,
+                                   path_inverse)
             if (settings.rig_mode != "PATH" or settings.rig_orientation != "TANGENT") and (settings.rig_mode != "MESH" or settings.rig_mesh_orientation == "TARGET"):
                 rig_edit.track(obj, target)
             yield
@@ -934,6 +961,10 @@ class LF_OT_read_rig(bpy.types.Operator):
                     setattr(s, name, values[name])
             s.rig_auto_fit = values.get("rig_auto_fit", True)
             s.rig_radius = values.get("rig_radius", 3)
+            s.rig_path_sampling = values.get('rig_path_sampling', 'COUNT')
+            s.rig_path_spacing = values.get('rig_path_spacing', 1)
+            s.rig_path_reverse = values.get('rig_path_reverse', False)
+            s.rig_path_link = values.get('rig_path_link', False)
             s.rig_aim_mode = values.get("aim_mode", "OBJECT" if values.get("target") else "SOURCE")
             s.rig_aim_position = values.get("aim_position", (0, 0, 0))
             s.rig_aim_offset = values.get("aim_offset", (0, 0, 0))
@@ -1955,7 +1986,7 @@ def draw_rig_actions(layout, settings, pending, *, edit=False):
     row = layout.row(align=True)
     if managed and settings.rig_parameter_source != rig:
         row.operator('lichtfeld.read_rig', text='Load selected rig', icon='IMPORT')
-    elif not rig or edit or managed and pending:
+    elif not rig or edit or managed and (pending or settings.rig_mode == 'PATH'):
         row.operator('lichtfeld.create_rig', text='Apply rig changes' if managed else 'Create camera rig')
         if managed and pending:
             row.operator('lichtfeld.read_rig', text='Revert', icon='LOOP_BACK')
@@ -2022,8 +2053,15 @@ def draw_capture_cameras(box, context, settings, ready, rig_changed, wrapped):
     elif reference.mode == 'UNSET' and managed:
         wrapped(box, 'Capture content applies only to new rigs. Choose an explicit center for this older rig.')
     box.prop(settings, 'rig_mode', text='Shape')
-    if settings.rig_mode != 'MESH' or settings.rig_mesh_distribution != 'FACES':
+    if settings.rig_mode == 'PATH':
+        box.prop(settings, 'rig_curve', text='Curve')
+        box.operator('lichtfeld.create_path_guide', text='Create path guide…')
+        box.prop(settings, 'rig_path_sampling')
+    if (settings.rig_mode != 'MESH' or settings.rig_mesh_distribution != 'FACES') and not (
+            settings.rig_mode == 'PATH' and settings.rig_path_sampling == 'SPACING'):
         box.prop(settings, 'views', text='Camera count')
+    elif settings.rig_mode == 'PATH':
+        box.prop(settings, 'rig_path_spacing', text='Spacing')
     if settings.rig_mode not in {'PATH', 'MESH'}:
         box.prop(settings, 'rig_auto_fit', text='Auto fit')
         box.prop(settings, 'rig_distance' if settings.rig_auto_fit else 'rig_radius',
@@ -2039,8 +2077,12 @@ def draw_capture_cameras(box, context, settings, ready, rig_changed, wrapped):
                 if rig.get('lichtfeld_fit_limited'):
                     wrapped(box, 'Last distance was increased by automatic fitting.')
     elif settings.rig_mode == 'PATH':
-        box.prop(settings, 'rig_curve')
         box.prop(settings, 'rig_orientation')
+        if settings.rig_orientation == 'TANGENT':
+            box.prop(settings, 'rig_path_reverse', text='Look backward')
+        box.prop(settings, 'rig_path_link', text='Follow guide')
+        if settings.rig_path_link:
+            box.label(text='Reshape curve: Apply')
     else:
         box.prop(settings, 'rig_mesh')
         box.prop(settings, 'rig_mesh_distribution')
@@ -2350,7 +2392,7 @@ def loaded(_):
 _CLASSES = (LichtFeldPanelState, LichtFeldPreferences, LichtFeldSourceRef, LichtFeldRigReference, LichtFeldSettings, LF_OT_notice, LF_OT_verify, LF_OT_setup, LF_OT_tight_framing, LF_OT_rig, LF_OT_live_rig, rig_edit.LF_GGT_live_rig,
             LF_OT_start, LF_OT_export_dataset, LF_OT_pick_sources, LF_OT_select_aim, LF_OT_inspect_camera, LF_OT_read_rig, LF_OT_command, LF_OT_import, LF_OT_resume, LF_OT_dataset, LF_OT_new_capture, LF_OT_inspect_dataset, LF_OT_restart, LF_OT_folder, LF_OT_reconnect, LF_OT_load_job, LF_OT_compare,
             LF_OT_setup_view, LF_OT_scan_sessions, LF_OT_attach_session, LF_OT_detach_session, LF_OT_previous_job, LF_OT_color_look, LF_OT_color_command, LF_OT_model_view, LF_OT_color_view, LF_OT_capture_lighting,
-            *capture_preview.CLASSES, *scene_render.CLASSES, *portal_ui.CLASSES)
+            *rig_path.CLASSES, *capture_preview.CLASSES, *scene_render.CLASSES, *portal_ui.CLASSES)
 
 ui_help.apply(_CLASSES)
 

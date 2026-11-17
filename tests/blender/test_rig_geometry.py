@@ -6,7 +6,7 @@ import math
 import unittest
 import numpy as np
 sys.path.insert(0,str(Path(__file__).resolve().parents[2]/'lichtfeld_training'))
-from rig_geometry import directions, sample_path
+from rig_geometry import directions, sample_path, guide_path
 from geometry_maps import convert
 
 
@@ -43,6 +43,39 @@ class GeometryTests(unittest.TestCase):
         self.assertTrue(np.allclose(n[0,0],[.5,.5,0]))
         self.assertFalse(valid[0,1])
         self.assertEqual(depth[0,1],0)
+
+    def test_maximum_spacing_includes_open_endpoints_and_closed_seam(self):
+        points = [(0,0,0), (10,0,0)]
+        samples = list(sample_path(points, 48, spacing=3))
+        self.assertTrue(np.allclose(samples, [(0,0,0),(2.5,0,0),(5,0,0),(7.5,0,0),(10,0,0)]))
+        square = [(0,0,0),(1,0,0),(1,1,0),(0,1,0)]
+        self.assertEqual(list(sample_path(square, 48, True, spacing=1)), square)
+        for spacing in (0, -1, float('nan'), float('inf'), .001, 100):
+            with self.subTest(spacing=spacing), self.assertRaises(ValueError):
+                list(sample_path(points, 48, spacing=spacing))
+
+    def test_regular_guides_have_expected_dimensions_and_no_duplicate_seam(self):
+        orbit = guide_path('ORBIT', 2, 0, 2*math.pi, 3, 0, 1, 0)[0]
+        self.assertEqual(len(orbit), 72)
+        self.assertEqual(len(set(orbit)), len(orbit))
+        self.assertTrue(all(abs(math.dist(p, (0,0,0))-2) < 1e-10 for p in orbit))
+        arc = guide_path('ORBIT', 2, 0, math.pi/2, 3, 0, 1, 0)[0]
+        self.assertTrue(np.allclose(arc[0], (2,0,0)))
+        self.assertTrue(np.allclose(arc[-1], (0,2,0)))
+        helix = guide_path('HELIX', 2, 0, 2*math.pi, 2, 0, 1, -4)[0]
+        self.assertTrue(np.allclose(helix[-1], (2,0,-4)))
+        spiral = guide_path('SPIRAL', 2, 0, 2*math.pi, 3, 0, math.pi/2, 0)[0]
+        self.assertTrue(np.allclose(spiral[-1], (0,0,2)))
+        self.assertTrue(np.allclose(np.diff([p[2] for p in spiral]), 2/(len(spiral)-1)))
+        self.assertTrue(all(abs(math.dist(p, (0,0,0))-2) < 1e-10 for p in spiral))
+        with self.assertRaises(ValueError):
+            list(guide_path('SPIRAL', 2, 0, 2*math.pi, 3, 1, 0, 0))
+        with self.assertRaises(ValueError):
+            guide_path('HELIX', 2, 0, 2*math.pi, 3, 0, 1, 0)
+        polar, closed = guide_path('SPIRAL', 2, 0, 2*math.pi, .1, -math.pi/2, math.pi/2, 0)
+        self.assertFalse(closed)
+        elevation = [math.asin(p[2]/2) for p in polar]
+        self.assertLessEqual(max(np.diff(elevation)), math.radians(5)+1e-10)
 
     def test_training_parameter_conflicts(self):
         from training_options import validate
