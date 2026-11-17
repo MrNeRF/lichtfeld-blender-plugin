@@ -5,7 +5,7 @@ from pathlib import Path
 import sys
 import threading
 import time
-from unittest.mock import patch
+from unittest.mock import patch, Mock
 import bpy
 import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
@@ -140,6 +140,32 @@ with tempfile.TemporaryDirectory() as directory:
     assert len(launched) == 1
     assert launched[0]["backend"] == prefs.backend_path
     assert launched[0]["connection_directory"] == ext.preflight.connection_folder(prefs)
+    # Failure to open or continue another run must leave the displayed job intact.
+    from types import SimpleNamespace
+    original = SimpleNamespace(close=Mock(), status={'state':'completed','iteration':120},
+                               reader=SimpleNamespace(error='',status_error=False))
+    settings = scene.lichtfeld_training
+    settings.job_directory = str(root)
+    settings.status = 'Completed'
+    settings.running = False
+    with patch.object(ui, 'peek', return_value=original), patch.object(ui, 'report_notice') as notice, \
+         patch.object(ext, 'allowed', return_value=True):
+        for owner, action in (('resume_data', lambda: bpy.ops.lichtfeld.resume_job()),
+                              ('load_job', lambda: bpy.ops.lichtfeld.load_job(filepath='missing/job.json'))):
+            with patch.object(ext.jobs, owner, side_effect=ValueError('Unavailable file')):
+                assert action() == {'FINISHED'}
+                future, done, failure = ui._tasks.pop()
+                try:
+                    future.result(timeout=5)
+                    raise AssertionError('Worker should fail')
+                except ValueError as error:
+                    ui.report_failure(failure, error)
+            assert settings.job_directory == str(root) and settings.status == 'Completed'
+            assert not settings.operation_busy and not settings.running
+            assert original.status == {'state':'completed','iteration':120}
+            original.close.assert_not_called()
+        assert notice.call_count == 2
+    print('FAILED_OPEN_AND_RESUME_PRESERVE_CURRENT_JOB_PASS', flush=True)
     prefs.backend_path = ""
     with patch.object(ext, "allowed", return_value=True), patch.object(ext, "launch_supervisor") as spawn:
         try:
@@ -199,7 +225,10 @@ class PanelLayout:
     def __init__(self): self.operators = []
     def box(self): return self
     def row(self, **kwargs): return self
+    def split(self, **kwargs): return self
     def column(self, **kwargs): return self
+    def panel(self, *args, **kwargs): return self, self
+    def panel_prop(self, owner, name): return self, self if getattr(owner, name) else None
     def label(self, **kwargs): pass
     def progress(self, **kwargs): pass
     def prop(self, *args, **kwargs): pass
@@ -209,12 +238,12 @@ class PanelLayout:
 settings = scene.lichtfeld_training
 settings.job_directory = "panel-fixture"
 settings.running = True
-settings.job_details = True
+bpy.context.window_manager.lichtfeld_panels.job_details = True
 settings.status = "Training"
 status = {"state": "training", "best": {"score": {"psnr": 30}}, "control_available": True}
 context = SimpleNamespace(scene=scene, region=SimpleNamespace(width=300))
 orders = []
-with patch.object(ui, "peek", return_value=SimpleNamespace(status=status, reader=SimpleNamespace(error=""))), patch.object(ext, "preferences", return_value=None):
+with patch.object(ui, "peek", return_value=SimpleNamespace(status=status, reader=SimpleNamespace(error="",status_error=False))), patch.object(ext, "preferences", return_value=None):
     for busy in (False, True, False):
         settings.importing = busy
         layout = PanelLayout()

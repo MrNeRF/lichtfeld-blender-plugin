@@ -10,6 +10,18 @@ if module not in bpy.context.preferences.addons:
  bpy.ops.preferences.addon_enable(module=module)
 ext=importlib.import_module(module)
 s=bpy.context.scene.lichtfeld_training
+profile=ext.training_options.PROFILES['mrnf']
+assert (s.iterations,s.max_points,s.sh_degree,s.seed_points)==(
+ profile['iterations'],profile['max_cap'],profile['sh_degree'],profile['init_num_pts'])
+assert s.eval_interval==profile['eval_steps'][0]
+import math
+for name in ext.training_options.FIELDS:
+ actual,expected=getattr(s,name),profile[name]
+ assert math.isclose(actual,expected,rel_tol=1e-6,abs_tol=1e-9),(name,actual,expected)
+s.strategy='mcmc'
+s.strategy='mrnf'
+assert s.use_exposure_correction and not s.use_ppisp and not s.use_bilateral_grid
+print('FRESH_SCENE_NATIVE_MRNF_DEFAULTS_PASS')
 assert s.engine==bpy.context.scene.render.engine
 s.use_exposure_correction=True
 assert not s.use_ppisp and not s.use_bilateral_grid

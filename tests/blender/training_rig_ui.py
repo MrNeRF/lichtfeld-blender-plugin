@@ -166,7 +166,7 @@ def live_controls():
     settings = scene.lichtfeld_training
     settings.scope = 'SCENE'; settings.views = 1000 if '--large' in sys.argv else 48
     settings.rig_auto_fit = False; settings.rig_radius = 3
-    settings.rig_generator = True
+    bpy.context.window_manager.lichtfeld_panels.rig_generator = True
     scene.tool_settings.use_keyframe_insert_auto = True
     bpy.context.preferences.view.show_splash = False
     area = next(a for a in bpy.context.window.screen.areas if a.type == 'VIEW_3D')

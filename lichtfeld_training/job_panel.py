@@ -3,9 +3,10 @@
 """Stable job controls: snapshot staging is deliberately absent from UI policy."""
 from pathlib import Path
 from . import workflow, scene_render
+from .ui_text import draw_disclosure
 
 
-def draw(layout, context, settings, status, reader_error, wrapped, color_view=False):
+def draw(layout, context, settings, status, reader_error, wrapped, color_view=False, status_error=False):
     external = bool(settings.attached_session)
     capture_only = status.get("job", {}).get("capture_only", False)
     phase = workflow.phase(status.get("state", settings.status))
@@ -16,14 +17,20 @@ def draw(layout, context, settings, status, reader_error, wrapped, color_view=Fa
     flags = workflow.actions(phase, external=external, result=bool(result), best=bool(best),
                              checkpoint=bool(status.get("checkpoint_available")), busy=busy,
                              control=status.get("control_available", False))
-    job = layout.box()
+    job = layout.column()
     command = "lichtfeld.color_view_command" if color_view else "lichtfeld.training_command"
     heading = ("Training continues · viewing only" if phase == 'controller lost' and status.get('backend_alive') else
-               workflow.status_label(settings.status))
+               workflow.status_label(phase))
     job.label(text="Connected trainer · Read only" if external else
                    "Dataset export" if capture_only else heading, icon="LINKED" if external else "RENDER_STILL")
     if external or capture_only:
-        job.label(text=workflow.status_label(settings.status))
+        job.label(text=workflow.status_label(phase))
+    job_error = status.get('error') or (settings.detail if not status and phase == 'failed' else '')
+    if job_error:
+        job.label(text='Job needs attention', icon='ERROR')
+        wrapped(job, job_error)
+    if not capture_only and phase in workflow.TERMINAL and 'iteration' in status:
+        job.label(text=f"Reached step {int(status['iteration']):,}")
     if settings.running:
         step = int(status.get("iteration", 0))
         total = int(status.get("iterations", status.get("job", {}).get("iterations", 0)))
@@ -55,39 +62,46 @@ def draw(layout, context, settings, status, reader_error, wrapped, color_view=Fa
             row.enabled = flags["stop"]
             row.operator(command, text="Cancel capture" if capture else "Cancel startup", icon="CANCEL").action = "stop"
     if not capture_only and (not capture or result or external):
-        preview = layout.box()
-        preview.label(text="Preview", icon="OUTLINER_DATA_POINTCLOUD")
-        preview.label(text=(f"Step {int(result.get('lichtfeld_iteration', 0)):,} · {int(result.get('lichtfeld_count', 0)):,} points"
-                            if result else "No preview was produced" if phase in workflow.TERMINAL else "Waiting for the first preview…"))
-        quality = "No saved model is available" if phase in workflow.TERMINAL else "Updates arrive automatically"
-        if result:
-            kind = result.get('lichtfeld_kind', 'preview')
-            if status.get("preview_fallback") and kind == "preview":
-                quality = f"Auto limited · {int(result.get('lichtfeld_count', 0)):,} points"
-            else:
-                quality = ('Saved model' if kind != 'preview' else 'Shared preview' if external else
-                           'Full preview' if status.get('job', {}).get('full_preview', settings.full_preview) else 'Limited preview')
-            quality += f" · SH {int(result.get('lichtfeld_sh_degree', 0))}"
-        elif status.get("preview_fallback"):
-            quality = "Preview size limited automatically"
-        preview.label(text=quality)
-        if phase in workflow.TRAINING_PHASES and not external:
-            row = preview.row(align=True)
-            row.enabled = not busy
-            row.operator("lichtfeld.model_view", text="Current", depress=status.get("viewer_mode") != "best").mode = "CURRENT"
-            best_row = row.row(align=True)
-            best_row.enabled = bool(best)
-            best_row.operator("lichtfeld.model_view", text="Best evaluated", depress=status.get("viewer_mode") == "best").mode = "BEST"
-            row = preview.row()
-            row.enabled = flags["previews"]
-            row.operator(command, text="Freeze preview" if settings.previews_enabled else "Resume preview", icon="PAUSE" if settings.previews_enabled else "PLAY").action = "preview_off" if settings.previews_enabled else "preview_on"
-        if not color_view:
-            row = preview.row(align=True)
-            row.enabled = bool(result) and not busy
-            row.operator("lichtfeld.compare_result", text="Show source" if settings.show_result else "Show splat", icon="HIDE_OFF")
-            row.operator("lichtfeld.trainer_color_view", text="Trainer colors", icon="SHADING_RENDERED")
-        if external and settings.session_camera_count:
-            preview.prop(settings, "show_session_cameras", text=f"Capture cameras ({settings.session_camera_count})")
+        header, preview = layout.panel("lichtfeld_job_preview", default_closed=False)
+        header.label(text="Preview")
+        if preview is not None:
+            preview.label(text=(f"Shown: step {int(result.get('lichtfeld_iteration', 0)):,} · {int(result.get('lichtfeld_count', 0)):,} points"
+                                if result else "No preview was produced" if phase in workflow.TERMINAL else "Waiting for the first preview…"))
+            quality = "No saved model is available" if phase in workflow.TERMINAL else "Updates arrive automatically"
+            if result:
+                kind = result.get('lichtfeld_kind', 'preview')
+                if status.get("preview_fallback") and kind == "preview":
+                    quality = f"Auto limited · {int(result.get('lichtfeld_count', 0)):,} points"
+                else:
+                    quality = ('Best evaluated model' if kind == 'best' else 'Saved model' if kind != 'preview' else 'Shared preview' if external else
+                               'Full preview' if status.get('job', {}).get('full_preview', settings.full_preview) else 'Limited preview')
+                quality += f" · SH {int(result.get('lichtfeld_sh_degree', 0))}"
+            elif status.get("preview_fallback"):
+                quality = "Preview size limited automatically"
+            preview.label(text=quality)
+            if phase in workflow.TRAINING_PHASES and not external:
+                row = preview.row(align=True)
+                row.enabled = not busy
+                row.operator("lichtfeld.model_view", text="Current", depress=status.get("viewer_mode") != "best").mode = "CURRENT"
+                best_row = row.row(align=True)
+                best_row.enabled = bool(best)
+                best_row.operator("lichtfeld.model_view", text="Best evaluated", depress=status.get("viewer_mode") == "best").mode = "BEST"
+                row = preview.row()
+                row.enabled = flags["previews"]
+                row.operator(command, text="Freeze preview" if settings.previews_enabled else "Resume preview", icon="PAUSE" if settings.previews_enabled else "PLAY").action = "preview_off" if settings.previews_enabled else "preview_on"
+            if not color_view:
+                row = preview.row(align=True)
+                row.enabled = bool(result) and not busy
+                row.operator("lichtfeld.compare_result", text="Show source" if settings.show_result else "Show splat", icon="HIDE_OFF")
+                row.operator("lichtfeld.trainer_color_view", text="Trainer colors", icon="SHADING_RENDERED")
+            if external and settings.session_camera_count:
+                preview.prop(settings, "show_session_cameras", text=f"Capture cameras ({settings.session_camera_count})")
+            preview_error = status.get('preview_error') or (reader_error if not status_error else '')
+            if preview_error:
+                preview.label(text='Preview update needs attention', icon='ERROR')
+                wrapped(preview, preview_error)
+                if settings.running:
+                    wrapped(preview, 'Preview updates retry automatically.')
     if external:
         wrapped(layout, "Read-only preview. Disconnecting or closing Blender leaves this trainer running.")
         if settings.previous_job:
@@ -103,16 +117,24 @@ def draw(layout, context, settings, status, reader_error, wrapped, color_view=Fa
             row.operator("lichtfeld.open_job", text="Open dataset folder", icon="FILE_FOLDER").dataset = True
         reuse = row.row()
         reuse.enabled = status.get('dataset_ready', phase == 'completed' or bool(best))
-        reuse.operator("lichtfeld.use_dataset", text="New training · same images", icon="FILE_REFRESH")
+        reuse.operator("lichtfeld.use_dataset", text="Train these images" if capture_only else "Train again · same images", icon="FILE_REFRESH")
         if flags["continue"]:
-            row.operator("lichtfeld.resume_job", text="Continue saved checkpoint…", icon="RECOVER_LAST")
-        row.operator("lichtfeld.new_capture", text="New dataset setup" if capture_only else "New capture setup", icon="RENDER_STILL")
-        wrapped(layout, 'Review the settings, save the scene, then start the new capture.')
+            row.operator("lichtfeld.resume_job", text="Continue from checkpoint…", icon="RECOVER_LAST")
+        row.operator("lichtfeld.new_capture", text="Capture new images", icon="RENDER_STILL")
         if status.get('dataset_ready') is False:
             wrapped(layout, 'This job has no complete dataset. Capture again with the current setup.')
-    details = layout.box()
-    details.prop(settings, "job_details", text="Details" if color_view else "Details and files", icon="TRIA_DOWN" if settings.job_details else "TRIA_RIGHT", emboss=False)
-    if settings.job_details:
+    details = draw_disclosure(layout, "job_details", "Details" if color_view else "Details and files")
+    if details is not None:
+        recorded = status.get('job', {})
+        size = recorded.get('capture_format', {})
+        if recorded.get('cameras') or (size.get('width') and size.get('height')) or (not capture_only and recorded.get('iterations')):
+            details.label(text='Settings used for this job', icon='PRESET')
+            if recorded.get('cameras'):
+                details.label(text=f"{len(recorded['cameras']):,} capture cameras")
+            if size.get('width') and size.get('height'):
+                details.label(text=f"{size['width']} × {size['height']} px")
+            if not capture_only and recorded.get('iterations'):
+                details.label(text=f"Training budget: {recorded['iterations']:,} steps")
         render = status.get('capture_render', {})
         if render:
             details.label(text='Capture render devices', icon='RENDER_STILL')
@@ -138,12 +160,11 @@ def draw(layout, context, settings, status, reader_error, wrapped, color_view=Fa
             details.operator("lichtfeld.open_job", text="Open job folder", icon="FILE_FOLDER")
             if not settings.running:
                 details.operator("lichtfeld.load_job", text="Open another job…", icon="FILEBROWSER")
-    error = status.get("preview_error") or reader_error or status.get("error")
     if not external and settings.running and status.get('control_available') is False:
-        warning = layout.box()
+        warning = layout.column()
         warning.label(text='Training controls unavailable', icon='LOCKED')
         wrapped(warning, status.get('control_reason') or 'Monitoring remains connected; controls will recover automatically when the job supervisor responds.')
-    if error:
-        warning = layout.box()
-        warning.label(text="Preview is retrying automatically" if settings.running else "Job needs attention", icon="ERROR")
-        wrapped(warning, error)
+    if reader_error and status_error:
+        warning = layout.column()
+        warning.label(text="Monitoring needs attention", icon="ERROR")
+        wrapped(warning, reader_error)

@@ -5,6 +5,7 @@ import json
 import time
 import bpy
 from . import render_devices, ui_runtime
+from .ui_text import draw_disclosure
 
 _cache = {}
 _pending = set()
@@ -189,18 +190,17 @@ def draw(box, scene, wrapped):
     # Fixed rows: asynchronous driver checks never move editable controls.
     for line in lines:
         box.label(text=line)
-    box.label(text='RGB: Standard sRGB · no compositor')
     row = box.row(align=True)
-    row.operator('lichtfeld.render_settings', text='Render settings…', icon='PREFERENCES').section = 'RENDER'
-    row.operator('lichtfeld.render_devices', text='Render devices', icon='SETTINGS')
+    row.operator('lichtfeld.render_settings', text='Render settings…').section = 'RENDER'
+    row.operator('lichtfeld.render_devices', text='Render devices')
     if scene.render.engine == 'CYCLES':
         box.prop(scene.cycles, 'device', text='Device')
-    box.prop(scene.lichtfeld_training, 'capture_advanced', text='Advanced capture settings',
-             icon='TRIA_DOWN' if scene.lichtfeld_training.capture_advanced else 'TRIA_RIGHT', emboss=False)
-    if scene.lichtfeld_training.capture_advanced:
-        wrapped(box, 'Uses the saved scene render settings. Capture fixes PNG output, Standard sRGB, no scene compositing, no motion blur or depth of field, and no render border.')
+    details = draw_disclosure(box, 'capture_advanced', 'Capture details')
+    if details is not None:
+        details.label(text='PNG · Standard sRGB · static capture')
         if not ready.get('ok'):
-            wrapped(box, ready.get('message', 'Render device check is running'))
+            wrapped(details, ready.get('message', 'Render device check is running'))
+    return details
 
 
 class LF_OT_render_settings(bpy.types.Operator):

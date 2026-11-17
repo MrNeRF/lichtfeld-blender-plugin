@@ -273,14 +273,18 @@ def decode_recipe(encoded):
     values = json.loads(encoded)
     if not isinstance(values, dict):
         raise ValueError("Rig metadata must be an object")
-    ranges = {"views": (4,1000), "rig_rings": (1,250), "rig_min":(-90,90), "rig_max":(-90,90),
-              "rig_distance":(1.05,100), "rig_lens":(1,500), "rig_radius":(.01,1000000), "rig_mesh_offset":(-100000,100000)}
-    for name in (*ranges, "rig_phase"):
+    properties = bpy.types.Scene.bl_rna.properties['lichtfeld_training'].fixed_type.properties
+    for name in ('views', 'rig_rings', 'rig_min', 'rig_max', 'rig_distance',
+                 'rig_lens', 'rig_radius', 'rig_mesh_offset', 'rig_phase'):
         if name not in values:continue
         value=values[name]
         if type(value) not in (int,float) or not math.isfinite(value):raise ValueError("Invalid rig number: "+name)
         if name in {"views","rig_rings"} and type(value) is not int:raise ValueError("Invalid rig count")
-        if name in ranges and not ranges[name][0] <= value <= ranges[name][1]:raise ValueError("Rig parameter outside its range: "+name)
+        # RNA owns both the bounds and their float32 representation. Metadata
+        # must accept what the native controls write, without a second table.
+        prop = properties[name]
+        if not prop.hard_min <= value <= prop.hard_max:
+            raise ValueError("Rig parameter outside its range: "+name)
     for name, valid in (("rig_mode",{"SPHERE","HEMISPHERE","RINGS","PATH","MESH"}),
                         ("rig_orientation",{"TARGET","TANGENT"}),
                         ("rig_mesh_distribution",{"SURFACE","FACES"}),

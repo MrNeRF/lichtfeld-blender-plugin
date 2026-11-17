@@ -97,10 +97,10 @@ there is no need to install the protocol manually.
 ## First capture and training
 
 1. Open your scene, choose a static frame, and save the `.blend` file.
-2. Choose **Activity → Capture and train**, then select the source: selected surface objects,
+2. Choose **Task → Capture and train**, then select the source: selected surface objects,
    a collection, or the entire scene.
 3. Select a collection containing at least four perspective cameras, or choose
-   **Create camera rig** in **Capture cameras**. Use **Check camera framing** before starting.
+   **Create camera rig** in **Cameras**. Use **Check framing** before starting.
 4. Set the output dimensions. Use **Render settings**, **Output settings**, and
    **Render devices** to review Blender's official configuration.
 5. Review the training strategy, total steps, Gaussian budget, and any optional
@@ -108,8 +108,9 @@ there is no need to install the protocol manually.
 6. Follow capture progress, then the live training preview. Pause/stop and preview
    controls appear when relevant. The displayed snapshot step can lag the trainer.
 
-The capture plan and start/export actions stay at the top. Expand the native
-setup sections to edit content, cameras, rendering/output, or training/preview.
+The setup stays inside one LichtFeld panel. Expand its sections to edit content,
+cameras, rendering/output or training. The start/export action and any blocking
+issue appear below the settings, including when the sections are collapsed.
 
 The capture uses the saved scene at the selected frame. Background Blender applies
 capture settings to an isolated copy; it does not animate your rig to render
@@ -117,7 +118,7 @@ different views. Changes made after a job starts apply to a subsequent capture.
 
 ### Camera distance and aiming
 
-The rig **Center** determines camera placement; **Look at** determines camera direction independently. Automatic fitting can increase the minimum distance factor to fit the reference at the selected lens and output aspect. For an exact radius, switch off **Fit subject automatically** and set **Distance from center**, then apply the rig changes. **Last distance** records the radius at the last successful generation; moving cameras manually does not update this historical value. Older rigs acquire this feedback when next regenerated.
+The rig **Center** determines camera placement; **Look at** determines camera direction independently. Automatic fitting can increase the minimum distance factor to fit the reference at the selected lens and output aspect. For an exact radius, switch off **Auto fit** and set **Distance**, then apply the rig changes. **Last distance** records the radius at the last successful generation; moving cameras manually does not update this historical value. Older rigs acquire this feedback when next regenerated.
 
 For an applied sphere, hemisphere or rings rig, choose **Edit live** to adjust distance, orbit rotation and aim immediately. Drag a field or enter a number; Escape cancels the current gesture and Blender Undo restores a confirmed gesture. Native viewport gizmos adjust distance, orbit rotation and aim when viewport gizmos are enabled. **Finish live editing** keeps the current camera poses and returns to shape/count controls. Changing live distance switches automatic fitting off when finished; otherwise the applied framing and aim modes are preserved. Camera count, distribution and path/mesh placement retain the explicit Apply workflow.
 
@@ -133,8 +134,8 @@ In **Check framing**, changing **Camera number** updates the view automatically 
 | --- | --- | --- |
 | **Capture and train** | Yes | Start a fresh model after capture |
 | **Generate dataset only** | Yes | Export to a chosen folder; no trainer starts |
-| **Train saved images** / **New training · same images** | No | Start a fresh model using the current training settings |
-| **Continue saved checkpoint…** | No | Restore the saved model and optimizer in a separate run |
+| **Train saved images** / **Train again · same images** | No | Start a fresh model using the current training settings |
+| **Continue from checkpoint…** | No | Restore the saved model and optimizer in a separate run |
 
 A fresh run on saved images does not restore the old splat. Changing camera poses,
 lighting, resolution, materials, or map contents requires a new capture. Each run

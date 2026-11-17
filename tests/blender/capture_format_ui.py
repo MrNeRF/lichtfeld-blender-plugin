@@ -13,7 +13,7 @@ destination=ROOT/'artifacts/capture-format-ui';destination.mkdir(exist_ok=True)
 source=bpy.context.scene;s=source.lichtfeld_training
 s.scope='SCENE';s.views=4;s.capture_aspect='WIDE';s.resolution=1024
 ext.capture_settings.apply_format(source, ext.capture_settings.preset_format(s))
-s.camera_overrides_open=True;s.override_optics=True;s.capture_lens=35
+bpy.context.window_manager.lichtfeld_panels.camera_overrides_open=True;s.override_optics=True;s.capture_lens=35
 operator=SimpleNamespace(collection=None,rig_backup=[],committed=False,report=lambda *args:None)
 for _ in ext.LF_OT_rig.generate(operator,bpy.context):pass
 bpy.context.preferences.view.show_splash=False
