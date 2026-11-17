@@ -47,6 +47,7 @@ if '--linked-guide' in sys.argv or '--position-variation' in sys.argv or '--rota
             s.rig_rotation_variation=.03
     if '--panorama' in sys.argv:
         s.rig_orientation='PANORAMA';s.rig_station_views=8
+        s.rig_station_frame='PATH' if '--path-facing' in sys.argv else 'TARGET' if '--target-facing' in sys.argv else 'GUIDE'
     assert bpy.ops.lichtfeld.create_rig()=={'FINISHED'}
     if '--linked-guide' in sys.argv or '--panorama' in sys.argv:
         s.rig_curve.location.x+=.3;s.rig_curve.scale=(1.2,1.2,1.2)

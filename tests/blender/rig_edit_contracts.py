@@ -164,17 +164,18 @@ print('GENERATED_DISTANCE_MANUAL_AUTOFIT_CANCEL_AND_PATH_PASS',flush=True)
 assert bpy.ops.lichtfeld.read_rig()=={"FINISHED"}
 recipe=collection["lichtfeld_rig_recipe"]
 s.rig_path_sampling='SPACING';s.rig_path_spacing=2;s.rig_path_reverse=True
-s.rig_station_views=12;s.rig_station_sweep=1
+s.rig_station_views=12;s.rig_station_sweep=1;s.rig_station_frame='TARGET'
 s.rig_position_variation=5;s.rig_rotation_variation=.04;s.rig_variation_seed=73
 assert bpy.ops.lichtfeld.read_rig()=={'FINISHED'}
 assert s.rig_path_sampling=='COUNT' and s.rig_path_spacing==1 and not s.rig_path_reverse
 assert s.rig_position_variation==0 and s.rig_rotation_variation==0 and s.rig_variation_seed==0
+assert s.rig_station_frame=='GUIDE'
 assert s.rig_station_views==8 and abs(s.rig_station_sweep-6.283185307179586)<1e-6
 assert ext.rig_recipe(s)==recipe
 saved_views=s.views
 for field, invalid in (('rig_path_sampling','UNKNOWN'),('rig_path_spacing',0),
                        ('rig_path_spacing',float('nan')),('rig_path_reverse',1),('rig_path_link',1),
-                       ('rig_station_views',3),('rig_station_views',4.5),('rig_station_views',True),
+                       ('rig_station_frame','INVALID'),('rig_station_views',3),('rig_station_views',4.5),('rig_station_views',True),
                        ('rig_station_sweep',0),('rig_station_sweep',7),('rig_station_sweep',float('nan')),
                        ('rig_rotation_variation',-.01),('rig_rotation_variation',1),
                        ('rig_rotation_variation',float('nan')),('rig_position_variation',26),('rig_position_variation',float('nan')),

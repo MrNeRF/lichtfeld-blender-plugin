@@ -33,6 +33,7 @@ def start():
         settings.rig_mode='PATH';settings.rig_orientation='PANORAMA';settings.views=125
         settings.rig_station_views=8;settings.rig_station_sweep=4.71238898038469;settings.rig_path_link=True
         assert bpy.ops.lichtfeld.create_path_guide(shape='ORBIT',radius=4)=={'FINISHED'}
+        settings.rig_station_frame='PATH' if '--path-facing' in sys.argv else 'TARGET' if '--target-facing' in sys.argv else 'GUIDE'
     assert bpy.ops.lichtfeld.create_rig() == {"RUNNING_MODAL"}
     state["started"] = state["last"] = time.perf_counter()
     bpy.app.timers.register(heartbeat, first_interval=.01)
@@ -73,7 +74,12 @@ def heartbeat():
                 for camera in settings.camera_collection.objects:
                     if camera.type=='CAMERA':
                         assert camera.constraints.get(extension.rig_edit.PATH_LINK).target==settings.rig_curve
-                        assert camera.constraints.get(extension.rig_edit.AIM) is None
+                        if '--target-facing' in sys.argv:
+                            assert camera.constraints.get(extension.rig_edit.AIM).target==settings.rig_aim
+                            assert camera.constraints.get(extension.rig_edit.ROTATION).owner_space=='WORLD'
+                        else:
+                            assert camera.constraints.get(extension.rig_edit.AIM) is None
+                assert settings.rig_station_frame==('PATH' if '--path-facing' in sys.argv else 'TARGET' if '--target-facing' in sys.argv else 'GUIDE')
                 state['panorama_save_reload']=True
             else:
                 assert settings.rig_position_variation==5 and settings.rig_variation_seed==73

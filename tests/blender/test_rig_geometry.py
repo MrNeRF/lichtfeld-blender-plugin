@@ -68,6 +68,14 @@ class GeometryTests(unittest.TestCase):
             with self.subTest(sweep=sweep),self.assertRaises(ValueError):
                 list(directions(8,'RINGS',0,0,1,sweep=sweep))
 
+    def test_centered_sectors_keep_facing_and_full_turn_start(self):
+        points=list(directions(5,'RINGS',0,0,1,sweep=math.pi,centered=True))
+        self.assertTrue(np.allclose(points[2],(1,0,0)))
+        self.assertTrue(np.allclose(points[0],(0,-1,0)))
+        self.assertTrue(np.allclose(points[-1],(0,1,0)))
+        self.assertEqual(list(directions(8,'RINGS',0,0,1,.3,centered=True)),
+                         list(directions(8,'RINGS',0,0,1,.3)))
+
     def test_arc_distance_and_closed_endpoint(self):
         result=list(sample_path([(0,0,0),(1,0,0),(1,9,0)],6))
         self.assertTrue(np.allclose(result,[(0,0,0),(1,1,0),(1,3,0),(1,5,0),(1,7,0),(1,9,0)]))

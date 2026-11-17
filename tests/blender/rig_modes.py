@@ -507,3 +507,137 @@ for cut in range(500):
         assert max(abs(a-b) for x,y in zip(camera.matrix_world,matrix) for a,b in zip(x,y))<1e-5,cut
 else:raise AssertionError('Station update never committed')
 print('PANORAMA_CANCEL_EVERY_PRECOMMIT_YIELD_PASS',flush=True)
+
+# Sectors can turn with the route or center on a shared native target.
+from mathutils import Quaternion
+s.rig_mode='PATH';s.rig_orientation='PANORAMA';s.rig_station_frame='PATH'
+s.views=8;s.rig_station_views=5;s.rig_station_sweep=math.pi;s.rig_phase=0;s.rig_path_reverse=False
+assert bpy.ops.lichtfeld.create_path_guide(shape='ORBIT',radius=4)=={'FINISHED'}
+guide=s.rig_curve;s.rig_path_link=True
+for reverse in (False,True):
+    s.rig_path_reverse=reverse
+    assert bpy.ops.lichtfeld.create_rig()=={'FINISHED'}
+    bpy.context.view_layer.update()
+    points=[Vector(p) for p in ext.rig_path.positions(bpy.context,guide,s.views) if p is not None]
+    for station in range(8):
+        camera=generated()[station*5+2]
+        forward=camera.matrix_world.to_quaternion() @ Vector((0,0,-1))
+        assert forward.dot(ext.rig_path.tangent(points,station,True,reverse).normalized())>.99999
+        assert camera.constraints.get(ext.rig_edit.AIM) is None
+s.rig_path_reverse=False
+for facing in ('PATH','TARGET'):
+    s.rig_station_frame=facing;s.rig_aim_mode='SOURCE'
+    assert bpy.ops.lichtfeld.create_rig()=={'FINISHED'}
+    bpy.context.view_layer.update()
+    if facing=='TARGET':
+        for station in range(8):
+            camera=generated()[station*5+2]
+            forward=camera.matrix_world.to_quaternion() @ Vector((0,0,-1))
+            assert forward.dot((s.rig_aim.matrix_world.translation-camera.matrix_world.translation).normalized())>.99999
+            assert camera.constraints.get(ext.rig_edit.AIM).target==s.rig_aim
+            assert camera.constraints.get(ext.rig_edit.ROTATION).target==s.rig_aim
+            for view in generated()[station*5:(station+1)*5]:
+                q=view.matrix_world.to_quaternion()
+                direction=q @ Vector((0,0,-1))
+                up=Vector((0,0,1))-direction*direction.z
+                assert (q @ Vector((0,1,0))).dot(up.normalized())>.99999
+        s.rig_aim_mode='VIEWPORT';s.rig_aim.location+=(Vector((.3,-.2,.4)))
+        bpy.context.view_layer.update()
+        camera=generated()[2]
+        assert (camera.matrix_world.to_quaternion() @ Vector((0,0,-1))).dot((s.rig_aim.location-camera.matrix_world.translation).normalized())>.99999
+    guide.location.x+=.5;guide.rotation_euler=(.2,.3,.6);guide.scale=(1.5,)*3
+    bpy.context.view_layer.update()
+    before=[ext.capture_settings.camera_pose(o,bpy.context.evaluated_depsgraph_get()) for o in generated()]
+    assert bpy.ops.lichtfeld.create_rig()=={'FINISHED'}
+    bpy.context.view_layer.update()
+    assert all(max(abs(a-b) for x,y in zip(ext.capture_settings.camera_pose(o,bpy.context.evaluated_depsgraph_get()),m) for a,b in zip(x,y))<1e-4 for o,m in zip(generated(),before)),facing
+    assert sum(o.type=='EMPTY' for o in s.camera_collection.objects)==1
+    s.rig_station_frame='GUIDE'
+    assert bpy.ops.lichtfeld.read_rig()=={'FINISHED'}
+    assert s.rig_station_frame==facing
+print('STATION_PATH_TARGET_CENTER_REVERSE_LIVE_AIM_GUIDE_REAPPLY_PASS',flush=True)
+
+# Upright frames retain the guide horizon on default helices and spirals.
+for shape in ('HELIX','SPIRAL'):
+    assert bpy.ops.lichtfeld.create_path_guide(shape=shape,radius=3)=={'FINISHED'}
+    test_guide=s.rig_curve
+    points=[Vector(p) for p in ext.rig_path.positions(bpy.context,test_guide,48) if p is not None]
+    guide_rotation=Quaternion((1,0,0,0))
+    frames=list(ext.rig_path.station_frames(points,guide_rotation))
+    turn=Quaternion(Vector((1,2,3)).normalized(),.8)
+    rotated=list(ext.rig_path.station_frames([turn@p+Vector((1,2,3)) for p in points],turn))
+    for index,(frame,transformed) in enumerate(zip(frames,rotated)):
+        forward=ext.rig_path.tangent(points,index,False).normalized()
+        up=Vector((0,0,1))-forward*forward.z
+        assert (frame @ Vector((0,0,-1))).dot(forward)>.99999
+        assert (frame @ Vector((0,1,0))).dot(up.normalized())>.99999
+        angle=(turn@frame).rotation_difference(transformed).angle
+        assert min(angle,2*math.pi-angle)<1e-3
+    # Inspect real generated views; measure bearing/elevation independently of
+    # the quaternion composition used by the generator.
+    test_guide.rotation_euler=(.2,.3,.6);test_guide.scale=(1.2,)*3
+    s.rig_aim_mode='SOURCE';s.rig_aim_offset=(0,0,0)
+    for facing in ('PATH','TARGET'):
+        s.rig_station_frame=facing
+        assert bpy.ops.lichtfeld.create_rig()=={'FINISHED'}
+        bpy.context.view_layer.update()
+        stations=[Vector(p) for p in ext.rig_path.positions(bpy.context,test_guide,s.views) if p is not None]
+        up=(test_guide.matrix_world.to_quaternion() @ Vector((0,0,1))) if facing=='PATH' else Vector((0,0,1))
+        for station,position in enumerate(stations):
+            reference=(ext.rig_path.tangent(stations,station,False) if facing=='PATH' else s.rig_aim.matrix_world.translation-position).normalized()
+            flat_reference=reference-up*reference.dot(up)
+            for view,camera in enumerate(generated()[station*5:(station+1)*5]):
+                pose=ext.capture_settings.camera_pose(camera,bpy.context.evaluated_depsgraph_get())
+                forward=pose.to_3x3() @ Vector((0,0,-1))
+                flat_forward=forward-up*forward.dot(up)
+                bearing=math.atan2(up.dot(flat_reference.cross(flat_forward)),flat_reference.dot(flat_forward))
+                difference=bearing-(-math.pi/2+view*math.pi/4)
+                assert abs(math.atan2(math.sin(difference),math.cos(difference)))<1e-4,(shape,facing,station,view)
+                assert abs(forward.dot(up)-reference.dot(up))<1e-5
+                expected_up=(up-forward*forward.dot(up)).normalized()
+                assert (pose.to_3x3() @ Vector((0,1,0))).dot(expected_up)>.99999
+try:
+    list(ext.rig_path.station_frames([Vector(p) for p in ((0,0,0),(0,0,1),(0,.5,2),(1,1,3))],Quaternion((1,0,0,0))))
+except ValueError as error:
+    assert 'vertical' in str(error) and 'Guide axes' in str(error)
+else:raise AssertionError('Accepted an undefined upright frame at a vertical tangent')
+s.rig_curve=guide
+print('STATION_UPRIGHT_HELIX_SPIRAL_COVARIANCE_VERTICAL_FAILURE_PASS',flush=True)
+
+# Target coincidence cleans staging and leaves the applied rig untouched.
+s.rig_station_frame='TARGET';s.rig_aim_mode='POSITION'
+s.rig_aim_offset=(0,0,0)
+s.rig_aim_position=next(Vector(p) for p in ext.rig_path.positions(bpy.context,guide,s.views) if p is not None)
+counts=(len(bpy.data.objects),len(bpy.data.cameras),len(bpy.data.collections))
+recipe=s.camera_collection['lichtfeld_rig_recipe']
+try:
+    bpy.ops.lichtfeld.create_rig()
+except RuntimeError as error:
+    assert 'coincides with its target' in str(error)
+else:raise AssertionError('Accepted a station at its own target')
+assert counts==(len(bpy.data.objects),len(bpy.data.cameras),len(bpy.data.collections))
+assert recipe==s.camera_collection['lichtfeld_rig_recipe']
+s.rig_aim_mode='SOURCE';s.views=4;s.rig_station_views=4
+for applied,wanted in (('GUIDE','TARGET'),('TARGET','PATH'),('PATH','GUIDE')):
+    s.rig_station_frame=applied
+    assert bpy.ops.lichtfeld.create_rig()=={'FINISHED'}
+    bpy.context.view_layer.update()
+    baseline=[(o,o.data,o.matrix_world.copy(),[c.name for c in o.constraints]) for o in generated()]
+    s.rig_station_frame=wanted
+    for cut in range(500):
+        owner=SimpleNamespace(collection=None,rig_backup=[],committed=False,report=lambda *args:None)
+        work=ext.LF_OT_rig.generate(owner,bpy.context)
+        try:
+            for _ in range(cut):next(work)
+        except StopIteration:break
+        if owner.committed:
+            for _ in work:pass
+            break
+        work.close()
+        for _ in ext.LF_OT_rig.cleanup(owner):pass
+        bpy.context.view_layer.update()
+        for camera,data,matrix,order in baseline:
+            assert camera.data==data and [c.name for c in camera.constraints]==order
+            assert max(abs(a-b) for x,y in zip(camera.matrix_world,matrix) for a,b in zip(x,y))<1e-5,(applied,wanted,cut)
+    else:raise AssertionError('Facing transaction never committed')
+print('STATION_FACING_TRANSITIONS_CANCEL_EVERY_YIELD_PASS',flush=True)

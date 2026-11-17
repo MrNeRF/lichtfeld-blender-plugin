@@ -123,6 +123,14 @@ before expansion and validates the expanded view count through the existing
 capture contract before creating staging IDs. Generated indices are station-major:
 `station * views_per_station + direction`. Existing transaction and capture-pose
 normalization handle guide links, cancellation and calibration unchanged.
+`rig_path.tangent` owns the existing outgoing/previous-point convention. Upright
+station frames use the guide's up axis and reject vertical tangents rather than
+accumulating transport roll. Yaw rotates the whole frame around guide up,
+keeping each station's elevation across its views. Target-facing stations use the existing shared
+Track To helper, followed by the existing constant rotation constraint in
+WORLD/BEFORE mode for yaw about world Z. Radial jitter retains LOCAL/AFTER mode.
+The same constraint owner transfers either mode after the commit boundary.
+Default guide-facing recipes omit the new frame key, preserving old recipes.
 
 `rig_edit.commit` validates generated indices and aim-helper uniqueness before
 mutating existing cameras, retaining the existing staged update/rollback path.

@@ -265,5 +265,14 @@ layout=Layout()
 ext.draw_capture_cameras(layout,context,s,ready,True,lambda *args:None)
 assert 'Station total updates on Apply' in layout.labels
 assert not any('= 32' in text for text in layout.labels)
+for facing in ('GUIDE','PATH','TARGET'):
+    s.rig_station_frame=facing
+    layout=Layout()
+    ext.draw_capture_cameras(layout,context,s,ready,True,lambda *args:None)
+    fields=dict(layout.fields)
+    assert 'rig_station_frame' in fields
+    assert ('rig_path_reverse' in fields)==(facing=='PATH')
+    assert ('rig_aim_mode' in fields)==(facing=='TARGET')
+    assert ('rig_aim_offset' in fields)==(facing=='TARGET')
 print('PATH_REVERSE_ONLY_SHOWN_FOR_PATH_VIEWING_PASS')
 bpy.ops.preferences.addon_disable(module=module)
