@@ -77,7 +77,7 @@ def directions(count, mode, minimum=0.0, maximum=90.0, rings=3, phase=0.0):
         raise ValueError("Unknown camera distribution")
 
 
-def sample_path(points, count, cyclic=False, *, spacing=None, reverse=False):
+def sample_path(points, count, cyclic=False, *, spacing=None):
     if spacing is None and count < 2:
         raise ValueError("The path needs at least two samples")
     if any(not math.isfinite(value) for point in points for value in point):
@@ -102,8 +102,7 @@ def sample_path(points, count, cyclic=False, *, spacing=None, reverse=False):
         if not 4 <= count <= 1000:
             raise ValueError(f"Spacing would create {count:,} cameras; adjust it to create 4–1,000 cameras")
     for index in range(count):
-        sample = (-index % count if cyclic else count - 1 - index) if reverse else index
-        position = distance[-1] * sample / (count if cyclic else count - 1)
+        position = distance[-1] * index / (count if cyclic else count - 1)
         segment = min(len(points)-2, max(0, bisect.bisect_right(distance, position)-1))
         length = distance[segment+1]-distance[segment]
         fraction = (position-distance[segment])/length if length else 0

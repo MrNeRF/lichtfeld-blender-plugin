@@ -421,6 +421,7 @@ def path_guides():
         assert bpy.context.scene.lichtfeld_training.rig_curve.name == name
         s = bpy.context.scene.lichtfeld_training
         s.scope = 'SCENE'; s.rig_path_sampling = 'SPACING'; s.rig_path_spacing = .03
+        s.rig_path_link = True
         assert bpy.ops.lichtfeld.create_rig() == {'RUNNING_MODAL'}
     except Exception:
         output.write_text(traceback.format_exc(), encoding='utf-8')
@@ -445,6 +446,27 @@ def path_guides():
             elif proof['phase'] == 'apply' and not s.operation_busy:
                 assert s.camera_collection and sum(o.type == 'CAMERA' for o in s.camera_collection.objects) == 26
                 assert bpy.ops.lichtfeld.create_path_guide.poll()
+                def first_position():
+                    bpy.context.view_layer.update()
+                    current=bpy.context.scene.lichtfeld_training
+                    camera=next(o for o in current.camera_collection.objects if o.get('lichtfeld_camera_index')==0)
+                    assert camera.constraints.get(extension.rig_edit.PATH_LINK).target==current.rig_curve
+                    return camera.matrix_world.translation.copy()
+                before=first_position()
+                bpy.ops.ed.undo_push(message='Linked path rig')
+                s.rig_curve.location.x+=1
+                assert abs(first_position().x-before.x-1)<1e-4
+                bpy.ops.ed.undo_push(message='Move linked guide')
+                assert bpy.ops.ed.undo()=={'FINISHED'}
+                assert (first_position()-before).length<1e-4
+                assert bpy.ops.ed.redo()=={'FINISHED'}
+                moved=first_position()
+                assert abs(moved.x-before.x-1)<1e-4
+                path=str(output.with_suffix('.blend'))
+                bpy.ops.wm.save_as_mainfile(filepath=path)
+                bpy.ops.wm.open_mainfile(filepath=path)
+                assert (first_position()-moved).length<1e-4
+                proof['linked_transform_undo_redo_save_reload']=True
                 proof['ok'] = True
                 output.write_text(json.dumps(proof), encoding='utf-8')
                 print('PATH_GUIDE_NATIVE_UNDO_REDO_MODAL_CANCEL_APPLY_PASS', flush=True)

@@ -237,4 +237,12 @@ assert all(name in fields for name in ('rig_min','rig_max','rig_lens','rig_aim_o
     'preview_sh_degree','preview_hold_seconds'))
 assert sum(name=='sh_degree' for name,row in layout.fields)==1
 print('NATIVE_DISCLOSURES_KEEP_ADVANCED_CAPTURE_TRAINING_AND_PREVIEW_REACHABLE_PASS')
+for mode in ('TARGET','TANGENT'):
+    s.rig_mode='PATH';s.rig_orientation=mode
+    layout=Layout()
+    ext.draw_capture_cameras(layout,context,s,ready,False,lambda *args:None)
+    names=dict(layout.fields)
+    assert ('rig_path_reverse' in names)==(mode=='TANGENT')
+    assert 'rig_path_link' in names
+print('PATH_REVERSE_ONLY_SHOWN_FOR_PATH_VIEWING_PASS')
 bpy.ops.preferences.addon_disable(module=module)

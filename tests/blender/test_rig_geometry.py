@@ -48,10 +48,8 @@ class GeometryTests(unittest.TestCase):
         points = [(0,0,0), (10,0,0)]
         samples = list(sample_path(points, 48, spacing=3))
         self.assertTrue(np.allclose(samples, [(0,0,0),(2.5,0,0),(5,0,0),(7.5,0,0),(10,0,0)]))
-        self.assertEqual(list(sample_path(points, 48, spacing=3, reverse=True)), samples[::-1])
         square = [(0,0,0),(1,0,0),(1,1,0),(0,1,0)]
         self.assertEqual(list(sample_path(square, 48, True, spacing=1)), square)
-        self.assertEqual(list(sample_path(square, 48, True, spacing=1, reverse=True)), [square[0], *square[:0:-1]])
         for spacing in (0, -1, float('nan'), float('inf'), .001, 100):
             with self.subTest(spacing=spacing), self.assertRaises(ValueError):
                 list(sample_path(points, 48, spacing=spacing))

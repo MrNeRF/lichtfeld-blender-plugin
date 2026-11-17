@@ -139,8 +139,9 @@ curve than the chosen distance. Open paths include both ends; closed paths do no
 duplicate the seam. Distances include the curve object's world scale. Spacing
 that would produce fewer than 4 or more than 1,000 generated cameras is rejected
 before changing the rig, with the proposed count in the error. The applied camera
-count appears in **Cameras**. **Reverse direction** reverses camera order and
-path-following direction; the start of a closed path stays in place.
+count appears in **Cameras**. With **Follow path**, **Look backward**
+looks toward the previous camera along the path without moving or renumbering
+cameras. It is hidden and ignored with **Look at target**.
 
 **Create path guide…** opens a small dialog for an orbit/arc, helix or spherical
 spiral. **Center** initially uses the 3D cursor, independently of the rig's
@@ -157,10 +158,26 @@ cameras. The selected path is excluded from capture; generated guides remain
 helpers, excluded from subject bounds and capture even after another guide is
 chosen, and are disabled for rendering. Select the intended subject again when using a first
 rig's selection-based reference. Choose **Apply rig changes** after editing the
-curve, its transform, sampling or direction. Path edits do not move cameras live;
-Apply remains available even with the rig controls collapsed. Camera aiming is
+curve, its transform, sampling or direction. Apply remains available even with
+the rig controls collapsed. Camera aiming is
 independent: choose the target or **Follow path**. Curve tilt does not control
 camera roll. Projection onto arbitrary meshes is not part of these guide tools.
+
+Enable **Follow guide** and apply the rig to link generated cameras
+to the guide's movement, rotation and uniform scaling in Object Mode. This uses
+Blender's native constraints, so it continues working after saving and reopening
+the scene. With **Look at target**, the cameras keep aiming at the independent
+target while their positions follow the guide. Additional custom cameras stay
+independent. Curve control-point edits still require **Apply rig changes**;
+scaling a guide does not automatically change the number of cameras or resample
+the requested maximum spacing. Apply when you want a new distribution.
+
+Nonuniform scaling can introduce shear with **Follow path**. Capture rejects that
+pose and asks you to apply rig changes; Apply resamples the transformed curve and
+restores valid camera poses. To detach cameras, disable **Follow guide**
+and apply before deleting the guide. Deleting a linked guide without detaching
+breaks the native constraint and cameras return to their last applied poses;
+Blender Undo restores the guide and its link.
 
 Select an existing generated rig and use **Load selected rig** before
 editing when its controls have not been loaded. Choosing a collection leaves the controls unchanged; **Apply rig changes**

@@ -92,7 +92,9 @@ s.rig_path_reverse = True; s.rig_orientation = 'TANGENT'
 bpy.context.view_layer.update()
 assert bpy.ops.lichtfeld.create_rig() == {'FINISHED'}
 cameras = sorted((o for o in s.camera_collection.objects if o.get('lichtfeld_generated')), key=lambda o:o.name)
-assert len(cameras) == 5 and all(abs(a.location.x-b.location.x-2)<1e-5 for a,b in zip(cameras,cameras[1:]))
+assert len(cameras) == 5 and all(abs(b.location.x-a.location.x-2)<1e-5 for a,b in zip(cameras,cameras[1:]))
+for camera in (cameras[0],cameras[-1]):
+    assert (camera.rotation_euler.to_matrix() @ Vector((0,0,-1))).dot(Vector((-1,0,0)))>.999
 collection = s.camera_collection; identities = {o.as_pointer() for o in collection.objects}
 s.rig_path_spacing = .0001
 try:
@@ -103,3 +105,120 @@ assert result == {'CANCELLED'} and s.camera_collection == collection
 assert {o.as_pointer() for o in collection.objects} == identities
 assert not s.operation_busy
 print('PATH_GUIDES_SPACING_WORLD_UNITS_RECIPE_ROLLBACK_PASS', flush=True)
+
+# Reverse is a viewing direction, never a hidden reorder of camera identities.
+s.rig_path_sampling='COUNT';s.views=8;s.rig_path_reverse=False
+assert bpy.ops.lichtfeld.create_path_guide(shape='ORBIT',radius=4)=={'FINISHED'}
+guide=s.rig_curve
+assert bpy.ops.lichtfeld.create_rig()=={'FINISHED'}
+def generated():
+    return sorted((o for o in s.camera_collection.objects if o.get('lichtfeld_generated')),key=lambda o:o['lichtfeld_camera_index'])
+forward=[(o.as_pointer(),o.location.copy(),o.rotation_euler.to_matrix() @ Vector((0,0,-1))) for o in generated()]
+s.rig_path_reverse=True
+assert bpy.ops.lichtfeld.create_rig()=={'FINISHED'}
+for index,(camera,(identity,position,direction)) in enumerate(zip(generated(),forward)):
+    assert camera.as_pointer()==identity and (camera.location-position).length<1e-5
+    backward=(forward[index-1][1]-position).normalized()
+    assert backward.dot(camera.rotation_euler.to_matrix() @ Vector((0,0,-1)))>.999
+s.rig_orientation='TARGET'
+assert 'rig_path_reverse' not in ext.rig_edit.decode_recipe(ext.rig_recipe(s))
+assert bpy.ops.lichtfeld.create_rig()=={'FINISHED'}
+before=[o.matrix_world.copy() for o in generated()]
+s.rig_path_reverse=False
+assert bpy.ops.lichtfeld.create_rig()=={'FINISHED'}
+bpy.context.view_layer.update()
+assert all(max(abs(a-b) for row_a,row_b in zip(o.matrix_world,m) for a,b in zip(row_a,row_b))<1e-5 for o,m in zip(generated(),before))
+
+# Native guide links move positions immediately, while target aiming stays independent.
+s.rig_path_link=True
+assert bpy.ops.lichtfeld.create_rig()=={'FINISHED'}
+bpy.context.view_layer.update()
+original=[o.matrix_world.translation.copy() for o in generated()]
+apply_inverse=guide.matrix_world.inverted()
+guide.location.x+=2;guide.rotation_euler.z=.4;guide.scale=(1.5,2,1)
+bpy.context.view_layer.update()
+for camera,position in zip(generated(),original):
+    expected=guide.matrix_world @ apply_inverse @ position
+    assert (camera.matrix_world.translation-expected).length<1e-4
+    pose=ext.capture_settings.camera_pose(camera,bpy.context.evaluated_depsgraph_get())
+    direction=(s.rig_aim.matrix_world.translation-pose.translation).normalized()
+    assert direction.dot(pose.to_3x3() @ Vector((0,0,-1)))>.999
+assert custom.constraints.get(ext.rig_edit.PATH_LINK) is None
+s.rig_path_link=False
+assert bpy.ops.lichtfeld.create_rig()=={'FINISHED'}
+assert all(o.constraints.get(ext.rig_edit.PATH_LINK) is None for o in generated())
+s.rig_orientation='TANGENT';s.rig_path_link=True
+assert bpy.ops.lichtfeld.create_rig()=={'FINISHED'}
+guide.scale=tuple(value*2 for value in guide.scale);guide.rotation_euler.z=.8
+bpy.context.view_layer.update()
+for camera in generated():
+    ext.capture_settings.camera_pose(camera,bpy.context.evaluated_depsgraph_get())
+guide.scale.x*=2
+bpy.context.view_layer.update()
+try:
+    ext.capture_settings.camera_pose(generated()[0],bpy.context.evaluated_depsgraph_get())
+    raise AssertionError('Nonuniform guide scaling must not produce invalid capture poses')
+except ValueError as error:
+    assert 'apply rig changes' in str(error),str(error)
+assert bpy.ops.lichtfeld.create_rig()=={'FINISHED'}
+bpy.context.view_layer.update()
+for camera in generated():
+    ext.capture_settings.camera_pose(camera,bpy.context.evaluated_depsgraph_get())
+print('PATH_REVERSE_VIEW_ONLY_LINK_TRANSFORMS_TARGET_SCALE_CAPTURE_PASS',flush=True)
+
+# The existing transaction restores link existence/target/inverse at every cut.
+from types import SimpleNamespace
+for applied,wanted in ((True,False),(False,True),(True,True)):
+    s.rig_path_link=applied
+    assert bpy.ops.lichtfeld.create_rig()=={'FINISHED'}
+    guide.location.y+=.2
+    bpy.context.view_layer.update()
+    s.rig_path_link=wanted
+    baseline=[(o,o.data,o.matrix_world.copy(),ext.rig_edit.path_link_state(o)) for o in generated()]
+    counts=(len(bpy.data.objects),len(bpy.data.cameras),len(bpy.data.collections),len(bpy.data.curves))
+    for cut in range(400):
+        owner=SimpleNamespace(collection=None,rig_backup=[],committed=False,report=lambda *args:None)
+        work=ext.LF_OT_rig.generate(owner,bpy.context)
+        try:
+            for _ in range(cut):next(work)
+        except StopIteration:
+            assert owner.committed
+            break
+        if owner.committed:
+            for _ in work:pass
+            break
+        work.close()
+        for _ in ext.LF_OT_rig.cleanup(owner):pass
+        bpy.context.view_layer.update()
+        assert counts==(len(bpy.data.objects),len(bpy.data.cameras),len(bpy.data.collections),len(bpy.data.curves)),(applied,wanted,cut)
+        for camera,data,matrix,link in baseline:
+            assert camera.data==data
+            assert max(abs(a-b) for x,y in zip(camera.matrix_world,matrix) for a,b in zip(x,y))<1e-5,(applied,wanted,cut)
+            restored=ext.rig_edit.path_link_state(camera)
+            assert bool(restored)==bool(link)
+            if link:
+                assert restored[0]==link[0] and restored[2]==link[2]
+                assert max(abs(a-b) for x,y in zip(restored[1],link[1]) for a,b in zip(x,y))<1e-6
+    else:raise AssertionError('Path rig never reached commit')
+print('PATH_LINK_UNLINK_RELINK_CANCEL_EVERY_PRECOMMIT_YIELD_PASS',flush=True)
+s.rig_mode='SPHERE'
+assert bpy.ops.lichtfeld.create_rig()=={'FINISHED'}
+assert all(o.constraints.get(ext.rig_edit.PATH_LINK) is None for o in generated())
+assert 'rig_path_link' not in ext.rig_edit.decode_recipe(ext.rig_recipe(s))
+assert bpy.ops.lichtfeld.live_rig()=={'FINISHED'}
+assert bpy.ops.lichtfeld.live_rig()=={'FINISHED'}
+print('PATH_LINK_TO_RADIAL_LIVE_REUSES_NATIVE_OWNER_PASS',flush=True)
+s.rig_mode='PATH';s.rig_orientation='TARGET';s.rig_path_link=True
+assert bpy.ops.lichtfeld.create_rig()=={'FINISHED'}
+camera=generated()[0]
+camera.constraints.move(list(camera.constraints).index(camera.constraints.get(ext.rig_edit.AIM)),0)
+order=[c.name for c in camera.constraints]
+s.rig_orientation='TANGENT'
+owner=SimpleNamespace(collection=None,rig_backup=[],committed=False,report=lambda *args:None)
+work=ext.LF_OT_rig.generate(owner,bpy.context)
+while not owner.rig_backup:next(work)
+assert camera.constraints.get(ext.rig_edit.AIM) is None
+work.close()
+for _ in ext.LF_OT_rig.cleanup(owner):pass
+assert [c.name for c in camera.constraints]==order
+print('PATH_LINK_USER_CONSTRAINT_ORDER_CANCEL_PASS',flush=True)

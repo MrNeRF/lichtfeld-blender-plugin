@@ -131,7 +131,7 @@ def camera_pose(camera, graph):
         raise ValueError(f'Camera {camera.name}: zero or near-zero scale; inspect the camera and its parents')
     axes = [axis.normalized() for axis in axes]
     if any(abs(axes[a].dot(axes[b])) > 1e-5 for a, b in ((0, 1), (0, 2), (1, 2))):
-        raise ValueError(f'Camera {camera.name}: sheared transform; inspect the camera and its parents')
+        raise ValueError(f'Camera {camera.name}: sheared transform; apply rig changes after guide scaling, or inspect camera parents')
     if axes[0].cross(axes[1]).dot(axes[2]) < 0:
         raise ValueError(f'Camera {camera.name}: mirrored transform; inspect the camera and its parents')
     return matrix.normalized()

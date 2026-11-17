@@ -7,7 +7,7 @@ from bpy.props import EnumProperty, FloatProperty, FloatVectorProperty
 from .rig_geometry import sample_path, guide_path
 
 
-def positions(context, curve, count, *, spacing=None, reverse=False):
+def positions(context, curve, count, *, spacing=None):
     if not curve or curve.type != 'CURVE' or len(curve.data.splines) != 1:
         raise ValueError('Choose a Curve with exactly one spline (Bezier, Poly or NURBS)')
     temporary = curve.copy()
@@ -49,7 +49,7 @@ def positions(context, curve, count, *, spacing=None, reverse=False):
             yield None
         if len(visited)!=len(mesh.vertices):
             raise ValueError('The evaluated curve contains disconnected paths')
-        for point in sample_path(points, count, cyclic, spacing=spacing, reverse=reverse):
+        for point in sample_path(points, count, cyclic, spacing=spacing):
             yield point
     finally:
         if evaluated:

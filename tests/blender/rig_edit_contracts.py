@@ -169,7 +169,7 @@ assert s.rig_path_sampling=='COUNT' and s.rig_path_spacing==1 and not s.rig_path
 assert ext.rig_recipe(s)==recipe
 saved_views=s.views
 for field, invalid in (('rig_path_sampling','UNKNOWN'),('rig_path_spacing',0),
-                       ('rig_path_spacing',float('nan')),('rig_path_reverse',1)):
+                       ('rig_path_spacing',float('nan')),('rig_path_reverse',1),('rig_path_link',1)):
     values=json.loads(recipe);values[field]=invalid;values['views']=24
     collection['lichtfeld_rig_recipe']=json.dumps(values)
     try:
