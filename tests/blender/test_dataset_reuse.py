@@ -130,6 +130,36 @@ class DatasetReuse(unittest.TestCase):
                 result=jobs.check_environment('',directory,require_backend=False)
             self.assertTrue(result['ok'])
 
+    def test_unwritable_jobs_path_does_not_mark_verified_backend_incompatible(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'file-not-directory'
+            path.write_text('not a directory')
+            backend = Path(directory) / 'backend'
+            backend.write_text('backend')
+            from unittest.mock import patch
+            with patch.object(jobs, 'verify_backend', return_value='Verified backend'):
+                result = jobs.check_environment(str(backend), str(path))
+            self.assertFalse(result['ok'])
+            self.assertTrue(result['backend'])
+            self.assertFalse(result['folder'])
+
+    def test_replacing_backend_invalidates_cached_api_verification(self):
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as directory:
+            backend = Path(directory) / 'backend'
+            backend.write_bytes(b'old')
+            with patch.object(jobs, 'verify_backend', return_value='Verified backend') as verify:
+                first = jobs.check_environment(str(backend), directory)
+                cached = jobs.check_environment(str(backend), directory,
+                    backend_version=first['backend_version'], backend_identity=first['backend_identity'])
+                self.assertTrue(cached['ok'])
+                verify.assert_called_once()
+                backend.write_bytes(b'replacement')
+                changed = jobs.check_environment(str(backend), directory,
+                    backend_version=first['backend_version'], backend_identity=first['backend_identity'])
+                self.assertTrue(changed['ok'])
+                self.assertEqual(verify.call_count, 2)
+
     def test_preview_sh_limit_does_not_change_native_training_degree(self):
         from bridge_core import training_config
         with tempfile.TemporaryDirectory() as directory:

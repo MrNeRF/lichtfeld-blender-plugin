@@ -11,7 +11,7 @@ import sys
 import time
 import traceback
 
-from jobs import release_source, captured_dataset
+from jobs import release_source, captured_dataset, check_environment
 from job_control import stop_requested, claim_training_start
 from bridge_core import atomic_json, read_json, read_job_json, training_config, training_command, verify_artifact, digest, verified_training_outcome
 from render_devices import arguments as render_arguments
@@ -123,12 +123,14 @@ def supervise(job_path):
     try:
         if not job.get("capture_only"):
             state("validating backend")
-            version = subprocess.run([job["backend"], "--version"], capture_output=True,
-                                     timeout=20, **process_options())
-            description = (version.stdout + version.stderr).decode("utf-8", errors="replace").strip()
-            if version.returncode or "LichtFeld" not in description:
-                raise RuntimeError("The selected LichtFeld installation cannot start. Verify its executable and runtime libraries.")
-            atomic_json(root / "backend.json", {"executable": job["backend"], "version": description,
+            checked = check_environment(job["backend"], str(root.parent),
+                                        backend_version=job.get("backend_version"),
+                                        backend_identity=job.get("backend_identity"))
+            if not checked.get("ok"):
+                raise ValueError(checked.get("message", "Could not verify LichtFeld Studio"))
+            job["backend_version"] = checked.get("backend_version")
+            job["backend_identity"] = checked.get("backend_identity")
+            atomic_json(root / "backend.json", {"executable": job["backend"], "version": checked.get("backend_version"),
                                                "profile_baseline": "23fb4b466"})
         if job.get("reuse_dataset"):
             captured_dataset(root, job)
@@ -203,6 +205,11 @@ def supervise(job_path):
             state("completed", export_directory=str(destination), message="Dataset exported. No training started.")
             return
         state("starting")
+        environment_check = check_environment(job["backend"], str(root.parent),
+                                              backend_version=job.get("backend_version"),
+                                              backend_identity=job.get("backend_identity"))
+        if not environment_check.get("ok"):
+            raise ValueError(environment_check.get("message", "Could not verify LichtFeld Studio"))
         atomic_json(root / "training.json", training_config(job))
         environment = os.environ.copy()
         environment.pop("PYTHONPATH", None)

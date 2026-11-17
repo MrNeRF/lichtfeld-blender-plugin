@@ -11,6 +11,30 @@ render pipeline.
 
 ## Process boundaries
 
+Portal Gallery runs the canonical account and gallery client in the configured LichtFeld Studio installation through `--headless --python-script`. A plugin-owned local adapter exchanges token-free account state, catalog entries and artifact paths over a subprocess pipe. Blender does not import LichtFeld Studio modules or hold account tokens. Credentials remain in LichtFeld Studio's canonical account store and never enter RNA properties or a `.blend` file. Download and conversion run on workers; cancellation closes owned subprocesses. The download cache lock remains held until conversion and decoding finish.
+
+Connection cancellation uses the same control pipe. The bridge calls `cancel_device_flow()`, waits for the canonical workers and publishes the resulting account state before acknowledging cancellation. Completion wins a simultaneous cancel. The host allows ten seconds for an acknowledgement before terminating an unresponsive process and reporting that cancellation was not confirmed. Waiting and cleanup run on the Portal worker; scene changes do not cancel account connections.
+
+`.licht` assets are validated by the Portal client and materialized by
+LichtFeld Studio's `convert` command, which shares the closed-project export, in a
+cancellable child process. Before downloading, the extension requires the
+`visible-project-splats-v1` identifier on its own line
+from `convert --capabilities`. Older builds that reject the option or omit this
+identifier are rejected before download.
+This exports visible splats, not the complete project scene. Enabled crop volumes
+are applied to their source splats before merging. External RAD sources are loaded
+at full detail and must be accessible and fit in memory.
+The shared Gaussian PLY reader and cooperative point-cloud builder then prepare
+and commit a new object; Portal assets never acquire a training job identity.
+
+Portal assets use LichtFeld's generic RDF coordinates. Their Blender object
+transform maps right (+X), up (-Y), and forward (+Z) to Blender's +X, +Z, and +Y,
+matching LichtFeld Studio's native PLY drag-out into Blender. The object transform
+keeps Gaussian geometry and view-dependent radiance in the same local frame;
+it does not rewrite SH coefficients separately. This differs from the recorded
+`data_to_source` transform used to return a Blender-origin training result to
+its original scene.
+
 The installed extension registers Blender properties, operators and panels.
 Blender's UI thread owns `bpy` scene changes. Cooperative operations yield while
 walking large scenes or staging preview buffers. Worker threads perform filesystem
@@ -25,7 +49,7 @@ is an internal implementation file; users install the extension ZIP.
 The adapter accesses the training model only at callback safe boundaries. It
 hands owned CPU arrays to a single publication writer. The training model is not
 shared directly with Blender. External previews use CPU mappings, not GPU buffer
-sharing or rendered images. Studio is optional for extension-owned training.
+sharing or rendered images. The LichtFeld Studio observer UI is optional for extension-owned training.
 
 ## Job and dataset files
 
@@ -126,7 +150,7 @@ aspect, lens, sensor and shift of the camera actually rendered.
 
 Schema-1 view geometry declares `source_frame`, `data_to_source`, `model_to_data`
 and OpenCV `camera_to_data` poses with `fx`, `fy`, `cx`, `cy`, width and height.
-The preview returns through `data_to_source` in Blender. Studio applies its own
+The preview returns through `data_to_source` in Blender. LichtFeld Studio applies its own
 shared visualizer presentation to the splat, capture cameras and framing bounds.
 That presentation does not rewrite the dataset. Rotations and SH coefficients
 remain model-local, avoiding a second transform of directional color.

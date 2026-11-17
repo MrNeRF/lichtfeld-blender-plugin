@@ -1,8 +1,8 @@
 schema_version = "1.0.0"
 id = "lichtfeld_training"
 version = "0.1.0"
-name = "LichtFeld Training"
-tagline = "Train Gaussian splats from your scene without leaving Blender"
+name = "LichtFeld"
+tagline = "Train Gaussian splats and import your LichtFeld Portal assets"
 maintainer = "LichtFeld Contributors"
 type = "add-on"
 tags = ["Render", "Import-Export"]
@@ -12,5 +12,5 @@ license = ["SPDX:GPL-3.0-or-later"]
 wheels = ["./wheels/lichtfeld_training_protocol-0.1.2-py3-none-any.whl"]
 
 [permissions]
-files = "Capture scenes and save local training jobs and splats"
-network = "Prepare the isolated numerical runtime on first use"
+files = "Capture scenes, save training jobs, and import Portal splats"
+network = "Connect to LichtFeld Portal and download gallery assets and runtime dependencies"

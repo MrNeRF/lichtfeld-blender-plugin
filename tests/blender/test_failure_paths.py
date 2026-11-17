@@ -212,7 +212,7 @@ class FailurePaths(unittest.TestCase):
                     raise OSError("disk full")
                 return core.atomic_json(path, value)
             try:
-                with patch.object(supervisor.subprocess, "run", return_value=types.SimpleNamespace(returncode=0, stdout=b"LichtFeld", stderr=b"")), patch.object(supervisor.subprocess, "Popen", side_effect=start), patch.object(supervisor, "atomic_json", side_effect=writing):
+                with patch.object(supervisor, "check_environment", return_value={"ok":True}), patch.object(supervisor.subprocess, "run", return_value=types.SimpleNamespace(returncode=0, stdout=b"LichtFeld", stderr=b"")), patch.object(supervisor.subprocess, "Popen", side_effect=start), patch.object(supervisor, "atomic_json", side_effect=writing):
                     supervisor.supervise(root / "job.json")
                 self.assertEqual(len(children), 1)
                 self.assertIsNotNone(children[0].poll())
@@ -222,6 +222,53 @@ class FailurePaths(unittest.TestCase):
                     if child.poll() is None:
                         child.kill()
                     child.wait(timeout=10)
+
+    def test_supervisor_rechecks_backend_before_starting_training(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = previous_job(directory)
+            job = core.read_json(root / "job.json")
+            job.update(backend=sys.executable, resume=str(root / "output/project.licht"),
+                       backend_version="verified", backend_identity=[1, 2, 3, 4])
+            core.atomic_json(root / "job.json", job)
+            with patch.object(supervisor.subprocess, "run", return_value=types.SimpleNamespace(returncode=0, stdout=b"LichtFeld", stderr=b"")), \
+                 patch.object(supervisor, "check_environment", side_effect=[
+                     {"ok":True, "backend_version":"verified", "backend_identity":[1, 2, 3, 4]},
+                     {"ok":False, "message":"Backend changed"}]) as check, \
+                 patch.object(supervisor.subprocess, "Popen") as spawn:
+                supervisor.supervise(root / "job.json")
+            self.assertEqual(check.call_count, 2)
+            for call in check.call_args_list:
+                self.assertEqual(call.args, (sys.executable, str(root.parent)))
+                self.assertEqual(call.kwargs, {"backend_version":"verified", "backend_identity":[1, 2, 3, 4]})
+            spawn.assert_not_called()
+            self.assertEqual(core.read_json(root / "state.json")["state"], "failed")
+
+    def test_backend_rechecked_after_capture(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / 'source.blend'
+            source.write_bytes(b'scene')
+            job = {'id':'capture', 'root':str(root), 'backend':'trusted', 'blender':'blender',
+                   'source_file':str(source)}
+            core.atomic_json(root / 'job.json', job)
+            events = []
+            def check(*args, **kwargs):
+                events.append('check')
+                if len(events) == 1:
+                    return {'ok':True, 'backend_version':'verified', 'backend_identity':[1, 2, 3, 4]}
+                return {'ok':False, 'message':'Backend changed'}
+            child = Mock(returncode=0)
+            child.poll.return_value = 0
+            def render(*args, **kwargs):
+                events.append('render')
+                return child
+            with patch.object(supervisor, 'check_environment', side_effect=check), \
+                 patch.object(supervisor.subprocess, 'Popen', side_effect=render) as spawn, \
+                 patch.object(supervisor, 'captured_dataset', side_effect=lambda *args: events.append('dataset')):
+                supervisor.supervise(root / 'job.json')
+            self.assertEqual(events, ['check', 'render', 'dataset', 'check'])
+            self.assertEqual(spawn.call_count, 1)
+            self.assertEqual(core.read_json(root / 'state.json')['state'], 'failed')
 
     def test_unresponsive_child_is_killed_and_reaped(self):
         child = Mock()

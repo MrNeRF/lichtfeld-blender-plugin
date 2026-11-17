@@ -12,7 +12,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 if "--installed" in sys.argv:
     import importlib
     ext = importlib.import_module("bl_ext.user_default.lichtfeld_training")
-    assert ext.__package__ in bpy.context.preferences.addons
+    if ext.__package__ not in bpy.context.preferences.addons:
+        bpy.ops.preferences.addon_enable(module=ext.__package__)
 else:
     bpy.ops.preferences.addon_enable(module="lichtfeld_training")
     import lichtfeld_training as ext
@@ -217,7 +218,7 @@ with patch.object(ui, "peek", return_value=SimpleNamespace(status=status, reader
     for busy in (False, True, False):
         settings.importing = busy
         layout = PanelLayout()
-        ext.LF_PT_training.draw(SimpleNamespace(layout=layout), context)
+        ext.draw_training(SimpleNamespace(layout=layout), context)
         orders.append(layout.operators)
 assert orders[0] == orders[1] == orders[2], orders
 assert "lichtfeld.import_result" in orders[0] and "lichtfeld.compare_result" in orders[0]

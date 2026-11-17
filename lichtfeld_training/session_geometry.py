@@ -5,6 +5,11 @@ from pathlib import Path
 
 from lichtfeld_sessions.geometry import FLIP, IDENTITY, SCHEMA, matrix, validate
 
+# Generic LichtFeld scenes use RDF: +X right, -Y up, +Z forward.
+# Match LichtFeld Studio's SplatDragAxes::blender(): +X right, +Z up, +Y forward.
+# Blender-origin training instead uses its recorded data_to_source transform.
+RDF_TO_BLENDER = ((1, 0, 0, 0), (0, 0, 1, 0), (0, -1, 0, 0), (0, 0, 0, 1))
+
 
 def from_capture(frames):
     import numpy as np

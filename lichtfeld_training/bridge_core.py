@@ -221,3 +221,9 @@ def write_splat(root, arrays, iteration, kind, score=None):
     return {"id": path.stem, "path": relative, "iteration": iteration, "kind": kind,
             "count": count, "sh_degree": degree, "bytes": path.stat().st_size,
             "sha256": digest(path), "score": score, "created": time.time()}
+
+
+if __name__ == '__main__':
+    import lichtfeld
+    require_backend_api(lichtfeld)
+    print('LFS_BLENDER_API_READY', file=sys.__stdout__, flush=True)

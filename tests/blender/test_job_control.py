@@ -135,6 +135,7 @@ class JobControlTests(unittest.TestCase):
                         return control.stop_requested(path, job_id)
                     with patch.object(supervisor.subprocess, 'run', return_value=types.SimpleNamespace(
                             stdout=b'LichtFeld Studio', stderr=b'', returncode=0)), \
+                         patch.object(supervisor, 'check_environment', return_value={'ok': True}), \
                          patch.object(supervisor.subprocess, 'Popen', side_effect=launch), \
                          patch.object(supervisor, 'training_config', return_value={}), \
                          patch.object(supervisor, 'training_command', return_value=['trusted']), \

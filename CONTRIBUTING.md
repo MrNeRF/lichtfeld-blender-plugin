@@ -21,8 +21,7 @@ and this extension's job-control protocol have distinct owners and release cycle
 
 The current development version remains `0.1.0`; change it only for an intentional
 release. Do not add source assets, downloaded scenes or native binaries to the
-installable archive. The reviewed pure Python protocol wheel is its shared
-LichtFeld dependency.
+installable archive. The reviewed pure Python protocol wheel is a shared LichtFeld dependency. Portal uses the client in the configured LichtFeld Studio installation.
 
 Keep additions focused on concrete behavior. Reuse existing workflow owners and
 test suites; avoid duplicate protocol logic, redundant layers and test scaffolding
@@ -36,15 +35,17 @@ the existing extension packager, using a checkout at the intended LichtFeld Stud
 revision:
 
 ```sh
-python -m pip install build "setuptools>=77"
+python -m pip install "build==1.6.1" "setuptools==84.2.1"
 python tools/package_blender_training.py --lichtfeld-source /path/to/LichtFeld-Studio --output /path/outside/source/packages
 ```
 
-The packager uses the standard setuptools wheel generator in a temporary staging
-directory and writes the wheel in `lichtfeld_training/wheels`. An unchanged
-wheel payload keeps the existing archive. Changed payloads under an existing
-distribution name and version are rejected: choose a new protocol wheel version
-in the manifest and reviewed inventory before regenerating. This applies to
+The packager builds the training protocol from the specified LichtFeld Studio checkout. It uses the standard setuptools wheel
+generator in a temporary staging directory and writes the wheel in
+`lichtfeld_training/wheels`. Use the versions above when regenerating: wheel
+metadata also depends on the build tools. An unchanged wheel payload keeps the
+existing archive. Changed payloads under an existing distribution name and
+version are rejected: choose a new dependency version in the manifest before
+regenerating. This applies to
 implementation changes as well as protocol contract changes; Blender can retain
 an installed dependency with the same name and version even after a restart.
 The extension's development version can remain unchanged. Review the

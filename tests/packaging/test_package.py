@@ -59,13 +59,15 @@ class PackageContracts(unittest.TestCase):
             for name in ('src/python/lichtfeld_sessions/__init__.py', 'src/python/_lfs_path_io.py', 'LICENSE'):
                 path = source/name
                 path.parent.mkdir(parents=True, exist_ok=True)
-                path.write_text('# Protocol build fixture\n')
+                path.write_bytes(b'# Protocol build fixture\r\n')
             wheel = repository/'lichtfeld_training'/packager.PROTOCOL_WHEEL
             original = wheel.read_bytes()
             with zipfile.ZipFile(wheel) as archive:
                 payloads = {name: archive.read(name) for name in archive.namelist()}
 
-            def generate(arguments, *, cwd, **kwargs):
+            def generate(arguments, *, cwd=None, **kwargs):
+                for name in ('lichtfeld_sessions/__init__.py', '_lfs_path_io.py', 'LICENSE'):
+                    self.assertEqual((Path(cwd)/name).read_bytes(), b'# Protocol build fixture\r\n')
                 output = Path(cwd)/'dist'/wheel.name
                 output.parent.mkdir()
                 with zipfile.ZipFile(output, 'w', compression=zipfile.ZIP_STORED) as archive:
@@ -75,6 +77,11 @@ class PackageContracts(unittest.TestCase):
             with mock.patch.object(packager, '__file__', str(repository/'tools/package_blender_training.py')), \
                     mock.patch.object(packager.subprocess, 'run', side_effect=generate):
                 # Equivalent contents need no new identity despite ZIP changes.
+                packager.build_protocol(source)
+                self.assertEqual(wheel.read_bytes(), original)
+                payloads = {name: data.replace(b'\r\n', b'\n') for name, data in payloads.items()}
+                record = next(name for name in payloads if name.endswith('.dist-info/RECORD'))
+                payloads[record] = b'Checksums regenerated for platform line endings\n'
                 packager.build_protocol(source)
                 self.assertEqual(wheel.read_bytes(), original)
                 payloads['lichtfeld_sessions/__init__.py'] += b'\n# Changed implementation\n'

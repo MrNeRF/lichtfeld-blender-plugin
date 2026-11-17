@@ -40,8 +40,8 @@ for checking, errors, changed in ((True, ["Checking source and cameras…"], Fal
     s.camera_collection["lichtfeld_rig_recipe"] = "changed" if changed else ext.rig_recipe(s)
     ready = {"checking": checking, "cameras": [], "environment": {"checking": checking}}
     layout = Layout()
-    with patch.object(ext.preflight, "cached", return_value=ready), patch.object(ext.preflight, "issues", return_value=errors), patch.object(ext, "preferences", return_value=None):
-        ext.LF_PT_training.draw(SimpleNamespace(layout=layout), context)
+    with patch.object(ext.preflight, "cached", return_value=ready), patch.object(ext.preflight, "issues", return_value=errors), patch.object(ext, "preferences", return_value=None), patch.object(ext.preflight, 'environment', return_value={'backend': True, 'ok': True}):
+        ext.draw_training(SimpleNamespace(layout=layout), context)
     orders.append((layout.fields, layout.rows))
 assert all(order == orders[0] for order in orders), orders
 assert any(name == "iterations" for name, row in orders[0][0])
@@ -61,8 +61,8 @@ for source in ('UNLOADED','LOADED','NEW'):
             for busy in (False,True,False):
                 s.operation_busy=busy
                 layout=Layout(closed=closed)
-                with patch.object(ext.preflight,'cached',return_value=busy_ready),patch.object(ext.preflight,'issues',return_value=[]),patch.object(ext,'preferences',return_value=None):
-                    ext.LF_PT_training.draw(SimpleNamespace(layout=layout),context)
+                with patch.object(ext.preflight,'cached',return_value=busy_ready),patch.object(ext.preflight,'issues',return_value=[]),patch.object(ext,'preferences',return_value=None), patch.object(ext.preflight, 'environment', return_value={'backend': True, 'ok': True}):
+                    ext.draw_training(SimpleNamespace(layout=layout),context)
                 busy_orders.append((layout.fields,layout.rows,layout.operations))
                 if busy:
                     assert 'Updating…' in layout.labels
@@ -84,8 +84,8 @@ for checking,pending,expected in ((False,True,'Rig/framing changes need Apply'),
     (True,False,'Checking camera setup…'),(False,False,'Capture uses current cameras')):
     ready={'checking':checking,'reference_changed':pending,'cameras':[],'environment':{}}
     layout=Layout()
-    with patch.object(ext.preflight,'cached',return_value=ready),patch.object(ext.preflight,'issues',return_value=[]),patch.object(ext,'preferences',return_value=None):
-        ext.LF_PT_training.draw(SimpleNamespace(layout=layout),context)
+    with patch.object(ext.preflight,'cached',return_value=ready),patch.object(ext.preflight,'issues',return_value=[]),patch.object(ext,'preferences',return_value=None), patch.object(ext.preflight, 'environment', return_value={'backend': True, 'ok': True}):
+        ext.draw_training(SimpleNamespace(layout=layout),context)
     assert expected in layout.labels,(expected,layout.labels)
 print('REFERENCE_ONLY_PENDING_STATE_AND_CHECKING_NOTICE_PASS')
 
@@ -97,8 +97,8 @@ ready={'checking':False,'reference_changed':True,'cameras':['a','b','c','d'],'en
 for task,operator in (('CAPTURE','lichtfeld.start_training'),('EXPORT','lichtfeld.export_dataset'),('REUSE','lichtfeld.restart_training')):
     s.dataset_mode=task
     layout=Layout()
-    with patch.object(ext.preflight,'cached',return_value=ready),patch.object(ext.preflight,'issues',return_value=[]),patch.object(ext,'preferences',return_value=None):
-        ext.LF_PT_training.draw(SimpleNamespace(layout=layout),context)
+    with patch.object(ext.preflight,'cached',return_value=ready),patch.object(ext.preflight,'issues',return_value=[]),patch.object(ext,'preferences',return_value=None), patch.object(ext.preflight, 'environment', return_value={'backend': True, 'ok': True}):
+        ext.draw_training(SimpleNamespace(layout=layout),context)
     operations=dict(layout.operations)
     assert operator in operations
     assert sum(name==operator for name,row in layout.operations)==1
@@ -110,8 +110,8 @@ for task,operator in (('CAPTURE','lichtfeld.start_training'),('EXPORT','lichtfel
     assert ('scope' in dict(layout.fields))==(task!='REUSE')
 s.dataset_mode='CAPTURE'
 layout=Layout(closed=True)
-with patch.object(ext.preflight,'cached',return_value=ready),patch.object(ext.preflight,'issues',return_value=[]),patch.object(ext,'preferences',return_value=None):
-    ext.LF_PT_training.draw(SimpleNamespace(layout=layout),context)
+with patch.object(ext.preflight,'cached',return_value=ready),patch.object(ext.preflight,'issues',return_value=[]),patch.object(ext,'preferences',return_value=None), patch.object(ext.preflight, 'environment', return_value={'backend': True, 'ok': True}):
+    ext.draw_training(SimpleNamespace(layout=layout),context)
 assert 'lichtfeld.start_training' in dict(layout.operations) and 'lichtfeld.capture_framing' in dict(layout.operations)
 assert 'lichtfeld.create_rig' in dict(layout.operations)
 assert 'iterations' not in dict(layout.fields) and 'scope' not in dict(layout.fields)
@@ -120,8 +120,8 @@ assert 'iterations' not in dict(layout.fields) and 'scope' not in dict(layout.fi
 for loaded,action in ((False,'lichtfeld.read_rig'),(True,'lichtfeld.create_rig')):
     s.rig_parameter_source=s.camera_collection if loaded else None
     layout=Layout(closed=True)
-    with patch.object(ext.preflight,'cached',return_value=ready),patch.object(ext.preflight,'issues',return_value=[]),patch.object(ext,'preferences',return_value=None):
-        ext.LF_PT_training.draw(SimpleNamespace(layout=layout),context)
+    with patch.object(ext.preflight,'cached',return_value=ready),patch.object(ext.preflight,'issues',return_value=[]),patch.object(ext,'preferences',return_value=None), patch.object(ext.preflight, 'environment', return_value={'backend': True, 'ok': True}):
+        ext.draw_training(SimpleNamespace(layout=layout),context)
     assert sum(name==action for name,row in layout.operations)==1
     assert sum(name=='lichtfeld.capture_framing' for name,row in layout.operations)==1
     if not loaded:assert not any(name=='lichtfeld.create_rig' for name,row in layout.operations)

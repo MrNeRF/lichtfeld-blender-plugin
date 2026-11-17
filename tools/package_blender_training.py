@@ -25,7 +25,8 @@ mrnf_defaults.json preflight.py preview_scene.py render_devices.py render_worker
 rig_edit.py rig_geometry.py rig_mesh.py rig_path.py scene_render.py
 scene_render_worker.py session_cameras.py session_geometry.py session_reader.py
 supervisor.py training_options.py training_profiles.json
-ui_help.py ui_runtime.py ui_text.py visibility.py workflow.py
+ui_help.py ui_runtime.py ui_text.py visibility.py workflow.py portal_runtime.py portal_ui.py portal_bridge.py
+assets/lichtfeld-icon.png assets/lichtfeld-logo-white.png assets/lichtfeld-logo-black.png
 """.split()) | {PROTOCOL_WHEEL}
 DOCUMENT_FILES = ("LICENSE", "CREDITS.md", "README.md", "CONTRIBUTING.md",
                   "docs/user-guide.md", "docs/technical-reference.md")
@@ -64,12 +65,13 @@ py-modules = ["_lfs_path_io"]
         wheel = staging / "dist" / Path(PROTOCOL_WHEEL).name
         installed = destination / wheel.name
         if installed.exists():
-            # Blender caches wheel distributions by name/version. Compare their
-            # payloads, not ZIP timestamps, ordering or compression settings.
+            # Preserve the existing archive across platform line endings. RECORD
+            # is generated from those bytes; compare the actual text payloads.
             with zipfile.ZipFile(installed) as previous, zipfile.ZipFile(wheel) as rebuilt:
                 names = set(previous.namelist())
                 if names != set(rebuilt.namelist()) or any(
-                        previous.read(name) != rebuilt.read(name) for name in names):
+                        previous.read(name).replace(b"\r\n", b"\n") != rebuilt.read(name).replace(b"\r\n", b"\n")
+                        for name in names if not name.endswith(".dist-info/RECORD")):
                     raise ValueError("Protocol wheel contents changed under the same distribution version. "
                                      "Update the protocol version in the manifest and reviewed wheel inventory.")
             return
