@@ -2265,7 +2265,10 @@ def draw_capture_actions(setup, settings, ready, errors, capture_only, wrapped):
     if checking:
         setup.label(text='Updating setup…' if settings.operation_busy else 'Checking capture setup…', icon='TIME')
     elif errors:
-        wrapped(setup, errors[0])
+        if errors[0] in ready.get('camera_issues', {}):
+            setup.label(text='Review cameras in Capture checks')
+        else:
+            wrapped(setup, errors[0])
     else:
         setup.label(text='Ready to capture', icon='CHECKMARK')
     if not bpy.data.filepath or bpy.data.is_dirty:
@@ -2415,20 +2418,29 @@ def draw_training(self, context):
             draw_training_controls(box, settings, wrapped)
     start = layout.column()
     start.enabled = not settings.operation_busy
-    if not draw_backend_requirement(start, prefs, installation, wrapped):
+    backend_required = draw_backend_requirement(start, prefs, installation, wrapped)
+    if not backend_required:
         draw_capture_actions(start, settings, ready, errors, capture_only, wrapped)
     checks = layout.column()
     checks.enabled = not settings.operation_busy
     box = draw_disclosure(checks, 'validation_details', 'Capture checks')
     if box is not None:
         box.enabled = not settings.operation_busy
-        box.operator('lichtfeld.check_camera_poses', text='Check camera poses...')
-        for error in errors[:5]:
-            wrapped(box, error)
-            if name := ready.get('camera_issues', {}).get(error):
-                box.operator('lichtfeld.inspect_capture_camera', icon='CAMERA_DATA').camera_name = name
-        if len(errors) > 5:
-            wrapped(box, f'{len(errors)-5:,} more issues; resolve the listed issues first.')
+        report = rig_analysis.last_result(context)
+        camera_issues = ready.get('camera_issues')
+        if camera_issues is not None:
+            count = len(camera_issues)
+            box.label(text=f"Camera issue{'s' if count != 1 else ''}: {count:,}")
+        else:
+            box.label(text='Camera issues: checking…')
+        box.label(text=f"Repeated poses: {len(report['repeats']):,} (last check)" if report is not None else 'Repeated poses: not checked')
+        box.operator('lichtfeld.camera_report', text='Camera checks...')
+        covered = set(preflight.save_issues()) if not backend_required else set()
+        if backend_required:covered.add(installation.get('message', 'Choose your LichtFeld Studio installation.'))
+        other_errors = [error for error in errors if error not in (camera_issues or {}) and error not in covered]
+        for error in other_errors[:5]:wrapped(box, error)
+        if len(other_errors) > 5:
+            wrapped(box, f'{len(other_errors)-5:,} more issues; resolve the listed issues first.')
         if not errors:
             box.label(text="Capture setup is ready", icon="CHECKMARK")
     draw_job_navigation(layout, settings)

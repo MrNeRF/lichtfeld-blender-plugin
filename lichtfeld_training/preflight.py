@@ -196,12 +196,23 @@ def cached(context,prefs,capture_only=False,*,capture=None):
  if not devices['ok']:errors.append(devices.get('message','Check Render devices'))
  return {**result,'errors':errors,'checking':devices.get('checking',False),'render_device':devices.get('effective'),'environment':environment(prefs,capture_only=capture_only)}
 
+def camera_status(context):
+ # Read the canonical readiness snapshot; drawing must not launch another scan.
+ result=_cache.get(context.scene.as_pointer())
+ return result if result and result['signature']==signature(context) else None
+
+
+def save_issues(require_saved=True):
+ if require_saved and not bpy.data.filepath:return ['Save the .blend before capture.']
+ if require_saved and bpy.data.is_dirty:return ['Save the latest changes before capture.']
+ return []
+
+
 def issues(result,require_saved=True):
  errors=list(result['errors'])
  env=result['environment']
  if not env.get('ok'):errors.append(env.get('message','Check the installation.'))
- if require_saved and not bpy.data.filepath:errors.append('Save the .blend before capture.')
- elif require_saved and bpy.data.is_dirty:errors.append('Save the latest changes before capture.')
+ errors.extend(save_issues(require_saved))
  return errors
 
 def tick(context,prefs):

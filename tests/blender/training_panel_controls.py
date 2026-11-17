@@ -25,6 +25,7 @@ class Layout:
     def panel_prop(self,owner,name):return self.child(),self.child() if getattr(owner,name) else None
     def label(self,**kw):self.records.append(('label',kw.get('text'),True))
     def progress(self,**kw):pass
+    def separator(self,**kw):pass
     def prop(self,*args,**kw):pass
     def operator(self,name,**kw):
         item=self;enabled=True
@@ -78,3 +79,24 @@ with patch.object(ext.ui_runtime,'peek',return_value=binding),patch.object(ext.u
     assert not any(name=='label' and text=='Settings used for this job' for name,text,enabled in layout.records)
 print('SNAPSHOT_STAGING_NEVER_TOGGLES_CONTROLS_AND_READONLY_PRESERVED_PASS',flush=True)
 s.job_directory='';s.attached_session='';ext.ui_runtime.clear()
+
+# Camera summaries must not hide unrelated job-folder or installation errors.
+s.running=False;s.mode='NEW';s.dataset_mode='CAPTURE'
+panels=bpy.context.window_manager.lichtfeld_panels
+panels.setup_content=False;panels.setup_cameras=False
+panels.setup_output=False;panels.setup_training=False;panels.validation_details=True
+camera_error='Camera Unsupported: capture requires a Perspective camera'
+for backend in (True,False):
+    installation={'backend':backend,'ok':False,'message':'Job folder is unavailable' if backend else 'Choose your installation'}
+    ready={'errors':[camera_error],'camera_issues':{camera_error:'Unsupported'},'environment':installation}
+    layout=Layout()
+    with patch.object(ext.ui_runtime,'peek',return_value=None),patch.object(ext.preflight,'environment',return_value=installation),patch.object(ext.preflight,'cached',return_value=ready):
+        ext.draw_training(SimpleNamespace(layout=layout),context)
+    labels=' '.join(text or '' for name,text,enabled in layout.records if name=='label')
+    assert 'Camera issue: 1' in labels and 'Repeated poses: not checked' in labels
+    assert installation['message'] in labels
+    assert camera_error not in labels
+    assert sum(name=='lichtfeld.camera_report' for name,text,enabled in layout.records)==1
+    assert not any(name=='lichtfeld.inspect_capture_camera' for name,text,enabled in layout.records)
+    if not backend:assert all(message in labels for message in ext.preflight.save_issues())
+print('CAMERA_SUMMARY_PRESERVES_ENVIRONMENT_AND_SAVE_ERRORS_PASS',flush=True)

@@ -538,8 +538,12 @@ def pose_checks():
     bpy.ops.wm.save_as_mainfile(filepath=path)
     bpy.ops.ed.undo_push(message='Pose check saved baseline')
     proof={'phase':'first','results':[],'ticks':0,'max_gap_ms':0}
+    from unittest.mock import patch
     original_show=extension.rig_analysis.show_result
-    extension.rig_analysis.show_result=lambda context,result:proof['results'].append(result)
+    def shown(context,result):
+        proof['results'].append(result)
+        original_show(context,result)
+    extension.rig_analysis.show_result=shown
     selection=(bpy.context.view_layer.objects.active,tuple(bpy.context.selected_objects))
     identities=tuple(obj.as_pointer() for obj in bpy.data.objects)
     def begin():
@@ -575,6 +579,14 @@ def pose_checks():
                 result=proof['results'].pop()
                 assert result['camera_count']==10000 and len(result['matches'])==1
                 assert len(result['camera_issues'])==1
+                snapshot=extension.rig_analysis.last_result(bpy.context)
+                assert snapshot is not None and len(snapshot['repeats'])==1 and 'poses' not in snapshot
+                reopened=time.perf_counter()
+                with patch.object(extension.rig_analysis,'analyze_steps',side_effect=AssertionError('Reopen started a second scan')):
+                    assert bpy.ops.lichtfeld.camera_report('INVOKE_DEFAULT',issues_open=True,repeats_open=True)=={'RUNNING_MODAL'}
+                assert extension.rig_analysis._active is None
+                assert not bpy.data.is_dirty
+                proof[proof['phase']+'_reopen_seconds']=time.perf_counter()-reopened
                 proof[proof['phase']+'_seconds']=now-proof['started']
                 print('POSE_CHECK_TIMING',proof['phase'],now-proof['started'],proof['max_gap_ms'],flush=True)
                 if proof['phase']=='first':proof['phase']='repeat';begin();return .01
@@ -587,11 +599,11 @@ def pose_checks():
             bpy.ops.ed.undo_push(message='Before read-only pose check')
             begin()
             assert bpy.ops.ed.undo()=={'FINISHED'}
-            assert extension.rig_analysis._active is None
+            assert extension.rig_analysis._active is None and extension.rig_analysis.last_result(bpy.context) is None
             proof['undo']=True
             begin()
             bpy.ops.wm.open_mainfile(filepath=path,use_scripts=False)
-            assert extension.rig_analysis._active is None
+            assert extension.rig_analysis._active is None and extension.rig_analysis.last_result(bpy.context) is None
             proof['load']=True
             bpy.app.timers.register(after_load,first_interval=.1)
             return None

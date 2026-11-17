@@ -1,12 +1,14 @@
 # SPDX-FileCopyrightText: 2026 LichtFeld Studio Authors
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Explicit, read-only pose diagnostics; no result history or scene state."""
+"""Explicit pose diagnostics with one transient repeated-pose snapshot; no scene state."""
 import time
 import bpy
+from bpy.props import BoolProperty
 from . import preflight, rig_geometry, rig_edit, capture_preview
-from .ui_text import draw_paragraph
+from .ui_text import draw_disclosure, draw_paragraph
 
 _active = None
+_report = None
 
 
 def analyze_steps(context):
@@ -21,27 +23,76 @@ def analyze_steps(context):
     return dict(checks, matches=matches, scene=scene, frame=frame)
 
 
+def last_result(context):
+    collection = context.scene.lichtfeld_training.camera_collection
+    if (_report is not None and collection is not None and
+            _report['scene_id'] == context.scene.session_uid and
+            _report['collection_id'] == collection.session_uid and
+            _report['frame'] == context.scene.frame_current):
+        return _report
+    return None
+
+
 def show_result(context, result):
-    names = [name for name, frame in result['poses']]
-    issues = list(result['camera_issues'].items())
-    matches = result['matches']
-    scene, frame, count = result['scene'], result['frame'], result['camera_count']
-    scale = context.preferences.system.ui_scale
-    def draw(menu, _context):
-        layout = menu.layout
-        layout.label(text=f'{scene} · frame {frame} · {count:,} cameras')
-        layout.label(text=f'{len(issues):,} pose issues; {len(matches):,} repeated poses')
-        for message, name in issues[:4]:
-            draw_paragraph(layout, message, 420, scale)
-            layout.operator('lichtfeld.inspect_capture_camera', text='Select ' + name).camera_name = name
-        for first, repeated in matches[:8]:
-            layout.operator('lichtfeld.inspect_capture_camera', text=names[repeated] + ' — same pose as ' + names[first]).camera_name = names[repeated]
-        remaining = max(0,len(issues)-4) + max(0,len(matches)-8)
-        if remaining:
-            layout.label(text=f'{remaining:,} more matches/issues; inspect the listed cameras and rerun')
-        layout.label(text='Exact poses only; images may differ with different optics')
-        layout.label(text='No cameras changed. Rerun after scene edits')
-    context.window_manager.popup_menu(draw, title='Camera pose check')
+    global _report
+    names = [name for name, matrix in result['poses']]
+    _report = dict(scene_id=context.scene.session_uid,
+                   collection_id=context.scene.lichtfeld_training.camera_collection.session_uid,
+                   frame=result['frame'], count=result['camera_count'],
+                   repeats=[(names[first], names[repeated]) for first, repeated in result['matches']])
+    bpy.ops.lichtfeld.camera_report('INVOKE_DEFAULT')
+
+
+class LF_OT_camera_report(bpy.types.Operator):
+    bl_idname = 'lichtfeld.camera_report'
+    bl_label = 'Camera checks'
+    bl_description = 'Review current camera issues and the last explicit repeated-pose check'
+    issues_open: BoolProperty(name='Camera issues', default=False, options={'SKIP_SAVE'},
+        description='Expand invalid camera settings and select a camera to inspect')
+    repeats_open: BoolProperty(name='Repeated poses', default=False, options={'SKIP_SAVE'},
+        description='Expand cameras with exactly matching evaluated position and orientation; different optics may still produce different images')
+
+    @classmethod
+    def poll(cls, context):
+        return bool(context.scene.lichtfeld_training.camera_collection) and not capture_preview.is_preview(context.scene)
+
+    def invoke(self, context, event):
+        return context.window_manager.invoke_popup(self, width=420)
+
+    def draw(self, context):
+        layout = self.layout
+        layout.label(text='Camera checks')
+        layout.separator()
+        ready = preflight.camera_status(context)
+        report = last_result(context)
+        issues = list(ready['camera_issues'].items()) if ready is not None else None
+        groups = (('issues_open', 'Camera issues', issues),
+                  ('repeats_open', 'Repeated poses', report['repeats'] if report is not None else None))
+        for field, title, entries in groups:
+            if entries is None:
+                layout.label(text=title + (': checking…' if field == 'issues_open' else ': not checked'))
+                continue
+            if not entries:
+                layout.label(text=title + ': 0')
+                continue
+            body = draw_disclosure(layout, field, f'{title} ({len(entries):,})', nested=False, owner=self)
+            if body is None:continue
+            if field == 'repeats_open':
+                body.label(text=f"Last check · frame {report['frame']} · {report['count']:,} cameras")
+            for first, name in entries[:8]:
+                row = body.split(factor=.78)
+                row.label(text=name)
+                row.operator('lichtfeld.inspect_capture_camera', text='Select').camera_name = name
+                detail = first.removeprefix(f'Camera {name}: ') if field == 'issues_open' else 'Same pose: ' + first
+                region = context.region_popup or context.region
+                draw_paragraph(body, detail, region.width, context.preferences.system.ui_scale)
+                body.separator(factor=.35)
+            if len(entries)>8:body.label(text=f'First 8 of {len(entries):,}; inspect and check again')
+        layout.separator()
+        row = layout.row()
+        row.alignment = 'RIGHT'
+        row.operator('lichtfeld.check_camera_poses', text='Run again' if report is not None else 'Run check')
+
 
 
 def is_running():
@@ -49,6 +100,8 @@ def is_running():
 
 
 def clear():
+    global _report
+    _report = None
     if _active is not None:
         _active.release()
 
@@ -56,7 +109,7 @@ def clear():
 class LF_OT_check_poses(bpy.types.Operator):
     bl_idname = 'lichtfeld.check_camera_poses'
     bl_label = 'Check camera poses'
-    bl_description = 'Find invalid or repeated evaluated camera poses on request; no cameras are changed and image coverage is not assessed'
+    bl_description = 'Run a fresh check for exactly repeated evaluated poses; no cameras are changed and image coverage is not assessed'
 
     @classmethod
     def poll(cls, context):
@@ -134,4 +187,4 @@ class LF_OT_check_poses(bpy.types.Operator):
         if hasattr(self, 'work'):self.release()
 
 
-CLASSES = (LF_OT_check_poses,)
+CLASSES = (LF_OT_check_poses, LF_OT_camera_report)

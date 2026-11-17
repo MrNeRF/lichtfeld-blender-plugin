@@ -305,9 +305,9 @@ surfaces and sufficient overlap still need inspection.
 
 **Fit cameras closer**, beside the distance controls, enables **Auto fit** and sets **Distance factor** to 1.05. It changes the setup parameters only: use **Create camera rig** or **Apply rig changes** to move the cameras, then check framing. Automatic fitting can still increase the final distance to keep the reference in view.
 
-### Check camera poses
+### Camera checks
 
-Open **Capture checks → Check camera poses** to inspect the cameras currently in
+Open **Capture checks → Camera checks** to review the cameras currently in
 the capture collection, including nested collections and custom cameras. The
 check reads evaluated poses, so parent and tracking constraints are included.
 It reports unsupported/invalid camera poses and exact repetitions of an earlier
@@ -315,9 +315,17 @@ pose. Panorama cameras sharing a position while facing different directions
 are distinct. Different lenses can produce different images at the same pose;
 this is a diagnostic, not a recommendation to delete cameras.
 
-The result names the scene and frame. Use a camera entry to select it for
-inspection. The check itself changes no cameras, selection, save state or undo
-history. While the check runs, scene input is held to keep the scan consistent;
+**Camera issues** follows the current capture readiness. **Repeated poses** shows
+the last explicit check, or **not checked** before the first run. Expand either
+group and use **Select** beside a camera to inspect it. The repeated-pose details
+name its matching camera and the frame/count of that snapshot.
+
+Use **Run check** or **Run again** to update repeated poses after editing cameras.
+Reopening the result does not start another scan. One transient result is kept
+for the current scene, camera collection and frame. Undo/redo, opening a file
+or disabling the extension clears it. No results are saved in the project. The check itself changes no
+cameras, selection, save state or undo history. While the check runs, scene input
+is held to keep the scan consistent;
 press Esc or right-click to cancel. Rerun after editing the scene; results are snapshots
 and unapplied rig settings are not used. Small position/rotation differences are
 not considered exact matches. This check does not measure collisions, clearance,
