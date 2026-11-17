@@ -125,10 +125,19 @@ capture contract before creating staging IDs. Generated indices are station-majo
 normalization handle guide links, cancellation and calibration unchanged.
 `rig_path.tangent` owns the existing outgoing/previous-point convention. Upright
 station frames use the guide's up axis and reject vertical tangents rather than
-accumulating transport roll. Yaw rotates the whole frame around guide up,
+accumulating transport roll. For Horizontal band, yaw rotates the whole frame around guide up,
 keeping each station's elevation across its views. Target-facing stations use the existing shared
 Track To helper, followed by the existing constant rotation constraint in
-WORLD/BEFORE mode for yaw about world Z. Radial jitter retains LOCAL/AFTER mode.
+WORLD/BEFORE mode for yaw about world Z. For non-band station coverage, `rig_geometry.station_directions` adapts the
+existing ring/Fibonacci distributions to forward-X, left-Y, up-Z station axes.
+Panorama grid uses the existing rings with aligned azimuths and multiplies views
+per row by rows before the capture-count check. Uniform vertical bands restrict
+elevation and azimuth in the Fibonacci sampler; forward hemispheres
+rotate the existing upper cap. Full sphere and legacy full-turn sampling retain
+exact arithmetic. New coverage is relative to the facing frame. Target-facing
+3D offsets reuse LOCAL/AFTER on the existing rotation constraint, so native aim
+movement remains active; no per-station helpers are added. Radial jitter retains
+LOCAL/AFTER mode.
 The same constraint owner transfers either mode after the commit boundary.
 Default guide-facing recipes omit the new frame key, preserving old recipes.
 

@@ -43,7 +43,7 @@ PROPERTIES = {
     'rig_mesh_offset': 'Offset camera positions along the helper’s world-space face normals, in scene units',
     'seed_method': 'Initialize Gaussians from rendered visible surfaces and image colors, or from sampled surface geometry',
     'seed_points': 'Maximum initial point count shared across all captured views; positive depth supervision needs enough visible correspondences',
-    'rig_orientation': 'Choose target aiming, the curve tangent, or a panorama band at each sampled curve position',
+    'rig_orientation': 'Choose target aiming, the curve tangent, or several perspective viewing directions at each sampled curve position',
     'rig_generator': 'Show parameters for creating or updating generated cameras; existing cameras are used until Apply is pressed',
     'rig_details': 'Show elevation, rotation, lens and aim offset. Applying replaces generated poses and preserves additional cameras; Undo restores the previous rig',
     'optimizer_file': 'Optional native optimizer JSON; managed parameters must be set with the visible training controls',

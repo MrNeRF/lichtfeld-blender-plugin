@@ -31,7 +31,8 @@ def start():
     if '--panorama' in sys.argv:
         settings=bpy.context.scene.lichtfeld_training
         settings.rig_mode='PATH';settings.rig_orientation='PANORAMA';settings.views=125
-        settings.rig_station_views=8;settings.rig_station_sweep=4.71238898038469;settings.rig_path_link=True
+        settings.rig_station_shape='GRID' if '--ordered' in sys.argv else 'SPHERE' if '--spherical' in sys.argv else 'BAND'
+        settings.rig_station_views=4 if '--ordered' in sys.argv else 8;settings.rig_station_sweep=4.71238898038469;settings.rig_path_link=True
         assert bpy.ops.lichtfeld.create_path_guide(shape='ORBIT',radius=4)=={'FINISHED'}
         settings.rig_station_frame='PATH' if '--path-facing' in sys.argv else 'TARGET' if '--target-facing' in sys.argv else 'GUIDE'
     assert bpy.ops.lichtfeld.create_rig() == {"RUNNING_MODAL"}
@@ -69,14 +70,15 @@ def heartbeat():
             settings=bpy.context.scene.lichtfeld_training
             if '--panorama' in sys.argv:
                 assert settings.rig_mode=='PATH' and settings.rig_orientation=='PANORAMA'
-                assert settings.views==125 and settings.rig_station_views==8
-                assert abs(settings.rig_station_sweep-4.71238898038469)<1e-6
+                assert settings.views==125 and settings.rig_station_views==(4 if '--ordered' in sys.argv else 8)
+                assert settings.rig_station_shape==('GRID' if '--ordered' in sys.argv else 'SPHERE' if '--spherical' in sys.argv else 'BAND')
+                assert abs(settings.rig_station_sweep-(6.283185307179586 if '--spherical' in sys.argv else 4.71238898038469))<1e-6
                 for camera in settings.camera_collection.objects:
                     if camera.type=='CAMERA':
                         assert camera.constraints.get(extension.rig_edit.PATH_LINK).target==settings.rig_curve
                         if '--target-facing' in sys.argv:
                             assert camera.constraints.get(extension.rig_edit.AIM).target==settings.rig_aim
-                            assert camera.constraints.get(extension.rig_edit.ROTATION).owner_space=='WORLD'
+                            assert camera.constraints.get(extension.rig_edit.ROTATION).owner_space==('LOCAL' if '--spherical' in sys.argv or '--ordered' in sys.argv else 'WORLD')
                         else:
                             assert camera.constraints.get(extension.rig_edit.AIM) is None
                 assert settings.rig_station_frame==('PATH' if '--path-facing' in sys.argv else 'TARGET' if '--target-facing' in sys.argv else 'GUIDE')
