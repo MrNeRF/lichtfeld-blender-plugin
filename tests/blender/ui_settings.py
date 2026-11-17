@@ -195,7 +195,7 @@ def step():
   if state['step']==11:
    snapshot('sidebar-load-rig.png')
    s.rig_parameter_source=state['rig_source'];s.rig_distance+=.25
-   s.rig_generator=True;s.rig_details=False
+   bpy.context.window_manager.lichtfeld_panels.rig_generator=True;bpy.context.window_manager.lichtfeld_panels.rig_details=False
    state['step']=12;return .5
   if state['step']==12:
    snapshot('sidebar-pending-rig.png')

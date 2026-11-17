@@ -251,7 +251,6 @@ class LichtFeldSettings(bpy.types.PropertyGroup):
     dataset_job_directory: StringProperty(name="Saved job folder", subtype="DIR_PATH")
     dataset_coverage: StringProperty(default="Framing not checked", options={"SKIP_SAVE"})
     dataset_summary: StringProperty(default="Choose a saved job or reuse the current job", options={"SKIP_SAVE"})
-    job_details: BoolProperty(name="Job details and recovery", default=False)
     previous_job: StringProperty(subtype="DIR_PATH")
     operation_busy: BoolProperty(default=False, options={"SKIP_SAVE"})
     importing: BoolProperty(default=False, options={"SKIP_SAVE"})
@@ -322,14 +321,8 @@ class LichtFeldSettings(bpy.types.PropertyGroup):
     rig_orientation: EnumProperty(name="Orientation", items=[
         ("TARGET", "Look at target", "Aim at the explicit target or source center"),
         ("TANGENT", "Follow path", "Aim along the sampled path")])
-    setup_content: BoolProperty(name="Capture", description="Expand capture content or saved dataset settings", default=True)
-    setup_cameras: BoolProperty(name="Cameras", description="Expand cameras and rig settings", default=True)
-    setup_output: BoolProperty(name="Render and output", description="Expand render and image output settings")
-    setup_training: BoolProperty(name="Training", description="Expand training and preview settings", default=True)
-    rig_generator: BoolProperty(name="Edit camera rig")
     rig_parameter_source: PointerProperty(type=bpy.types.Collection, options={'HIDDEN'},
         description="Generated rig whose parameters were explicitly loaded or last applied; choosing another collection does not replace the controls")
-    rig_details: BoolProperty(name="Advanced rig settings")
     optimizer_file: StringProperty(name="Additional native parameters (JSON)", subtype="FILE_PATH")
     mask_mode: EnumProperty(name="Foreground mask",items=[
         ('AUTO','Automatic','Alpha-consistent for objects/collections; no mask for a whole-scene capture'),
@@ -344,13 +337,10 @@ class LichtFeldSettings(bpy.types.PropertyGroup):
     refine_end: FloatProperty(name="Refine until (fraction)", default=training_options.PROFILES['mrnf']['stop_refine']/training_options.PROFILES['mrnf']['iterations'], min=0, max=1)
     growth_end: FloatProperty(name="Grow until (fraction)", default=training_options.PROFILES['mrnf']['grow_until_iter']/training_options.PROFILES['mrnf']['iterations'], min=0, max=1)
     keep_all_checkpoints: BoolProperty(name="Keep all checkpoints", default=training_options.PROFILES['mrnf']['keep_all_checkpoints'])
-    training_advanced: BoolProperty(name="Advanced training")
-    capture_advanced: BoolProperty(name="Advanced capture settings")
     reuse_render_data: BoolProperty(name="Reuse Cycles scene data",
         get=lambda s: s.id_data.render.use_persistent_data,
         set=lambda s, v: setattr(s.id_data.render, 'use_persistent_data', v),
         description="Alias of Blender Persistent Data; new captures use the saved scene performance settings")
-    preview_advanced: BoolProperty(name="Preview details")
     use_depth_loss: BoolProperty(name="Depth supervision", default=False)
     use_normal_loss: BoolProperty(name="Normal supervision", default=False)
     depth_loss_weight: FloatProperty(name="Depth loss weight", default=2, min=0, max=100)
@@ -375,8 +365,6 @@ class LichtFeldSettings(bpy.types.PropertyGroup):
         ('LANDSCAPE', 'Landscape', ''), ('PORTRAIT', 'Portrait', '')], update=custom_changed)
     capture_width: IntProperty(name="Width", default=1920, min=64, max=4096, update=custom_changed)
     capture_height: IntProperty(name="Height", default=1080, min=64, max=4096, update=custom_changed)
-    format_presets_open: BoolProperty(name="Size presets")
-    camera_overrides_open: BoolProperty(name="Capture-only camera overrides")
     override_optics: BoolProperty(name="Common lens and sensor", description="Override optics on all capture copies; camera positions and originals are kept")
     capture_lens: FloatProperty(name="Focal length (mm)", default=35, min=1, max=500)
     capture_sensor_width: FloatProperty(name="Sensor width (mm)", default=36, min=1, max=100)
@@ -416,8 +404,6 @@ class LichtFeldSettings(bpy.types.PropertyGroup):
         ("BLENDER_EEVEE", "EEVEE", "Capture the scene using EEVEE"),
         ("UNSUPPORTED", "Unsupported engine", "Choose Cycles or EEVEE in Blender Render Properties")],
         get=scene_render.engine_get, set=scene_render.engine_set)
-    validation_details: BoolProperty(name="Validation details", default=False)
-    advanced: BoolProperty(name="Capture and training details")
     job_directory: StringProperty(name="Current job", subtype="DIR_PATH")
     status: StringProperty(default="Ready", options={"SKIP_SAVE"})
     detail: StringProperty(options={"SKIP_SAVE"})
@@ -440,6 +426,23 @@ for _name in training_options.FIELDS:
             min=-1 if _name in {'shs_lr','grow_fraction'} else 0,
             max=1 if _name in training_options.PROBABILITIES else 1e20, precision=6, update=custom_changed)
     LichtFeldSettings.__annotations__[_name] = _property
+
+
+class LichtFeldPanelState(bpy.types.PropertyGroup):
+    """Session UI state belongs to WindowManager, never the saved scene."""
+    setup_content: BoolProperty(name="Capture", description="Expand capture content or saved dataset settings", default=True)
+    setup_cameras: BoolProperty(name="Cameras", description="Expand cameras and rig settings", default=True)
+    setup_output: BoolProperty(name="Render and output", description="Expand render and image output settings")
+    setup_training: BoolProperty(name="Training", description="Expand training and preview settings", default=True)
+    rig_generator: BoolProperty(name="Edit camera rig")
+    rig_details: BoolProperty(name="Advanced rig settings")
+    training_advanced: BoolProperty(name="Advanced training")
+    capture_advanced: BoolProperty(name="Advanced capture settings")
+    preview_advanced: BoolProperty(name="Preview details")
+    format_presets_open: BoolProperty(name="Size presets")
+    camera_overrides_open: BoolProperty(name="Capture-only camera overrides")
+    validation_details: BoolProperty(name="Validation details", default=False)
+    job_details: BoolProperty(name="Job details and recovery", default=False)
 
 
 class LF_OT_verify(bpy.types.Operator):
@@ -1770,7 +1773,7 @@ def draw_training_controls(setup, settings, wrapped):
                   ('use_exposure_correction', 'use_ppisp', 'use_bilateral_grid') if getattr(settings, name)]
     if appearance:
         wrapped(box, 'Appearance: ' + ', '.join(appearance))
-    advanced = draw_disclosure(box, settings, "training_advanced", "Advanced")
+    advanced = draw_disclosure(box, "training_advanced", "Advanced")
     if advanced is not None:
         box = advanced
         box.prop(settings, "strategy", text="Method")
@@ -1794,7 +1797,7 @@ def draw_training_controls(setup, settings, wrapped):
                 for name in ('refine_start','refine_end','growth_end'):
                     part.prop(settings, name)
         box.prop(settings,"optimizer_file", text="Optimizer JSON")
-    box = draw_disclosure(setup, settings, "preview_advanced", "Live preview")
+    box = draw_disclosure(setup, "preview_advanced", "Live preview")
     if box is None:
         return
     box.prop(settings, "preview_mode", text="Updates")
@@ -1813,7 +1816,7 @@ def draw_capture_format(box, scene, settings, wrapped):
     box.prop(scene.render, 'resolution_percentage', text='Scale %')
     row = box.row(align=True)
     row.operator('lichtfeld.render_settings', text='Output settings…').section = 'OUTPUT'
-    presets = draw_disclosure(box, settings, 'format_presets_open', 'Size presets')
+    presets = draw_disclosure(box, 'format_presets_open', 'Size presets')
     if presets is not None:
         presets.prop(settings, 'capture_aspect', text='Aspect')
         presets.prop(settings, 'capture_orientation', text='Layout')
@@ -1830,7 +1833,7 @@ def draw_capture_format(box, scene, settings, wrapped):
 
 def draw_capture_overrides(box, settings, wrapped):
     enabled = any((settings.override_optics, settings.override_shift, settings.override_clipping))
-    content = draw_disclosure(box, settings, 'camera_overrides_open', 'Camera overrides' + (' · active' if enabled else ''))
+    content = draw_disclosure(box, 'camera_overrides_open', 'Camera overrides' + (' · active' if enabled else ''))
     if content is None:
         return
     col = content.column(align=True)
@@ -1854,7 +1857,7 @@ def draw_setup_section(layout, settings, name, title):
     box = layout.box()
     box.enabled = not settings.operation_busy
     name = 'setup_' + ('content' if name == 'saved_images' else name)
-    content = draw_disclosure(box, settings, name, title, nested=False)
+    content = draw_disclosure(box, name, title, nested=False)
     if content is None:
         return None
     content.use_property_split = True
@@ -1886,7 +1889,7 @@ def draw_capture_sources(box, context, settings):
         box.prop(settings, "source_collection", text="")
     elif settings.scope == "SELECTION":
         box.operator("lichtfeld.pick_sources", icon="RESTRICT_SELECT_OFF").for_rig = False
-    box.label(text=f"Capture frame: {context.scene.frame_current}")
+    box.label(text=f"Capture frame: {context.scene.frame_current}", icon='BLANK1')
 
 
 def draw_rig_actions(layout, settings, pending, *, edit=False):
@@ -1900,7 +1903,7 @@ def draw_rig_actions(layout, settings, pending, *, edit=False):
     if managed and settings.rig_parameter_source != rig:
         row.operator('lichtfeld.read_rig', text='Load selected rig', icon='IMPORT')
     elif not rig or edit or managed and pending:
-        row.operator('lichtfeld.create_rig', text='Apply rig changes' if managed else 'Create camera rig', icon='CAMERA_DATA')
+        row.operator('lichtfeld.create_rig', text='Apply rig changes' if managed else 'Create camera rig')
         if managed and pending:
             row.operator('lichtfeld.read_rig', text='Revert', icon='LOOP_BACK')
     if managed and not pending and settings.rig_parameter_source == rig and settings.rig_mode in {'SPHERE', 'HEMISPHERE', 'RINGS'}:
@@ -1937,7 +1940,7 @@ def draw_capture_cameras(box, context, settings, ready, rig_changed, wrapped):
         box.label(text='Updating setup…' if settings.operation_busy else
                        'Load selected rig before editing' if managed and settings.rig_parameter_source != rig else
                        'Rig/framing changes need Apply' if rig_changed else
-                       'Checking cameras…' if ready.get('checking') else f"{len(ready['cameras']):,} capture cameras")
+                       'Checking cameras…' if ready.get('checking') else f"{len(ready['cameras']):,} capture cameras", icon='BLANK1')
         additional = len(ready['cameras']) - ready.get('generated_cameras', 0)
         if managed and additional > 0:
             box.label(text=f"{ready.get('generated_cameras', 0):,} generated · {additional:,} additional")
@@ -1946,7 +1949,7 @@ def draw_capture_cameras(box, context, settings, ready, rig_changed, wrapped):
         if managed and settings.rig_parameter_source != rig:
             draw_rig_actions(box, settings, rig_changed)
             return
-        content = draw_disclosure(box, settings, 'rig_generator', 'Rig settings' if managed else 'Create a rig')
+        content = draw_disclosure(box, 'rig_generator', 'Rig settings' if managed else 'Create a rig')
         if content is None:
             draw_rig_actions(box, settings, rig_changed)
             return
@@ -1999,8 +2002,8 @@ def draw_capture_cameras(box, context, settings, ready, rig_changed, wrapped):
         elif settings.rig_aim_mode == 'POSITION':
             box.prop(settings, 'rig_aim_position')
         if settings.rig_aim:
-            box.operator('lichtfeld.select_aim', text='Move aim target in viewport', icon='EMPTY_AXIS')
-    details = draw_disclosure(box, settings, 'rig_details', 'Geometry and lens')
+            box.operator('lichtfeld.select_aim', text='Move aim target in viewport')
+    details = draw_disclosure(box, 'rig_details', 'Geometry and lens')
     if details is not None:
         outer = box
         box = details
@@ -2189,7 +2192,7 @@ def draw_training(self, context):
         draw_capture_actions(start, settings, ready, errors, capture_only, wrapped)
     checks = layout.column()
     checks.enabled = not settings.operation_busy
-    box = draw_disclosure(checks, settings, 'validation_details', 'Capture checks')
+    box = draw_disclosure(checks, 'validation_details', 'Capture checks')
     if box is not None:
         box.enabled = not settings.operation_busy
         for error in errors[:5]:
@@ -2282,7 +2285,7 @@ def loaded(_):
         ui_runtime.submit(lambda name=name: jobs.remembered_job(directory, source, name), done)
 
 
-_CLASSES = (LichtFeldPreferences, LichtFeldSourceRef, LichtFeldRigReference, LichtFeldSettings, LF_OT_notice, LF_OT_verify, LF_OT_setup, LF_OT_tight_framing, LF_OT_rig, LF_OT_live_rig, rig_edit.LF_GGT_live_rig,
+_CLASSES = (LichtFeldPanelState, LichtFeldPreferences, LichtFeldSourceRef, LichtFeldRigReference, LichtFeldSettings, LF_OT_notice, LF_OT_verify, LF_OT_setup, LF_OT_tight_framing, LF_OT_rig, LF_OT_live_rig, rig_edit.LF_GGT_live_rig,
             LF_OT_start, LF_OT_export_dataset, LF_OT_pick_sources, LF_OT_select_aim, LF_OT_inspect_camera, LF_OT_read_rig, LF_OT_command, LF_OT_import, LF_OT_resume, LF_OT_dataset, LF_OT_new_capture, LF_OT_inspect_dataset, LF_OT_restart, LF_OT_folder, LF_OT_reconnect, LF_OT_load_job, LF_OT_compare,
             LF_OT_setup_view, LF_OT_scan_sessions, LF_OT_attach_session, LF_OT_detach_session, LF_OT_previous_job, LF_OT_color_look, LF_OT_color_command, LF_OT_model_view, LF_OT_color_view, LF_OT_capture_lighting,
             *capture_preview.CLASSES, *scene_render.CLASSES, *portal_ui.CLASSES)
@@ -2293,6 +2296,7 @@ ui_help.apply(_CLASSES)
 def register():
     for cls in _CLASSES:
         bpy.utils.register_class(cls)
+    bpy.types.WindowManager.lichtfeld_panels = PointerProperty(type=LichtFeldPanelState)
     bpy.types.Scene.lichtfeld_training = PointerProperty(type=LichtFeldSettings)
     bpy.types.Collection.lichtfeld_rig_reference = PointerProperty(type=LichtFeldRigReference)
     portal_ui.register()
@@ -2332,6 +2336,7 @@ def unregister():
         bpy.app.handlers.load_post.remove(loaded)
     if unloading in bpy.app.handlers.load_pre:
         bpy.app.handlers.load_pre.remove(unloading)
+    del bpy.types.WindowManager.lichtfeld_panels
     del bpy.types.Scene.lichtfeld_training
     del bpy.types.Collection.lichtfeld_rig_reference
     for cls in reversed(_CLASSES):

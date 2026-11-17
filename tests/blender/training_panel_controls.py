@@ -48,7 +48,7 @@ with patch.object(ext.ui_runtime,'peek',return_value=binding),patch.object(ext.u
     layout=Layout();ext.draw_training(SimpleNamespace(layout=layout),context)
     assert next(enabled for name,text,enabled in layout.records if name=='lichtfeld.use_dataset') is False
     assert next(enabled for name,text,enabled in layout.records if name=='lichtfeld.new_capture') is True
-    s.job_details=True
+    bpy.context.window_manager.lichtfeld_panels.job_details=True
     result['lichtfeld_iteration']=80
     status.update(state='completed',iteration=100,iterations=100,
                   error='Training failure',preview_error='Preview failure',

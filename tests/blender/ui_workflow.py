@@ -90,7 +90,7 @@ def tick():
   if step==21:
    snap('08-reuse-popover')
    if options.sidebar:
-    settings.training_advanced=True;state['step']=21.1;return .5
+    bpy.context.window_manager.lichtfeld_panels.training_advanced=True;state['step']=21.1;return .5
    state['step']=21.4;return .25
   if step==21.1:
    snap('08a-reuse-advanced-popover')
@@ -102,7 +102,7 @@ def tick():
    state['step']=21.2;return .5
   if step==21.2:
    snap('08b-reuse-advanced-bottom-popover')
-   settings.training_advanced=False
+   bpy.context.window_manager.lichtfeld_panels.training_advanced=False
    current_view=max(bpy.context.window.screen.areas,key=lambda a:a.width*a.height)
    with bpy.context.temp_override(area=current_view,region=next(r for r in current_view.regions if r.type=='UI')):
     assert bpy.ops.view2d.pan(deltay=10000)=={'FINISHED'}

@@ -123,7 +123,7 @@ def draw(layout, context, settings, status, reader_error, wrapped, color_view=Fa
         row.operator("lichtfeld.new_capture", text="Capture new images", icon="RENDER_STILL")
         if status.get('dataset_ready') is False:
             wrapped(layout, 'This job has no complete dataset. Capture again with the current setup.')
-    details = draw_disclosure(layout, settings, "job_details", "Details" if color_view else "Details and files")
+    details = draw_disclosure(layout, "job_details", "Details" if color_view else "Details and files")
     if details is not None:
         recorded = status.get('job', {})
         size = recorded.get('capture_format', {})

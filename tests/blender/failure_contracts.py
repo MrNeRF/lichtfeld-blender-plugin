@@ -238,7 +238,7 @@ class PanelLayout:
 settings = scene.lichtfeld_training
 settings.job_directory = "panel-fixture"
 settings.running = True
-settings.job_details = True
+bpy.context.window_manager.lichtfeld_panels.job_details = True
 settings.status = "Training"
 status = {"state": "training", "best": {"score": {"psnr": 30}}, "control_available": True}
 context = SimpleNamespace(scene=scene, region=SimpleNamespace(width=300))

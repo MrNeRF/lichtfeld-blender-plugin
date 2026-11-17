@@ -19,6 +19,8 @@ subject.objects.link(cube)
 s.scope="COLLECTION";s.source_collection=subject;s.views=8;s.rig_mode="SPHERE"
 assert bpy.ops.lichtfeld.create_rig()=={"FINISHED"}
 collection=s.camera_collection
+assert all(tuple(obj.users_collection)==(collection,) for obj in collection.objects if obj.type=='CAMERA')
+assert not any(obj.type=='CAMERA' and obj.get('lichtfeld_generated') for obj in bpy.context.scene.collection.objects)
 original=sorted((o for o in collection.objects if o.type=="CAMERA"),key=lambda o:o["lichtfeld_camera_index"])
 ids=[o.as_pointer() for o in original];target=s.rig_aim;target_id=target.as_pointer()
 s.rig_auto_fit=False;s.rig_radius=3.25
@@ -407,8 +409,21 @@ bpy.ops.preferences.addon_enable(module=module)
 s = bpy.context.scene.lichtfeld_training
 s.scope = 'SCENE'; s.views = 8; s.rig_mode = 'HEMISPHERE'
 s.rig_auto_fit = False; s.rig_radius = 3
+s.rig_distance = 1.05
 assert bpy.ops.lichtfeld.create_rig() == {'FINISHED'}
 rig = s.camera_collection
+assert s.rig_distance < 1.05  # Native RNA boundary rounded to float32.
+assert ext.rig_edit.decode_recipe(rig['lichtfeld_rig_recipe'])['rig_distance']==s.rig_distance
+s.rig_distance = 2.8
+assert bpy.ops.lichtfeld.read_rig()=={'FINISHED'}
+assert s.rig_distance < 1.05
+import json
+invalid=json.loads(rig['lichtfeld_rig_recipe']);invalid['rig_distance']=1.0
+try:
+    ext.rig_edit.decode_recipe(json.dumps(invalid))
+    raise AssertionError('An actual out-of-range rig distance was accepted')
+except ValueError:
+    pass
 cams = sorted((o for o in rig.objects if o.type == 'CAMERA'), key=lambda o: o['lichtfeld_camera_index'])
 bpy.context.view_layer.update()
 poses = [o.matrix_world.copy() for o in cams]
@@ -419,6 +434,7 @@ extra.location = (20, 30, 40)
 assert bpy.ops.lichtfeld.live_rig() == {'FINISHED'}
 root = ext.rig_edit.live_root(s)
 assert root
+assert ext.rig_edit.LF_GGT_live_rig.poll(bpy.context)
 bpy.context.view_layer.update()
 assert all(max(abs(a-b) for x,y in zip(o.matrix_world,m) for a,b in zip(x,y)) < 1e-5 for o,m in zip(cams,poses))
 assert not ext.LF_OT_rig.poll(bpy.context)

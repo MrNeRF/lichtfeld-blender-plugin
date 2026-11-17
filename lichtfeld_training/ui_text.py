@@ -2,8 +2,10 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Pixel-measured paragraphs; wrapping adapts to sidebar width and UI scale."""
 
-def draw_disclosure(layout, owner, name, title, *, nested=True):
+def draw_disclosure(layout, name, title, *, nested=True):
     """Expand within the existing surface without an overlapping panel background."""
+    import bpy
+    owner = bpy.context.window_manager.lichtfeld_panels
     if nested:
         row = layout.split(factor=.04, align=True)
         spacer = row.column()

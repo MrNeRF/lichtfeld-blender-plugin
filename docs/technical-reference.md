@@ -1,7 +1,7 @@
 # Technical reference
 
 Setup uses one native sidebar panel. Its internal sections use Blender boxes
-and RNA expansion flags; the shared disclosure helper keeps a consistent indent
+and RNA expansion flags owned by WindowManager, separate from saved scene/job settings; the shared disclosure helper keeps a consistent indent
 without adding overlapping panel-body backgrounds. Sidebar and popover share
 the same drawing functions. Existing preflight results supply the validated
 output format and render configuration; existing render readiness supplies

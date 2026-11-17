@@ -195,7 +195,7 @@ def draw(box, scene, wrapped):
     row.operator('lichtfeld.render_devices', text='Render devices')
     if scene.render.engine == 'CYCLES':
         box.prop(scene.cycles, 'device', text='Device')
-    details = draw_disclosure(box, scene.lichtfeld_training, 'capture_advanced', 'Capture details')
+    details = draw_disclosure(box, 'capture_advanced', 'Capture details')
     if details is not None:
         details.label(text='PNG · Standard sRGB · static capture')
         if not ready.get('ok'):

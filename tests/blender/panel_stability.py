@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Real Blender: whole setup layout stability and idle validation redraws."""
 from pathlib import Path
+import tempfile
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 import sys, importlib
@@ -11,11 +12,21 @@ module='bl_ext.user_default.lichtfeld_training' if '--installed' in sys.argv els
 bpy.ops.preferences.addon_enable(module=module)
 ext=importlib.import_module(module)
 s = bpy.context.scene.lichtfeld_training
+with tempfile.TemporaryDirectory() as directory:
+    bpy.ops.wm.save_as_mainfile(filepath=str(Path(directory)/'panel-state.blend'))
+    for name in ext.LichtFeldPanelState.__annotations__:
+        bpy.ops.wm.context_toggle(data_path='window_manager.lichtfeld_panels.'+name)
+        assert not bpy.data.is_dirty, name
+        bpy.ops.wm.context_toggle(data_path='window_manager.lichtfeld_panels.'+name)
+        assert not bpy.data.is_dirty, name
+    if not bpy.app.background:
+        bpy.ops.wm.context_set_int('EXEC_DEFAULT', True, data_path='scene.lichtfeld_training.iterations',value=s.iterations+1)
+        assert bpy.data.is_dirty, 'A real training edit must still require saving'
 s.job_directory = ""
 s.running = False
-s.validation_details = False
+bpy.context.window_manager.lichtfeld_panels.validation_details = False
 s.scope = "COLLECTION"
-s.setup_output = True
+bpy.context.window_manager.lichtfeld_panels.setup_output = True
 s.camera_collection = bpy.data.collections.new("Stability cameras")
 s.camera_collection["lichtfeld_generated"] = True
 
@@ -55,7 +66,7 @@ print("WHOLE_SETUP_LAYOUT_STABLE_PASS", len(orders[0][1]))
 
 # Expert controls stay reachable while their active configuration remains visible.
 for advanced in (False, True):
-    s.training_advanced=advanced;s.use_depth_loss=True;s.use_normal_loss=True
+    bpy.context.window_manager.lichtfeld_panels.training_advanced=advanced;s.use_depth_loss=True;s.use_normal_loss=True
     layout=Layout()
     ext.draw_training_controls(layout,s,lambda box,text:box.label(text=text))
     fields=dict(layout.fields)
@@ -64,7 +75,7 @@ for advanced in (False, True):
     assert sum(name=='sh_degree' for name,row in layout.fields)==1
     assert ('depth_loss_weight' in fields)==advanced and ('normal_loss_weight' in fields)==advanced
     assert 'Maps: Depth + Normals' in layout.labels
-s.training_advanced=False;s.use_depth_loss=False;s.use_normal_loss=False
+bpy.context.window_manager.lichtfeld_panels.training_advanced=False;s.use_depth_loss=False;s.use_normal_loss=False
 print('TRAINING_ADVANCED_CONTROLS_AND_ACTIVE_SUMMARY_PASS')
 
 # Modal Apply/source preparation changes enabled state, not panel geometry.
@@ -75,9 +86,9 @@ for source in ('UNLOADED','LOADED','NEW'):
     s.camera_collection=None if source=='NEW' else rig
     s.rig_parameter_source=rig if source=='LOADED' else None
     for closed in (False,True):
-        s.setup_content = s.setup_cameras = s.setup_output = s.setup_training = not closed
+        bpy.context.window_manager.lichtfeld_panels.setup_content = bpy.context.window_manager.lichtfeld_panels.setup_cameras = bpy.context.window_manager.lichtfeld_panels.setup_output = bpy.context.window_manager.lichtfeld_panels.setup_training = not closed
         for edit in ((False,True) if source=='LOADED' and not closed else (False,)):
-            s.rig_generator=edit
+            bpy.context.window_manager.lichtfeld_panels.rig_generator=edit
             busy_orders=[]
             for busy in (False,True,False):
                 s.operation_busy=busy
@@ -96,8 +107,8 @@ for source in ('UNLOADED','LOADED','NEW'):
                     expected='Rig/framing changes need Apply' if source=='LOADED' else 'Load selected rig before editing'
                     assert expected in layout.labels
             assert all(order==busy_orders[0] for order in busy_orders),(source,closed,edit)
-s.camera_collection=rig;s.rig_generator=False
-s.setup_content = s.setup_cameras = s.setup_output = s.setup_training = True
+s.camera_collection=rig;bpy.context.window_manager.lichtfeld_panels.rig_generator=False
+bpy.context.window_manager.lichtfeld_panels.setup_content = bpy.context.window_manager.lichtfeld_panels.setup_cameras = bpy.context.window_manager.lichtfeld_panels.setup_output = bpy.context.window_manager.lichtfeld_panels.setup_training = True
 print('MODAL_APPLY_LAYOUT_STABLE_PASS')
 
 s.rig_parameter_source=s.camera_collection
@@ -132,14 +143,14 @@ for task,operator in (('CAPTURE','lichtfeld.start_training'),('EXPORT','lichtfel
     assert ('scope' in dict(layout.fields))==(task!='REUSE')
 s.dataset_mode='CAPTURE'
 layout=Layout(closed=True)
-s.setup_content = s.setup_cameras = s.setup_output = s.setup_training = False
+bpy.context.window_manager.lichtfeld_panels.setup_content = bpy.context.window_manager.lichtfeld_panels.setup_cameras = bpy.context.window_manager.lichtfeld_panels.setup_output = bpy.context.window_manager.lichtfeld_panels.setup_training = False
 with patch.object(ext.preflight,'cached',return_value=ready),patch.object(ext.preflight,'issues',return_value=[]),patch.object(ext,'preferences',return_value=None), patch.object(ext.preflight, 'environment', return_value={'backend': True, 'ok': True}):
     ext.draw_training(SimpleNamespace(layout=layout),context)
 assert 'lichtfeld.start_training' in dict(layout.operations)
 assert 'lichtfeld.capture_framing' not in dict(layout.operations)
 assert 'lichtfeld.create_rig' not in dict(layout.operations)
 assert 'iterations' not in dict(layout.fields) and 'scope' not in dict(layout.fields)
-s.setup_content = s.setup_cameras = s.setup_output = s.setup_training = True
+bpy.context.window_manager.lichtfeld_panels.setup_content = bpy.context.window_manager.lichtfeld_panels.setup_cameras = bpy.context.window_manager.lichtfeld_panels.setup_output = bpy.context.window_manager.lichtfeld_panels.setup_training = True
 # Rig actions live in the expanded section, never in its disclosure header.
 for loaded,action in ((False,'lichtfeld.read_rig'),(True,'lichtfeld.create_rig')):
     s.rig_parameter_source=s.camera_collection if loaded else None
@@ -153,7 +164,7 @@ for loaded,action in ((False,'lichtfeld.read_rig'),(True,'lichtfeld.create_rig')
 print('CAPTURE_PLAN_APPLIED_REFERENCE_TASK_ACTIONS_AND_COLLAPSED_SECTIONS_PASS')
 
 # Distance feedback follows native scene units; aiming remains directly available.
-s.rig_generator=True;s.rig_details=False;s.rig_mode='SPHERE'
+bpy.context.window_manager.lichtfeld_panels.rig_generator=True;bpy.context.window_manager.lichtfeld_panels.rig_details=False;s.rig_mode='SPHERE'
 s.camera_collection['lichtfeld_generated_radius']=3.25
 s.camera_collection['lichtfeld_fit_limited']=True
 for system,scale,expected in (('NONE',.01,'3.25'),('METRIC',.01,'3.25 cm'),('IMPERIAL',1,"10.66'")):
@@ -209,8 +220,9 @@ print('FRESH_CAPTURE_SURVIVES_DISPLAY_CACHE_INVALIDATION_PASS')
 s.dataset_mode='CAPTURE';s.mode='NEW';s.camera_collection=rig;s.rig_parameter_source=rig
 s.rig_mode='HEMISPHERE';s.full_preview=False
 for name in ('rig_generator','rig_details','training_advanced','preview_advanced',
-             'capture_advanced','format_presets_open','camera_overrides_open',
-             'override_optics','override_shift','override_clipping'):
+             'capture_advanced','format_presets_open','camera_overrides_open'):
+    setattr(bpy.context.window_manager.lichtfeld_panels,name,True)
+for name in ('override_optics','override_shift','override_clipping'):
     setattr(s,name,True)
 layout=Layout()
 with patch.object(ext.preflight,'cached',return_value=ready), \

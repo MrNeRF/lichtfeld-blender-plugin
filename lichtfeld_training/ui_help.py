@@ -87,7 +87,6 @@ PROPERTIES = {
     'preview_mode': 'Choose adaptive live model updates or a configured minimum interval; saved models retain full quality',
     'engine': 'Alias of the official scene Render Engine; supported capture engines are Cycles and EEVEE',
     'validation_details': 'Expand the current capture readiness checks and any issues that prevent starting',
-    'advanced': 'Legacy expansion state for capture and training details',
     'job_directory': 'Folder containing this job’s configuration, captured dataset, logs and saved training results',
     'status': 'Current stage reported by this job’s capture or training process',
     'detail': 'Latest stage detail or recoverable error reported by the job',

@@ -60,8 +60,8 @@ ready = {'checking':False, 'errors':[], 'cameras':[1,2,3,4], 'environment':{'ok'
 layout = Layout()
 ext.draw_capture_actions(layout, s, ready, [], True, lambda box, text: box.label(text=text))
 assert ('operator', 'wm.save_mainfile') not in layout.records
-s.preview_advanced = True
-s.setup_output = True
+bpy.context.window_manager.lichtfeld_panels.preview_advanced = True
+bpy.context.window_manager.lichtfeld_panels.setup_output = True
 for task, action in [('CAPTURE','lichtfeld.start_training'), ('EXPORT','lichtfeld.export_dataset'),
                      ('REUSE','lichtfeld.restart_training')]:
     s.dataset_mode = task
