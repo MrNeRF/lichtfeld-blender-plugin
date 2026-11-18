@@ -72,7 +72,12 @@ class DatasetReuse(unittest.TestCase):
                         self.assertTrue(capture.samefile(root/'capture.blend'))
                         self.assertIn('--finalize-capture', launches[1][0])
                     self.assertFalse((root/'supervisor.lock').exists())
-                    self.assertEqual(before, {p.name: p.read_bytes() for p in (root/'dataset/images').iterdir()})
+                    dataset = root / 'dataset'
+                    if expected == 'completed':
+                        self.assertFalse(dataset.exists())
+                        dataset = Path(state['export_directory'])
+                        self.assertEqual(jobs.captured_dataset(root)[2], dataset)
+                    self.assertEqual(before, {p.name: p.read_bytes() for p in (dataset/'images').iterdir()})
                 finally:
                     owner.close()
 

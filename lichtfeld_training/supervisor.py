@@ -6,6 +6,7 @@ import os
 import hashlib
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -212,7 +213,16 @@ def supervise(job_path):
             state("exporting dataset")
             destination = export_captured_dataset(job, heartbeat=heartbeat,
                 cancelled=lambda: stop_requested(root, job["id"]))
-            state("completed", export_directory=str(destination), message="Dataset exported. No training started.")
+            message = "Dataset exported. No training started."
+            try:
+                # Commit the new dataset location before releasing the owned capture copy.
+                atomic_json(job_path, {**job, "dataset_root": str(destination)})
+                source_dataset = root / 'dataset'
+                if source_dataset.is_dir() and not source_dataset.is_symlink():
+                    shutil.rmtree(source_dataset)
+            except OSError:
+                message += " The temporary capture copy could not be fully removed."
+            state("completed", export_directory=str(destination), message=message)
             return
         state("starting")
         environment_check = check_environment(job["backend"], str(root.parent),

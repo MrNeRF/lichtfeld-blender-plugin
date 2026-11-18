@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2026 LichtFeld Studio Authors
 # SPDX-License-Identifier: GPL-3.0-or-later
 from pathlib import Path
-import sys,tempfile,time,json,subprocess,importlib
+import sys,tempfile,time,json,subprocess,importlib,shutil
 from unittest.mock import Mock,patch
 import bpy
 ROOT=Path(__file__).resolve().parents[2]
@@ -53,7 +53,15 @@ with tempfile.TemporaryDirectory() as directory:
   if state.get('state') in {'completed','failed','stopped'}:break
   time.sleep(.2)
  assert state.get('state')=='completed',state
- assert set(ext.read_json(root/'job.json')['cameras'])==expected_cameras
+ metadata=ext.read_json(root/'job.json')
+ assert set(metadata['cameras'])==expected_cameras
+ first_output=Path(state['export_directory'])
+ assert not (root/'dataset').exists()
+ assert ext.jobs.captured_dataset(root)[2]==first_output
+ # Reconstruct an interrupted capture from the exported data for the recovery case.
+ shutil.copytree(first_output, root/'dataset',ignore=shutil.ignore_patterns('job.json'))
+ metadata.pop('dataset_root')
+ ext.atomic_json(root/'job.json',metadata)
  before={p.name:(p.stat().st_mtime_ns,p.read_bytes()) for p in (root/'dataset/images').glob('*.png')}
  journal=ext.read_json(root/'capture-frames.json')
  ext.atomic_json(root/'capture-frames.json',{**journal,'frames':journal['frames'][:-1]})
@@ -78,7 +86,13 @@ with tempfile.TemporaryDirectory() as directory:
  def launch(arguments,**kwargs):
   launches.append(arguments)
   return failed if len(launches)==1 else popen(arguments,**kwargs)
- with patch.object(supervisor.subprocess,'Popen',side_effect=launch):
+ # Keep the scratch copy during the recovery fixture to compare file identity.
+ real_atomic=supervisor.atomic_json
+ def write_job(path,value):
+  if path==root/'job.json' and value.get('dataset_root'):
+   raise OSError('Simulated cleanup metadata failure')
+  return real_atomic(path,value)
+ with patch.object(supervisor.subprocess,'Popen',side_effect=launch),patch.object(supervisor,'atomic_json',side_effect=write_job):
   supervisor.supervise(root/'job.json')
  state=ext.read_json(root/'state.json',{})
  assert state.get('state')=='completed',state
