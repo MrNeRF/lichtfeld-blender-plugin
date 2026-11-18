@@ -31,7 +31,7 @@ s.camera_collection = bpy.data.collections.new("Stability cameras")
 s.camera_collection["lichtfeld_generated"] = True
 
 class Layout:
-    def __init__(self, closed=False): self.fields = []; self.rows = []; self.labels = []; self.operations = []; self.closed=closed
+    def __init__(self, closed=False): self.fields = []; self.rows = []; self.labels = []; self.operations = []; self.operator_properties = []; self.closed=closed
     def box(self): return self
     def row(self, **kw): return self
     def split(self, **kw): return self
@@ -48,7 +48,9 @@ class Layout:
     def operator(self, name, **kw):
         self.operations.append((name,len(self.rows)))
         self.rows.append("operator")
-        return SimpleNamespace()
+        properties = SimpleNamespace()
+        self.operator_properties.append((name, properties))
+        return properties
 context = SimpleNamespace(scene=bpy.context.scene, view_layer=bpy.context.view_layer, region=SimpleNamespace(width=240))
 orders = []
 for checking, errors, changed in ((True, ["Checking source and cameras…"], False),
@@ -59,7 +61,12 @@ for checking, errors, changed in ((True, ["Checking source and cameras…"], Fal
     layout = Layout()
     with patch.object(ext.preflight, "cached", return_value=ready), patch.object(ext.preflight, "issues", return_value=errors), patch.object(ext, "preferences", return_value=None), patch.object(ext.preflight, 'environment', return_value={'backend': True, 'ok': True}):
         ext.draw_training(SimpleNamespace(layout=layout), context)
-    orders.append((layout.fields, layout.rows))
+    # Capture checks only appears when there are additional messages to inspect.
+    optional = {index for name, index in layout.fields if name == 'validation_details'}
+    fields = [(name, index - sum(item < index for item in optional))
+              for name, index in layout.fields if index not in optional]
+    rows = [kind for index, kind in enumerate(layout.rows) if index not in optional]
+    orders.append((fields, rows))
 assert all(order == orders[0] for order in orders), orders
 assert any(name == "iterations" for name, row in orders[0][0])
 print("WHOLE_SETUP_LAYOUT_STABLE_PASS", len(orders[0][1]))
@@ -152,15 +159,16 @@ assert 'lichtfeld.create_rig' not in dict(layout.operations)
 assert 'iterations' not in dict(layout.fields) and 'scope' not in dict(layout.fields)
 bpy.context.window_manager.lichtfeld_panels.setup_content = bpy.context.window_manager.lichtfeld_panels.setup_cameras = bpy.context.window_manager.lichtfeld_panels.setup_output = bpy.context.window_manager.lichtfeld_panels.setup_training = True
 # Rig actions live in the expanded section, never in its disclosure header.
-for loaded,action in ((False,'lichtfeld.read_rig'),(True,'lichtfeld.create_rig')):
+for loaded in (False, True):
     s.rig_parameter_source=s.camera_collection if loaded else None
     layout=Layout()
     with patch.object(ext.preflight,'cached',return_value=ready),patch.object(ext.preflight,'issues',return_value=[]),patch.object(ext,'preferences',return_value=None), patch.object(ext.preflight, 'environment', return_value={'backend': True, 'ok': True}):
         ext.draw_training(SimpleNamespace(layout=layout),context)
-    assert sum(name==action for name,row in layout.operations)==1
+    create_modes = [getattr(props, 'new_rig', False) for name, props in layout.operator_properties
+                    if name == 'lichtfeld.create_rig']
+    assert create_modes == ([False, True] if loaded else [True])
     assert sum(name=='lichtfeld.capture_framing' for name,row in layout.operations)==1
-    if not loaded:assert not any(name=='lichtfeld.create_rig' for name,row in layout.operations)
-    else:assert any(name=='lichtfeld.read_rig' for name,row in layout.operations),'Revert must remain accessible'
+    assert sum(name=='lichtfeld.read_rig' for name,row in layout.operations)==1
 print('CAPTURE_PLAN_APPLIED_REFERENCE_TASK_ACTIONS_AND_COLLAPSED_SECTIONS_PASS')
 
 # Distance feedback follows native scene units; aiming remains directly available.

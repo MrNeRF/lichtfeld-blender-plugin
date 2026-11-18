@@ -168,9 +168,8 @@ def outside_frame(points, pose, projection, near, far):
     return ''
 
 
-def framing_steps(context):
-    settings = context.scene.lichtfeld_training
-    reference = settings.camera_collection.lichtfeld_rig_reference
+def framing_steps(context, collection):
+    reference = collection.lichtfeld_rig_reference
     if reference.mode == 'UNSET':
         return None, 'Existing camera poses have no applied rig reference to check.'
     try:
@@ -193,11 +192,12 @@ def analyze_steps(context, clearance=0.0, framing=False, coverage=False):
     signature = preflight.signature(context)
     scene, frame = context.scene.name, context.scene.frame_current
     settings = context.scene.lichtfeld_training
+    collections = preflight.camera_collections(settings)
     outside, views = [], []
     framing_note = coverage_note = projection_note = ''
     points = None
     inspect = None
-    if (framing or coverage) and settings.camera_collection:
+    if (framing or coverage) and collections:
         try:
             output = capture_settings.format_for(context.scene, settings)
             overrides = capture_settings.camera_for(settings)
@@ -206,10 +206,12 @@ def analyze_steps(context, clearance=0.0, framing=False, coverage=False):
         if settings.override_optics or settings.override_shift:
             projection_note = 'Skipped because capture lens or shift overrides are enabled. Inspect those views with Check framing in capture setup.'
         if framing:
-            if projection_note:
+            if len(collections) != 1:
+                framing_note = 'Reference framing needs a single capture collection.'
+            elif projection_note:
                 framing_note = projection_note
             else:
-                points, framing_note = yield from framing_steps(context)
+                points, framing_note = yield from framing_steps(context, collections[0])
         if coverage:
             coverage_note = projection_note
         if points is not None or (coverage and not coverage_note):
@@ -225,6 +227,8 @@ def analyze_steps(context, clearance=0.0, framing=False, coverage=False):
                 if coverage and not coverage_note:
                     views.append((pose, projection, near, far))
     checks = yield from preflight.camera_checks(context, poses=True, inspect=inspect)
+    if checks['camera_selection_error']:
+        raise ValueError(checks['camera_selection_error'])
     if not checks['camera_count']:
         raise ValueError('Choose a collection containing cameras')
     matches = yield from rig_geometry.repeated_poses([matrix for name, matrix in checks['poses']])
@@ -255,10 +259,13 @@ def analyze_steps(context, clearance=0.0, framing=False, coverage=False):
 
 
 def last_result(context):
-    collection = context.scene.lichtfeld_training.camera_collection
-    if (_report is not None and collection is not None and
+    settings = context.scene.lichtfeld_training
+    if any(row.collection is None for row in settings.capture_collections):
+        return None
+    collections = preflight.camera_collections(settings)
+    if (_report is not None and collections and
             _report['scene_id'] == context.scene.session_uid and
-            _report['collection_id'] == collection.session_uid and
+            _report['collection_ids'] == tuple(collection.session_uid for collection in collections) and
             _report['frame'] == context.scene.frame_current):
         return _report
     return None
@@ -268,7 +275,8 @@ def show_result(context, result):
     global _report
     names = [name for name, matrix in result['poses']]
     _report = dict(scene_id=context.scene.session_uid,
-                   collection_id=context.scene.lichtfeld_training.camera_collection.session_uid,
+                   collection_ids=tuple(collection.session_uid for collection in
+                                        preflight.camera_collections(context.scene.lichtfeld_training)),
                    frame=result['frame'],
                    clearance=result['clearance'], nearby=result['nearby'],
                    clearance_note=result['clearance_note'],
@@ -307,7 +315,7 @@ class LF_OT_camera_report(bpy.types.Operator):
 
     @classmethod
     def poll(cls, context):
-        return bool(context.scene.lichtfeld_training.camera_collection) and not capture_preview.is_preview(context.scene)
+        return bool(preflight.camera_collections(context.scene.lichtfeld_training)) and not capture_preview.is_preview(context.scene)
 
     def invoke(self, context, event):
         report = last_result(context)
@@ -448,7 +456,7 @@ class LF_OT_check_poses(bpy.types.Operator):
         if _active is not None or context.mode != 'OBJECT' or capture_preview.is_preview(context.scene):
             return False
         s = context.scene.lichtfeld_training
-        return bool(s.camera_collection) and not s.running and not s.operation_busy and not rig_edit.render_busy(context) and not rig_edit.live_root(s)
+        return bool(preflight.camera_collections(s)) and not s.running and not s.operation_busy and not rig_edit.render_busy(context) and not rig_edit.live_root(s)
 
     def release(self):
         global _active
