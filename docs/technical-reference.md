@@ -114,6 +114,24 @@ no rotation constraint or recipe key is added. Capture freezes the evaluated pos
 through the existing camera-copy path. Automatic fitting reserves the maximum
 angular deviation in the existing optical projection calculation.
 
+Path panorama stations reuse `rig_path.positions` for the distinct station
+positions and the `RINGS` branch of `rig_geometry.directions` for local optical
+axes. Its optional sweep includes partial-sector endpoints and excludes the
+full-turn seam. Orientations use the evaluated guide object's quaternion after the shared
+`capture_settings.rigid_frame` validation, without scale or per-station helpers. The generator checks duplicate station positions
+before expansion and validates the expanded view count through the existing
+capture contract before creating staging IDs. Generated indices are station-major:
+`station * views_per_station + direction`. Existing transaction and capture-pose
+normalization handle guide links, cancellation and calibration unchanged.
+`rig_path.tangent` owns the existing outgoing/previous-point convention. Upright
+station frames use the guide's up axis and reject vertical tangents rather than
+accumulating transport roll. Yaw rotates the whole frame around guide up,
+keeping each station's elevation across its views. Target-facing stations use the existing shared
+Track To helper, followed by the existing constant rotation constraint in
+WORLD/BEFORE mode for yaw about world Z. Radial jitter retains LOCAL/AFTER mode.
+The same constraint owner transfers either mode after the commit boundary.
+Default guide-facing recipes omit the new frame key, preserving old recipes.
+
 `rig_edit.commit` validates generated indices and aim-helper uniqueness before
 mutating existing cameras, retaining the existing staged update/rollback path.
 `rig_reference` stores an independent Blender RNA group in the scene controls and

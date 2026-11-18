@@ -3,8 +3,31 @@
 """Evaluate a single Blender curve without changing the original object."""
 import bpy
 import math
+from mathutils import Matrix, Vector
 from bpy.props import EnumProperty, FloatProperty, FloatVectorProperty
 from .rig_geometry import sample_path, guide_path
+
+
+def tangent(points, index, cyclic, reverse=False):
+    if reverse:
+        return points[index-1]-points[index] if index or cyclic else points[index]-points[1]
+    if index+1 < len(points):
+        return points[index+1]-points[index]
+    return points[0]-points[index] if cyclic else points[index]-points[index-1]
+
+
+def station_frames(points, guide_rotation, cyclic=False, reverse=False):
+    """Path-facing frames stay upright relative to the guide, without roll drift."""
+    for index in range(len(points)):
+        forward = tangent(points, index, cyclic, reverse)
+        if forward.length < 1e-8:
+            raise ValueError('The path has a zero tangent; adjust the curve or station spacing')
+        forward.normalize()
+        right = forward.cross(guide_rotation @ Vector((0,0,1)))
+        if right.length < 1e-5:
+            raise ValueError('The path is vertical relative to the guide; choose Guide axes facing or adjust the curve in Edit Mode')
+        right.normalize()
+        yield Matrix((right, right.cross(forward), -forward)).transposed().to_quaternion()
 
 
 def positions(context, curve, count, *, spacing=None):

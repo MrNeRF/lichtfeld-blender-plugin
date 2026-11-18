@@ -92,6 +92,13 @@ def remember_objects(collection, settings):
             del collection[key]
 
 
+def uses_aim(settings):
+    if settings.rig_mode == 'PATH':
+        return settings.rig_orientation == 'TARGET' or (
+            settings.rig_orientation == 'PANORAMA' and settings.rig_station_frame == 'TARGET')
+    return settings.rig_mode != 'MESH' or settings.rig_mesh_orientation == 'TARGET'
+
+
 def aim_point(context, settings, center):
     if settings.rig_aim_mode == "OBJECT":
         if not settings.rig_target:
@@ -137,11 +144,11 @@ def track(camera, target):
         camera.constraints.remove(constraint)
 
 
-def rotate_after_aim(camera, target, angles=None):
-    """Constant local angular offset after native tracking, without extra IDs."""
+def rotate_after_aim(camera, target, angles=None, *, world=False):
+    """Constant angular offset after native tracking, without extra IDs."""
     constraint = camera.constraints.get(ROTATION)
     if constraint and constraint.type != 'TRANSFORM':
-        raise ValueError('Keep LichtFeld Rotation Variation reserved for rotation jitter')
+        raise ValueError('Keep LichtFeld Rotation Variation reserved for generated rotation offsets')
     if angles is None:
         if constraint:
             camera.constraints.remove(constraint)
@@ -151,8 +158,8 @@ def rotate_after_aim(camera, target, angles=None):
     constraint.target = target
     constraint.map_from = 'LOCATION'
     constraint.map_to = 'ROTATION'
-    constraint.mix_mode_rot = 'AFTER'
-    constraint.owner_space = 'LOCAL'
+    constraint.mix_mode_rot = 'BEFORE' if world else 'AFTER'
+    constraint.owner_space = 'WORLD' if world else 'LOCAL'
     constraint.target_space = 'WORLD'
     constraint.to_euler_order = 'XYZ'
     for axis, value in zip('xyz', angles):
@@ -246,7 +253,7 @@ def managed_members(collection):
         path = obj.constraints.get(PATH_LINK)
         rotation = obj.constraints.get(ROTATION)
         if rotation and rotation.type != 'TRANSFORM':
-            raise ValueError('Keep LichtFeld Rotation Variation reserved for rotation jitter')
+            raise ValueError('Keep LichtFeld Rotation Variation reserved for generated rotation offsets')
         if obj.library or (constraint and constraint.type != "TRACK_TO") or (path and path.type != 'CHILD_OF'):
             raise ValueError("Make generated cameras local and keep LichtFeld Aim and Path Transform names reserved")
         yield
@@ -312,7 +319,8 @@ def commit(owner, settings, previous, staging, target, recipe):
             track(original, final_target if prepared.constraints.get(AIM) else None)
             rotation = prepared.constraints.get(ROTATION)
             rotate_after_aim(original, final_target,
-                tuple(getattr(rotation, 'to_min_' + axis + '_rot') for axis in 'xyz') if rotation else None)
+                tuple(getattr(rotation, 'to_min_' + axis + '_rot') for axis in 'xyz') if rotation else None,
+                world=bool(rotation and rotation.owner_space == 'WORLD'))
             data = prepared.data
             bpy.data.objects.remove(prepared, do_unlink=True)
             if data.users == 0:
@@ -363,19 +371,21 @@ def decode_recipe(encoded):
     properties = bpy.types.Scene.bl_rna.properties['lichtfeld_training'].fixed_type.properties
     for name in ('views', 'rig_rings', 'rig_min', 'rig_max', 'rig_distance',
                  'rig_lens', 'rig_radius', 'rig_mesh_offset', 'rig_phase', 'rig_path_spacing',
-                 'rig_position_variation', 'rig_rotation_variation', 'rig_variation_seed'):
+                 'rig_position_variation', 'rig_rotation_variation', 'rig_variation_seed',
+                 'rig_station_views', 'rig_station_sweep'):
         if name not in values:continue
         value=values[name]
         if type(value) not in (int,float) or not math.isfinite(value):raise ValueError("Invalid rig number: "+name)
-        if name in {"views","rig_rings","rig_variation_seed"} and type(value) is not int:raise ValueError("Invalid rig count or seed")
+        if name in {"views","rig_rings","rig_variation_seed","rig_station_views"} and type(value) is not int:raise ValueError("Invalid rig count or seed")
         # RNA owns both the bounds and their float32 representation. Metadata
         # must accept what the native controls write, without a second table.
         prop = properties[name]
         if not prop.hard_min <= value <= prop.hard_max:
             raise ValueError("Rig parameter outside its range: "+name)
     for name, valid in (("rig_mode",{"SPHERE","HEMISPHERE","RINGS","PATH","MESH"}),
-                        ("rig_orientation",{"TARGET","TANGENT"}),
+                        ("rig_orientation",{"TARGET","TANGENT","PANORAMA"}),
                         ('rig_path_sampling', {'COUNT', 'SPACING'}),
+                        ('rig_station_frame', {'GUIDE', 'PATH', 'TARGET'}),
                         ("rig_mesh_distribution",{"SURFACE","FACES"}),
                         ("rig_mesh_orientation",{"INWARD","OUTWARD","TARGET"}),
                         ("aim_mode",{"SOURCE","OBJECT","CURSOR","POSITION","VIEWPORT"})):

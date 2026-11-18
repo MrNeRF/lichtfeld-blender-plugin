@@ -28,6 +28,12 @@ def start():
         bpy.context.scene.lichtfeld_training.rig_variation_seed = 73
     if '--rotation-variation' in sys.argv:
         bpy.context.scene.lichtfeld_training.rig_rotation_variation=.03
+    if '--panorama' in sys.argv:
+        settings=bpy.context.scene.lichtfeld_training
+        settings.rig_mode='PATH';settings.rig_orientation='PANORAMA';settings.views=125
+        settings.rig_station_views=8;settings.rig_station_sweep=4.71238898038469;settings.rig_path_link=True
+        assert bpy.ops.lichtfeld.create_path_guide(shape='ORBIT',radius=4)=={'FINISHED'}
+        settings.rig_station_frame='PATH' if '--path-facing' in sys.argv else 'TARGET' if '--target-facing' in sys.argv else 'GUIDE'
     assert bpy.ops.lichtfeld.create_rig() == {"RUNNING_MODAL"}
     state["started"] = state["last"] = time.perf_counter()
     bpy.app.timers.register(heartbeat, first_interval=.01)
@@ -56,12 +62,27 @@ def heartbeat():
             assert settings.rig_position_variation == 5 and settings.rig_variation_seed == 73
         assert settings.rig_reference.objects[0].object is not None
         assert settings.camera_collection.lichtfeld_rig_reference.objects[0].object == settings.rig_reference.objects[0].object
-        if '--position-variation' in sys.argv or '--rotation-variation' in sys.argv:
+        if '--position-variation' in sys.argv or '--rotation-variation' in sys.argv or '--panorama' in sys.argv:
             path=str(output.with_suffix('.blend'))
             bpy.ops.wm.save_as_mainfile(filepath=path)
             bpy.ops.wm.open_mainfile(filepath=path,use_scripts=False)
             settings=bpy.context.scene.lichtfeld_training
-            assert settings.rig_position_variation==5 and settings.rig_variation_seed==73
+            if '--panorama' in sys.argv:
+                assert settings.rig_mode=='PATH' and settings.rig_orientation=='PANORAMA'
+                assert settings.views==125 and settings.rig_station_views==8
+                assert abs(settings.rig_station_sweep-4.71238898038469)<1e-6
+                for camera in settings.camera_collection.objects:
+                    if camera.type=='CAMERA':
+                        assert camera.constraints.get(extension.rig_edit.PATH_LINK).target==settings.rig_curve
+                        if '--target-facing' in sys.argv:
+                            assert camera.constraints.get(extension.rig_edit.AIM).target==settings.rig_aim
+                            assert camera.constraints.get(extension.rig_edit.ROTATION).owner_space=='WORLD'
+                        else:
+                            assert camera.constraints.get(extension.rig_edit.AIM) is None
+                assert settings.rig_station_frame==('PATH' if '--path-facing' in sys.argv else 'TARGET' if '--target-facing' in sys.argv else 'GUIDE')
+                state['panorama_save_reload']=True
+            else:
+                assert settings.rig_position_variation==5 and settings.rig_variation_seed==73
             assert sum(o.type=='CAMERA' for o in settings.camera_collection.objects)==1000
             if '--rotation-variation' in sys.argv:
                 assert abs(settings.rig_rotation_variation-.03)<1e-6

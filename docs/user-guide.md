@@ -188,6 +188,47 @@ Manual distance, moved aim targets and position jitter still require checking
 coverage with **Check framing**. Live aiming retains the angular offsets.
 Path and mesh rigs do not expose these controls. Per-camera aim variation is not included.
 
+For indoor routes, choose **Curve path → Orientation → Panorama stations**.
+Each sampled curve position becomes a station with several normal perspective
+cameras. **Stations** chooses positions, **Views/station** chooses directions,
+and the panel shows their product before Apply. With spacing-based sampling the
+station total is known only after Apply. Quality presets change the station
+count, not the views per station; for example, 144 stations × 8 views creates
+1,152 cameras. Custom cameras in the collection remain additional capture views.
+
+Choose **Facing** to orient the sectors:
+
+- **Guide axes** keeps the common orientation. **Start azimuth** starts at guide
+  +X and advances toward +Y, with guide +Z up. This preserves existing rigs.
+- **Along path** centers each partial sector on the next sampled point, with
+  guide +Z as the up reference. **Look backward** uses the previous point.
+  Helices and spirals keep this up reference rather than accumulating roll.
+  A vertical tangent has no upright frame: adjust the curve in Edit Mode or
+  choose another facing mode if it is rejected.
+- **Toward target** centers each partial sector on the existing **Look at**
+  target, with world +Z up. After Apply, moving the aim helper or its followed
+  object updates all sector directions immediately, without extra helpers.
+  Every view retains the elevation toward the target, including rear views.
+
+For path/target facing, **Yaw offset** rotates the sector from that reference.
+A full 360° turn starts in the facing direction plus this offset; partial sectors
+include both end directions around it. With an even view count the sector
+center can fall between two views. **Sweep** describes optical axes, not
+image coverage. Guide/path frames must be non-mirrored, nondegenerate and free
+of shear. Apply guide scale or inspect parents if a frame is rejected.
+
+**Follow guide** moves and rotates the rig immediately. Target-facing cameras
+continue to aim independently at their target; the other modes follow the guide
+frame. Apply updates changed curve geometry, counts or facing settings. Changing
+station or direction counts retains camera identity by generated index, not by
+a persistent station identity.
+
+These are separate perspective images, not a stitched or equirectangular panorama.
+The sweep describes camera axes, not image coverage: lens, output aspect and
+obstacles still matter. Multiple views at one station add viewing directions but
+no translational baseline; the curve supplies the different station positions.
+These modes cover one band per station, not a full spherical set of directions.
+
 Enable **Follow guide** and apply the rig to link generated cameras
 to the guide's movement, rotation and uniform scaling in Object Mode. This uses
 Blender's native constraints, so it continues working after saving and reopening

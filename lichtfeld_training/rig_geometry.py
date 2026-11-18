@@ -59,7 +59,7 @@ def guide_path(shape, radius, start, sweep, turns, minimum, maximum, height):
     return points, closed
 
 
-def directions(count, mode, minimum=0.0, maximum=90.0, rings=3, phase=0.0):
+def directions(count, mode, minimum=0.0, maximum=90.0, rings=3, phase=0.0, *, sweep=2*math.pi, centered=False):
     if count < 4:
         raise ValueError("Use at least four cameras")
     if mode == "SPHERE":
@@ -74,6 +74,14 @@ def directions(count, mode, minimum=0.0, maximum=90.0, rings=3, phase=0.0):
             radius = math.sqrt(max(0, 1 - z*z))
             yield (radius * math.cos(angle), radius * math.sin(angle), z)
     elif mode == "RINGS":
+        if not math.isfinite(sweep) or not math.isfinite(phase):
+            raise ValueError('Ring angles must be finite')
+        if math.isclose(sweep, 2*math.pi, rel_tol=0, abs_tol=1e-6):
+            sweep = 2*math.pi  # RNA rounds the 360-degree bound to float32.
+        if not 0 < sweep <= 2*math.pi:
+            raise ValueError('Use an angular sweep greater than zero and no larger than 360 degrees')
+        if centered and sweep != 2*math.pi:
+            phase -= sweep/2
         if not -89.9 <= minimum <= maximum <= 89.9:
             raise ValueError("Ring elevations must stay between -89.9 and 89.9 degrees")
         if rings > 1 and minimum == maximum:
@@ -85,7 +93,8 @@ def directions(count, mode, minimum=0.0, maximum=90.0, rings=3, phase=0.0):
             elevation = math.radians((minimum + maximum)/2 if rings == 1 else
                                      minimum + (maximum-minimum)*ring/(rings-1))
             for index in range(size):
-                angle = phase + 2*math.pi*(index + (ring % 2)*0.5)/size
+                angle = (phase + 2*math.pi*(index + (ring % 2)*0.5)/size if sweep == 2*math.pi else
+                         phase + sweep*index/(size-1))
                 yield (math.cos(elevation)*math.cos(angle),
                        math.cos(elevation)*math.sin(angle), math.sin(elevation))
     else:
