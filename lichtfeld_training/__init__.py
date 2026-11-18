@@ -2241,9 +2241,9 @@ def draw_capture_cameras(box, context, settings, ready, rig_changed, wrapped):
         box.operator('lichtfeld.capture_framing', text='Check framing', icon='VIEW_CAMERA')
         box.operator('lichtfeld.live_rig', text='Finish live editing', icon='CHECKMARK')
         return
-    box.prop(settings, 'camera_collection', text='Rig to edit' if settings.capture_collections else 'Collection')
+    box.prop(settings, 'camera_collection', text='Edit rig' if settings.capture_collections else 'Camera set')
     collection_count = len(preflight.camera_collections(settings))
-    title = f'Capture collections ({collection_count})' if settings.capture_collections else 'Capture collections'
+    title = f'Capture sets ({collection_count})' if settings.capture_collections else 'Combine camera sets'
     capture_list = draw_disclosure(box, 'capture_collection_details', title)
     if capture_list is not None:
         for index, entry in enumerate(settings.capture_collections):
@@ -2279,7 +2279,7 @@ def draw_capture_cameras(box, context, settings, ready, rig_changed, wrapped):
     else:
         box.label(text='Updating setup…' if settings.operation_busy else 'Create a camera rig')
     reference = settings.rig_reference
-    box.prop(reference, 'mode', text='Center')
+    box.prop(reference, 'mode', text='Rig center')
     if reference.mode == 'COLLECTION':
         box.prop(reference, 'collection', text='')
     elif reference.mode == 'OBJECTS':
@@ -2559,9 +2559,8 @@ def draw_training(self, context):
         row = start.row()
         row.operator_context = 'INVOKE_DEFAULT'
         count = len(camera_issues or {})
-        row.operator('lichtfeld.camera_report', text='Check cameras…')
-        if count:
-            start.label(text=f"{count:,} camera {'issue' if count == 1 else 'issues'}", icon='ERROR')
+        label = f"Review {count:,} camera {'issue' if count == 1 else 'issues'}…" if count else 'Check camera poses…'
+        row.operator('lichtfeld.camera_report', text=label, icon='ERROR' if count else 'NONE')
         report = rig_analysis.last_result(context)
         if report is None:
             start.label(text='Poses not checked yet', icon='BLANK1')
