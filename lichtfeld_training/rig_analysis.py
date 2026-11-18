@@ -23,6 +23,13 @@ _DIRECTION_COSINE = math.cos(math.radians(15))
 _MIN_INCIDENCE = math.sin(math.radians(5))
 
 
+_FRAMING_HINTS = {
+    'Outside image': 'Use Check framing to inspect the aim, focal length or lens shift.',
+    'Behind camera': 'Check where the camera points. If it tracks a target, check the target position.',
+    'Before near clip': 'Check the clip start or move the camera farther from the reference.',
+    'Beyond far clip': 'Check the clip end or move the camera closer to the reference.',
+}
+
 def draw_camera_row(layout, name, detail=''):
     row = layout.split(factor=.78)
     row.label(text=f'Camera: “{name}”{detail}')
@@ -394,8 +401,15 @@ class LF_OT_camera_report(bpy.types.Operator):
             else:
                 outside = report['outside']
                 layout.label(text=f'Reference outside frame (last check): {len(outside):,}')
+                examples = {}
                 for name, reason in outside[:5]:
-                    draw_camera_row(layout, name, ' · ' + reason)
+                    examples.setdefault(reason, []).append(name)
+                for reason, names in examples.items():
+                    body = layout.box().column(align=True)
+                    body.label(text=reason)
+                    draw_paragraph(body, _FRAMING_HINTS[reason], width, scale)
+                    for name in names:
+                        draw_camera_row(body, name)
                 if len(outside) > 5:
                     layout.label(text=f'Showing 5 of {len(outside):,} cameras')
         elif self.framing:

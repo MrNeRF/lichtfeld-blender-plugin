@@ -369,7 +369,10 @@ If the geometry exceeds the check's budget, narrow the capture scope and rerun.
 Enable **Check rig reference framing** to flag cameras where the applied rig
 reference bounds lie completely beyond one image edge or clipping plane. The
 check uses the current output aspect ratio and evaluated camera pose, and
-honours capture clipping overrides. It is a conservative check of bounds.
+honours capture clipping overrides. The report groups camera examples by
+finding and suggests what to inspect, such as aim, lens or clipping. Use
+**Select** beside an example to find the camera. The check leaves all camera
+settings untouched. It is a conservative check of bounds.
 The automatic check skips capture lens or shift overrides. Use **Check framing**
 in capture setup to inspect those overrides and to review partially visible or
 occluded views. The automatic check also skips references with active Geometry
