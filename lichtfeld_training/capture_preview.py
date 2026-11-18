@@ -48,12 +48,18 @@ def restore_window(window, area):
         return
     try:
         space = area.spaces.active
-        perspective, local_camera, camera = state
+        perspective, local_camera, camera, location, rotation, distance, offset, zoom = state
         if camera is not None and camera.name not in bpy.data.objects:
             camera = None
-        space.region_3d.view_perspective = perspective
+        region = space.region_3d
         space.use_local_camera = local_camera
         space.camera = camera
+        region.view_perspective = perspective
+        region.view_location = location
+        region.view_rotation = rotation
+        region.view_distance = distance
+        region.view_camera_offset = offset
+        region.view_camera_zoom = zoom
     except (ReferenceError, RuntimeError, TypeError):
         pass
 
@@ -299,7 +305,10 @@ def _open_steps(source, window, area):
         if area and area.type == 'VIEW_3D':
             space = area.spaces.active
             if key not in _views:
-                _views[key] = (space.region_3d.view_perspective, space.use_local_camera, space.camera)
+                region = space.region_3d
+                _views[key] = (region.view_perspective, space.use_local_camera, space.camera,
+                               region.view_location.copy(), region.view_rotation.copy(), region.view_distance,
+                               tuple(region.view_camera_offset), region.view_camera_zoom)
         window.scene = preview
         if area and area.type == 'VIEW_3D':
             space.use_local_camera = False
