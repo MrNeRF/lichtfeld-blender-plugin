@@ -32,6 +32,11 @@ assert not ext.LF_OT_start.poll(bpy.context)
 assert s.quality=='CUSTOM' and s.resolution==1024
 s.quality='HIGH'
 assert ext.capture_settings.format_for(bpy.context.scene,s)['width']==1536
+s.capture_aspect='WIDE'
+s.quality='HIGH'
+format_wide=ext.capture_settings.format_for(bpy.context.scene,s)
+assert (format_wide['width'],format_wide['height'])==(1536,864)
+s.capture_aspect='SQUARE'
 s.quality='BALANCED'
 assert (s.views,s.iterations)==(96,7000)
 assert ext.capture_settings.format_for(bpy.context.scene,s)['width']==1024
