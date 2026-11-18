@@ -208,6 +208,7 @@ def check_environment(backend, directory, source="", require_backend=True, *, ba
             raise ValueError("LichtFeld Studio changed during verification. Check the installation again.")
     else:
         version = "Dataset capture folder is writable"
+    stage = "jobs"
     try:
         root=Path(directory)
         root.mkdir(mode=0o700,parents=True,exist_ok=True)
@@ -215,13 +216,17 @@ def check_environment(backend, directory, source="", require_backend=True, *, ba
         result = {"ok":True,"backend":True,"folder":True,"message":version,"directory":str(root),
                   "backend_version":version,"backend_identity":identity}
         if source:
+            stage = "source"
             path = Path(source)
             info = path.stat()
             with tempfile.TemporaryFile(dir=path.parent) as probe:
                 probe.write(b"capture")
             result["source_identity"] = [info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns]
     except (OSError, ValueError) as error:
-        return {"ok":False,"backend":True,"folder":False,"message":str(error),
+        message = ("Choose a writable training jobs folder." if stage == "jobs" else
+                   "Save the scene in a folder where Blender can write capture files.")
+        return {"ok":False,"backend":True,"folder":False,"message":message,
+                "folder_issue":stage,"folder_details":str(error),
                 "backend_version":version,"backend_identity":identity}
     return result
 

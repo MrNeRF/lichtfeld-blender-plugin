@@ -2592,6 +2592,8 @@ def draw_training(self, context):
     backend_required = draw_backend_requirement(start, prefs, installation, wrapped)
     if not backend_required:
         draw_capture_actions(start, settings, ready, errors, capture_only, wrapped)
+        if ready['environment'].get('folder_issue') == 'jobs':
+            start.operator('lichtfeld.setup', text='Choose jobs folder…')
     camera_issues = ready.get('camera_issues')
     if preflight.camera_collections(settings):
         row = start.row()
@@ -2616,6 +2618,8 @@ def draw_training(self, context):
     box = draw_disclosure(checks, 'validation_details', 'Capture checks', nested=False) if checks is not None else None
     if box is not None:
         for error in other_errors[:5]:wrapped(box, error)
+        if ready['environment'].get('folder_details'):
+            wrapped(box, ready['environment']['folder_details'])
         if len(other_errors) > 5:
             wrapped(box, f'{len(other_errors)-5:,} more issues; resolve the listed issues first.')
     draw_job_navigation(layout, settings)
