@@ -163,6 +163,24 @@ the rig controls collapsed. Camera aiming is
 independent: choose the target or **Follow path**. Curve tilt does not control
 camera roll. Projection onto arbitrary meshes is not part of these guide tools.
 
+For sphere, hemisphere and ring rigs, **Geometry and lens → Position jitter**
+adds small static position variations. The value is the maximum displacement as
+a percentage of rig radius (0–25%): 5% on a 4 m rig moves each camera by at most 0.2 m.
+It defaults to zero. With a nonzero value, **Seed** chooses a reproducible pattern
+by generated camera index; changing camera names, redrawing or applying again
+does not reshuffle it. Set the amount to zero, or use the field's native
+**Reset to Default Value** context-menu action, to disable jitter. This keeps the
+seed in the current controls; loading an applied rig's parameters at zero jitter
+restores the default seed. Apply the rig to update camera poses.
+
+Jitter rotates and scales with the radial rig, including its live distance and
+orbit controls. Finishing live editing and applying again retains the pattern.
+The usual target controls continue to aim the cameras. These are static offsets,
+not animation; captured images and calibration use the resulting camera poses.
+Variation does not guarantee better training, coverage or clearance from geometry.
+Path and mesh rigs do not expose this control; rotational and per-camera aim
+variation are not included.
+
 Enable **Follow guide** and apply the rig to link generated cameras
 to the guide's movement, rotation and uniform scaling in Object Mode. This uses
 Blender's native constraints, so it continues working after saving and reopening

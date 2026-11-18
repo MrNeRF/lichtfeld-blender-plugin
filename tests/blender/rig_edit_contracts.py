@@ -164,12 +164,16 @@ print('GENERATED_DISTANCE_MANUAL_AUTOFIT_CANCEL_AND_PATH_PASS',flush=True)
 assert bpy.ops.lichtfeld.read_rig()=={"FINISHED"}
 recipe=collection["lichtfeld_rig_recipe"]
 s.rig_path_sampling='SPACING';s.rig_path_spacing=2;s.rig_path_reverse=True
+s.rig_position_variation=5;s.rig_variation_seed=73
 assert bpy.ops.lichtfeld.read_rig()=={'FINISHED'}
 assert s.rig_path_sampling=='COUNT' and s.rig_path_spacing==1 and not s.rig_path_reverse
+assert s.rig_position_variation==0 and s.rig_variation_seed==0
 assert ext.rig_recipe(s)==recipe
 saved_views=s.views
 for field, invalid in (('rig_path_sampling','UNKNOWN'),('rig_path_spacing',0),
-                       ('rig_path_spacing',float('nan')),('rig_path_reverse',1),('rig_path_link',1)):
+                       ('rig_path_spacing',float('nan')),('rig_path_reverse',1),('rig_path_link',1),
+                       ('rig_position_variation',26),('rig_position_variation',float('nan')),
+                       ('rig_variation_seed',-1),('rig_variation_seed',1.5),('rig_variation_seed',True)):
     values=json.loads(recipe);values[field]=invalid;values['views']=24
     collection['lichtfeld_rig_recipe']=json.dumps(values)
     try:

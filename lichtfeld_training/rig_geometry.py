@@ -3,6 +3,21 @@
 """Pure deterministic camera distributions and arc-length path sampling."""
 import bisect
 import math
+import random
+
+
+def position_offset(index, seed, amplitude, phase=0.0):
+    """Static, index-stable displacement within a ball of the given radius."""
+    if not math.isfinite(amplitude) or amplitude < 0:
+        raise ValueError('Position variation must be finite and nonnegative')
+    if amplitude == 0:
+        return (0.0, 0.0, 0.0)
+    rng = random.Random((seed << 32) + index)
+    radius = amplitude * rng.random() ** (1/3)
+    z = 2*rng.random()-1
+    angle = 2*math.pi*rng.random() + phase
+    planar = math.sqrt(max(0, 1-z*z))
+    return (radius*planar*math.cos(angle), radius*planar*math.sin(angle), radius*z)
 
 
 def guide_path(shape, radius, start, sweep, turns, minimum, maximum, height):
