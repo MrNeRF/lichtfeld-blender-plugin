@@ -812,14 +812,20 @@ with tempfile.TemporaryDirectory() as directory:
     bpy.context.view_layer.update()
     assert bpy.ops.lichtfeld.check_camera_poses(clearance=.2) == {'FINISHED'}
     assert abs(dict(ext.rig_analysis.last_result(bpy.context)['nearby'])[original.name] - .125) < 1e-5
-    plane.hide_set(True)
-    assert bpy.ops.lichtfeld.check_camera_poses(clearance=.5) == {'FINISHED'}
-    assert 'No visible mesh surfaces' in ext.rig_analysis.last_result(bpy.context)['clearance_note']
-    plane.hide_set(False)
     with patch.object(ext.rig_analysis, '_SURFACE_BUDGET', 3):
         assert bpy.ops.lichtfeld.check_camera_poses(clearance=.5) == {'FINISHED'}
         report = ext.rig_analysis.last_result(bpy.context)
         assert not report['nearby'] and 'budget exceeded' in report['clearance_note']
+    previous_guide = s.rig_mesh
+    s.rig_mesh = plane
+    assert bpy.ops.lichtfeld.check_camera_poses(clearance=.5) == {'FINISHED'}
+    report = ext.rig_analysis.last_result(bpy.context)
+    assert not report['nearby'] and 'No visible mesh surfaces' in report['clearance_note']
+    s.rig_mesh = previous_guide
+    plane.hide_set(True)
+    assert bpy.ops.lichtfeld.check_camera_poses(clearance=.5) == {'FINISHED'}
+    assert 'No visible mesh surfaces' in ext.rig_analysis.last_result(bpy.context)['clearance_note']
+    plane.hide_set(False)
 s.scope, s.source_collection = scope, source_collection
 bpy.data.objects.remove(plane, do_unlink=True)
 bpy.data.meshes.remove(mesh)
