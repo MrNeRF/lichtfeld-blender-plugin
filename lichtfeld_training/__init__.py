@@ -1942,7 +1942,8 @@ class LF_OT_reconnect(bpy.types.Operator):
     bl_description = "Restart this connection without starting or stopping the trainer"
 
     def execute(self, context):
-        ui_runtime.reconnect(context.scene)
+        scene = preview_scene.source_scene(context.scene) or context.scene
+        ui_runtime.reconnect(scene)
         return {"FINISHED"}
 
 
@@ -2517,7 +2518,8 @@ def draw_training(self, context):
             current = ui_runtime.peek(color_source)
             from . import job_panel
             job_panel.draw(layout, context, color_source.lichtfeld_training, current.status if current else {},
-                           current.reader.error if current else "", wrapped, color_view=True, status_error=current.reader.status_error if current else False)
+                           current.reader.error if current else "", wrapped, color_view=True, status_error=current.reader.status_error if current else False,
+                           reader_stopped=bool(current and current.reader.stop.is_set()))
         else:
             preview_scene.draw_orphaned(layout, context, wrapped)
         return
@@ -2528,7 +2530,8 @@ def draw_training(self, context):
     if settings.attached_session or settings.job_directory:
         from . import job_panel
         job_panel.draw(layout, context, settings, status, current.reader.error if current else "", wrapped,
-                       status_error=current.reader.status_error if current else False)
+                       status_error=current.reader.status_error if current else False,
+                       reader_stopped=bool(current and current.reader.stop.is_set()))
         return
     if settings.detail:
         wrapped(layout, settings.detail)

@@ -6,7 +6,7 @@ from . import workflow, scene_render
 from .ui_text import draw_disclosure
 
 
-def draw(layout, context, settings, status, reader_error, wrapped, color_view=False, status_error=False):
+def draw(layout, context, settings, status, reader_error, wrapped, color_view=False, status_error=False, reader_stopped=False):
     external = bool(settings.attached_session)
     capture_only = status.get("job", {}).get("capture_only", False)
     phase = workflow.phase(status.get("state", settings.status))
@@ -29,6 +29,8 @@ def draw(layout, context, settings, status, reader_error, wrapped, color_view=Fa
     if job_error:
         job.label(text='Job needs attention', icon='ERROR')
         wrapped(job, job_error)
+    if reader_stopped:
+        job.operator("lichtfeld.reconnect_job", text="Reconnect viewer", icon="FILE_REFRESH")
     if not capture_only and phase in workflow.TERMINAL and 'iteration' in status:
         job.label(text=f"Reached step {int(status['iteration']):,}")
     if settings.running:
