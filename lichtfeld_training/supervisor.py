@@ -140,9 +140,10 @@ def supervise(job_path):
             source = Path(job.get("capture_staging_file", job["source_file"]))
             if not source.is_file():
                 raise RuntimeError("The saved source .blend is no longer available")
-            if job.get("source_sha256") and digest(source) != job["source_sha256"]:
+            source_digest = digest(source)
+            if job.get("source_sha256") and source_digest != job["source_sha256"]:
                 raise ValueError("The immutable capture source was modified")
-            job["source_sha256"] = digest(source)
+            job["source_sha256"] = source_digest
             atomic_json(job_path, job)
             with (root / "render.log").open("wb") as log:
                 for recovering in (False, True):
