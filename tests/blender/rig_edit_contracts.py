@@ -779,6 +779,59 @@ with tempfile.TemporaryDirectory() as directory:
         assert region.tag_refresh_ui.call_count == 2
 print('POSE_CHECK_PANORAMA_NESTED_COPY_INVALID_READ_ONLY_CANCEL_PASS',flush=True)
 
+# The distance check uses evaluated world-space geometry in the capture scope.
+scope, source_collection = s.scope, s.source_collection
+surfaces = bpy.data.collections.new('Clearance test surfaces')
+bpy.context.scene.collection.children.link(surfaces)
+mesh = bpy.data.meshes.new('Clearance test plane')
+mesh.from_pydata([(-.05, -.05, 1), (.05, -.05, 1), (.05, .05, 1), (-.05, .05, 1)], [], [(0, 1, 2, 3)])
+plane = bpy.data.objects.new('Clearance test plane', mesh)
+surfaces.objects.link(plane)
+centre = original.matrix_world.translation
+plane.location = (centre.x, centre.y, centre.z - 2.25)
+plane.scale = (2, 3, 2)
+s.scope = 'COLLECTION'
+s.source_collection = surfaces
+bpy.context.view_layer.update()
+with tempfile.TemporaryDirectory() as directory:
+    bpy.ops.wm.save_as_mainfile(filepath=str(Path(directory) / 'clearance.blend'))
+    assert bpy.ops.lichtfeld.check_camera_poses(clearance=.5) == {'FINISHED'}
+    report = ext.rig_analysis.last_result(bpy.context)
+    assert report['clearance_note'] == '' and report['clearance'] == .5
+    distances = dict(report['nearby'])
+    assert abs(distances[original.name] - .25) < 1e-5
+    assert abs(distances[copy.name] - .25) < 1e-5
+    assert invalid.name not in distances
+    assert not bpy.data.is_dirty
+    assert bpy.ops.lichtfeld.check_camera_poses(clearance=.2) == {'FINISHED'}
+    assert not ext.rig_analysis.last_result(bpy.context)['nearby']
+    modifier = plane.modifiers.new('Evaluated surface copy', 'ARRAY')
+    modifier.use_relative_offset = False
+    modifier.use_constant_offset = True
+    modifier.constant_offset_displace = (0, 0, .0625)
+    bpy.context.view_layer.update()
+    assert bpy.ops.lichtfeld.check_camera_poses(clearance=.2) == {'FINISHED'}
+    assert abs(dict(ext.rig_analysis.last_result(bpy.context)['nearby'])[original.name] - .125) < 1e-5
+    with patch.object(ext.rig_analysis, '_SURFACE_BUDGET', 3):
+        assert bpy.ops.lichtfeld.check_camera_poses(clearance=.5) == {'FINISHED'}
+        report = ext.rig_analysis.last_result(bpy.context)
+        assert not report['nearby'] and 'budget exceeded' in report['clearance_note']
+    previous_guide = s.rig_mesh
+    s.rig_mesh = plane
+    assert bpy.ops.lichtfeld.check_camera_poses(clearance=.5) == {'FINISHED'}
+    report = ext.rig_analysis.last_result(bpy.context)
+    assert not report['nearby'] and 'No visible mesh surfaces' in report['clearance_note']
+    s.rig_mesh = previous_guide
+    plane.hide_set(True)
+    assert bpy.ops.lichtfeld.check_camera_poses(clearance=.5) == {'FINISHED'}
+    assert 'No visible mesh surfaces' in ext.rig_analysis.last_result(bpy.context)['clearance_note']
+    plane.hide_set(False)
+s.scope, s.source_collection = scope, source_collection
+bpy.data.objects.remove(plane, do_unlink=True)
+bpy.data.meshes.remove(mesh)
+bpy.data.collections.remove(surfaces)
+print('CAMERA_CLEARANCE_WORLD_SCALE_VISIBILITY_THRESHOLD_BUDGET_PASS', flush=True)
+
 # Existing Select camera must not choose an arbitrary linked namesake.
 with tempfile.TemporaryDirectory() as directory:
     path=str(Path(directory)/'linked-camera.blend')
