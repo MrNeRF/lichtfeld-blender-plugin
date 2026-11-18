@@ -1152,8 +1152,7 @@ class LF_OT_read_rig(bpy.types.Operator):
         try:
             values = rig_edit.decode_recipe(encoded)
             objects = {}
-            for name, key in (('target', 'lichtfeld_rig_target'), ('curve', 'lichtfeld_rig_curve'),
-                              ('mesh', 'lichtfeld_placement_mesh')):
+            for name, key in rig_edit.RIG_OBJECT_KEYS.items():
                 obj = collection.get(key) if key in collection else bpy.data.objects.get(values.get(name, ''))
                 if obj is not None and (not isinstance(obj, bpy.types.Object) or
                                         name == 'curve' and obj.type != 'CURVE' or
@@ -2534,7 +2533,7 @@ def draw_training(self, context):
     ready = preflight.cached(context, prefs, capture_only=capture_only)
     errors = preflight.issues(ready)
     rig = settings.camera_collection
-    pending = rig and rig.get('lichtfeld_generated') and (rig.get('lichtfeld_rig_recipe') != rig_recipe(settings) or ready.get('reference_changed', False))
+    pending = rig and rig.get('lichtfeld_generated') and (not rig_edit.recipe_matches(rig, settings) or ready.get('reference_changed', False))
     box = draw_setup_section(layout, settings, 'content', 'Capture')
     if box is not None:
         draw_capture_sources(box, context, settings)
