@@ -281,17 +281,16 @@ second=s.camera_collection
 assert s.rig_parameter_source==second
 s.camera_collection=first
 assert s.views==8 and s.rig_lens==60
-assert not bpy.ops.lichtfeld.create_rig.poll() and not bpy.ops.lichtfeld.select_aim.poll()
+assert not bpy.ops.lichtfeld.select_aim.poll()
 assert bpy.ops.lichtfeld.read_rig()=={'FINISHED'}
 assert s.rig_parameter_source==first and s.views==first_views
 s.views=6
 s.camera_collection=second
-assert s.views==6 and not bpy.ops.lichtfeld.create_rig.poll()
+assert s.views==6
 assert bpy.ops.lichtfeld.read_rig()=={'FINISHED'}
 assert s.views==8 and s.rig_lens==60 and s.rig_parameter_source==second
 # Loading older files without this property requires an explicit Load too.
 s.rig_parameter_source=None
-assert not bpy.ops.lichtfeld.create_rig.poll()
 assert bpy.ops.lichtfeld.read_rig()=={'FINISHED'}
 second_name=second.name
 with tempfile.TemporaryDirectory() as directory:
@@ -983,9 +982,20 @@ first_objects = {obj.as_pointer() for obj in first_rig.objects}
 first_poses = {obj.as_pointer(): obj.matrix_world.copy() for obj in first_rig.objects if obj.type == 'CAMERA'}
 s.rig_mode = 'HEMISPHERE'
 s.views = 8
+s.rig_parameter_source = None
+s.rig_aim_mode = 'VIEWPORT'
+s.rig_aim = None
+try:
+    bpy.ops.lichtfeld.create_rig()
+except RuntimeError as error:
+    assert 'Load selected rig before applying changes' in str(error)
+else:
+    raise AssertionError('Applied settings to a rig that was not loaded')
+assert s.camera_collection == first_rig
 assert bpy.ops.lichtfeld.create_rig(new_rig=True) == {'FINISHED'}
 second_rig = s.camera_collection
 assert second_rig != first_rig and s.rig_parameter_source == second_rig
+assert s.rig_aim in second_rig.objects[:] and s.rig_aim not in first_rig.objects[:]
 assert sum(obj.type == 'CAMERA' for obj in second_rig.objects) == 8
 assert {obj.as_pointer() for obj in first_rig.objects} == first_objects
 assert {obj.as_pointer(): obj.matrix_world for obj in first_rig.objects if obj.type == 'CAMERA'} == first_poses
@@ -1026,3 +1036,25 @@ assert bpy.ops.lichtfeld.capture_collection_entry(index=0) == {'FINISHED'}
 assert set(checked()['cameras']) == expected - {obj.name for obj in second_rig.objects if obj.type == 'CAMERA' and obj != shared}
 first_rig.objects.unlink(shared)
 print('MULTI_RIG_CAPTURE_DEDUPLICATES_CAMERAS_AND_KEEPS_EDIT_TARGET_INDEPENDENT_PASS', flush=True)
+
+# The capture manifest stores names, and the worker resolves them file-wide.
+s.capture_collections.add().collection = second_rig
+second_rig.objects.link(linked)
+try:
+    checked()
+except ValueError as error:
+    assert f'Camera name is ambiguous in this file: {linked.name}' in str(error)
+else:
+    raise AssertionError('Accepted a linked camera that the renderer would resolve to another object')
+second_rig.objects.unlink(linked)
+bpy.data.objects.remove(linked, do_unlink=True)
+with tempfile.TemporaryDirectory() as directory:
+    path = str(Path(directory) / 'multi-rig.blend')
+    active_name, capture_name = first_rig.name, second_rig.name
+    bpy.ops.wm.save_as_mainfile(filepath=path)
+    bpy.ops.wm.open_mainfile(filepath=path, use_scripts=False)
+    s = bpy.context.scene.lichtfeld_training
+    assert s.camera_collection.name == active_name
+    assert [entry.collection.name for entry in s.capture_collections] == [capture_name]
+    assert checked()['camera_count'] == 10
+print('MULTI_RIG_CAPTURE_NAME_LOOKUP_AND_SAVE_REOPEN_PASS', flush=True)

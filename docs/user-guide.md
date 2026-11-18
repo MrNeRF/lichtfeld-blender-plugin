@@ -277,9 +277,14 @@ Updating it preserves generated camera identities where possible and retains
 additional custom cameras in the collection. Inspect coverage after changing
 placement, count, lens, aspect ratio or target.
 
-To keep the selected generated rig and create a separate one, open **Rig settings**,
-adjust the settings for the new rig and choose **Create another rig**. The new
-collection becomes the capture collection. Choose the original collection and
+Choose **Create another rig** to keep the selected generated rig and create a
+separate collection using the current settings. Adjust them in **Rig settings**
+or **New rig settings** before creating the rig. **Load selected rig** is only
+needed to replace the current controls with that rig's saved settings. A new
+viewport target starts at the new rig's reference center, with its aim offset. With an
+explicit capture list, the new rig is selected for editing. Add it to
+**Capture collections** to include its cameras. In single-collection mode, it
+becomes the capture collection. Choose the original collection and
 use **Load selected rig** to return to its saved settings.
 
 To capture more than one rig, expand **Capture collections** in **Cameras** and

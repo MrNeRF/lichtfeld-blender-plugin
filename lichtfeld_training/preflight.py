@@ -74,6 +74,11 @@ def camera_objects(scene, settings):
    yield
  if rows and len({camera.name for camera in cameras}) != len(cameras):
   raise ValueError('Capture cameras must have unique names across the included collections.')
+ if rows:
+  for camera in cameras:
+   if bpy.data.objects.get(camera.name) != camera:
+    raise ValueError(f'Camera name is ambiguous in this file: {camera.name}. Rename the camera or make the linked camera local with a unique name.')
+   yield
  return sorted(cameras,key=lambda obj:(obj.name,obj.library.filepath if obj.library else ''))
 
 

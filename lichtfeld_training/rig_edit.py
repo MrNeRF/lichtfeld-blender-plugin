@@ -116,7 +116,7 @@ def uses_aim(settings):
     return settings.rig_mode != 'MESH' or settings.rig_mesh_orientation == 'TARGET'
 
 
-def aim_point(context, settings, center):
+def aim_point(context, settings, center, *, new_target=False):
     if settings.rig_aim_mode == "OBJECT":
         if not settings.rig_target:
             raise ValueError("Choose a target object or aim at Reference center")
@@ -125,7 +125,7 @@ def aim_point(context, settings, center):
         point = context.scene.cursor.location.copy()
     elif settings.rig_aim_mode == "POSITION":
         point = Vector(settings.rig_aim_position)
-    elif settings.rig_aim_mode == "VIEWPORT":
+    elif settings.rig_aim_mode == "VIEWPORT" and not new_target:
         if not settings.rig_aim or not settings.camera_collection or settings.rig_aim.name not in settings.camera_collection.objects:
             raise ValueError("Create a rig target first or choose Reference center")
         point = settings.rig_aim.matrix_world.translation.copy()
