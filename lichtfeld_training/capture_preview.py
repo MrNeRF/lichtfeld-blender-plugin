@@ -416,15 +416,13 @@ def draw(layout, context, source, *, width=None):
     layout.operator('lichtfeld.close_capture_framing', icon='BACK')
     box = layout.box()
     box.label(text=context.scene.get('capture_camera_name', ''))
-    box.label(text=context.scene.get('capture_format_label', ''))
     from .rig_edit import render_busy
     box.enabled = not (render_busy(context) or s.operation_busy or s.running or s.job_directory)
     box.prop(s, 'capture_preview_index', text='Camera number')
     box.label(text=f"{context.scene.get('capture_camera_count', 0)} cameras, sorted by name")
     draw_capture_format(box, source, s, wrapped)
     draw_capture_overrides(box, s, wrapped)
-    box.operator('lichtfeld.capture_framing', text='Update framing', icon='FILE_REFRESH')
-    wrapped(layout, 'Camera changes are automatic. Update framing applies output settings and camera overrides. Source cameras stay unchanged.')
+    box.operator('lichtfeld.capture_framing', text='Apply preview settings')
     if s.test_render_active:
         layout.label(text='Rendering test image…')
     elif s.test_render_error:
@@ -434,11 +432,11 @@ def draw(layout, context, source, *, width=None):
         row.operator('lichtfeld.cancel_capture_test')
     else:
         if bpy.data.filepath:
-            row.operator('lichtfeld.render_capture_test', text='Save and render test image')
+            row.operator('lichtfeld.render_capture_test', text='Render test')
         else:
             row.operator('lichtfeld.save_capture_source', text='Save scene…')
     if s.test_render_image:
-        row.operator('lichtfeld.show_test_image', text='View last')
+        row.operator('lichtfeld.show_test_image', text='Last image')
 
 
 def draw_orphaned(layout, _context):
@@ -648,7 +646,7 @@ class LF_OT_show_test_image(bpy.types.Operator):
             area.spaces.active.image = image
             if len(window.screen.areas) > 1:
                 with bpy.context.temp_override(window=window, area=area):
-                    bpy.ops.screen.screen_full_area(use_hide_panels=True)
+                    bpy.ops.screen.screen_full_area(use_hide_panels=False)
                 window.screen['lichtfeld_test_viewer'] = True
             return {'FINISHED'}
         except (OSError, RuntimeError, KeyError) as error:
