@@ -14,3 +14,4 @@ wheels = ["./wheels/lichtfeld_training_protocol-0.1.2-py3-none-any.whl"]
 [permissions]
 files = "Capture scenes, save training jobs, and import Portal splats"
 network = "Connect to Portal and download assets or runtime dependencies"
+clipboard = "Copy Portal sign-in codes and error details"
