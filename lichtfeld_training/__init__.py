@@ -82,7 +82,8 @@ def preferences(context=None):
 
 def python_binary():
     prefix = Path(sys.prefix)
-    for candidate in (prefix / "bin/python.exe", prefix / "bin/python3.13",
+    version = f"{sys.version_info.major}.{sys.version_info.minor}"
+    for candidate in (prefix / "bin/python.exe", prefix / f"bin/python{version}",
                       prefix / "bin/python3", prefix / "python.exe"):
         if candidate.is_file():
             return str(candidate)
