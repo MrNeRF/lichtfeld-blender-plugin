@@ -10,6 +10,26 @@ SOURCE = 'lichtfeld_capture_preview_source'
 CAMERA = 'lichtfeld_capture_preview_camera'
 _views = {}
 _pending = {}
+_indices = {}
+
+
+def camera_index(settings):
+    return _indices.get(settings.id_data.session_uid, settings.get('capture_preview_index', 1))
+
+
+def set_camera_index(settings, value):
+    _indices[settings.id_data.session_uid] = value
+
+
+def visible_camera_index(_state):
+    source = source_scene(bpy.context.scene)
+    return source.lichtfeld_training.capture_preview_index if source is not None else 1
+
+
+def set_visible_camera_index(_state, value):
+    source = source_scene(bpy.context.scene)
+    if source is not None:
+        source.lichtfeld_training.capture_preview_index = value
 
 
 def camera_pending(scene):
@@ -212,7 +232,6 @@ def camera_steps(source, preview, key, token):
         capture_settings.apply_format(preview, value)
         preview['capture_camera_name'] = name
         preview['capture_camera_count'] = count
-        preview['capture_format_label'] = f"{value['width']} × {value['height']} px"
         if settings.capture_preview_index != index:
             settings.capture_preview_index = index
     except ReferenceError:
@@ -265,7 +284,6 @@ def _open_steps(source, window, area, *, prefer_selected):
         preview['capture_camera_name'] = name
         preview['capture_camera_count'] = count
         preview['capture_source_layer'] = layer.name
-        preview['capture_format_label'] = f"{value['width']} × {value['height']} px"
         preview.collection.objects.link(camera)
         preview.camera = camera
         preview[CAMERA] = camera
@@ -418,7 +436,7 @@ def draw(layout, context, source, *, width=None):
     box.label(text=context.scene.get('capture_camera_name', ''))
     from .rig_edit import render_busy
     box.enabled = not (render_busy(context) or s.operation_busy or s.running or s.job_directory)
-    box.prop(s, 'capture_preview_index', text='Camera number')
+    box.prop(context.window_manager.lichtfeld_panels, 'framing_camera', text='Camera number')
     box.label(text=f"{context.scene.get('capture_camera_count', 0)} cameras, sorted by name")
     draw_capture_format(box, source, s, wrapped)
     draw_capture_overrides(box, s, wrapped)

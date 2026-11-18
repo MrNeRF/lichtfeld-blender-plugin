@@ -457,6 +457,7 @@ class LichtFeldSettings(bpy.types.PropertyGroup):
     capture_clip_end: FloatProperty(name="Far", default=1000, min=.00002, max=1000000, subtype='DISTANCE', unit='LENGTH')
     capture_preview_index: IntProperty(name="Capture camera", default=1, min=1, max=capture_settings.MAX_VIEWS,
         description="Camera number in name order; the framing view updates automatically",
+        get=capture_preview.camera_index, set=capture_preview.set_camera_index,
         update=capture_preview.camera_changed)
     samples: IntProperty(name="Render samples", min=1, max=2147483647, get=scene_render.sample_get, set=scene_render.sample_set, update=custom_changed)
     iterations: IntProperty(name="Training steps", default=training_options.PROFILES['mrnf']['iterations'], min=4, max=1000000, update=custom_changed)
@@ -519,6 +520,9 @@ class LichtFeldPanelState(bpy.types.PropertyGroup):
     training_advanced: BoolProperty(name="Advanced training")
     capture_advanced: BoolProperty(name="Advanced capture settings")
     preview_advanced: BoolProperty(name="Preview details")
+    framing_camera: IntProperty(name="Camera number", min=1, max=capture_settings.MAX_VIEWS,
+        description="Preview a capture camera in name order",
+        get=capture_preview.visible_camera_index, set=capture_preview.set_visible_camera_index)
     format_presets_open: BoolProperty(name="Size presets")
     camera_overrides_open: BoolProperty(name="Capture-only camera overrides")
     validation_details: BoolProperty(name="Validation details", default=False)
