@@ -1445,9 +1445,22 @@ class LF_OT_start(bpy.types.Operator):
                     except StopIteration as stop:
                         if context.scene != scene or preflight.signature(context) != initial:
                             raise ValueError("The capture setup changed. Save the scene and start again.")
-                        LF_OT_start.launch(context, stop.value, export_directory)
-                        return
+                        capture = stop.value
+                        break
                     yield
+                while not bpy.app.background:
+                    scene_render.tick(scene)
+                    readiness = preflight.cached(context, preferences(context),
+                                                 capture_only=capture_only, capture=capture)
+                    if not readiness['checking'] and not readiness['environment'].get('checking'):
+                        errors = preflight.issues(readiness)
+                        if errors:
+                            raise ValueError(errors[0])
+                        break
+                    yield ui_runtime.WAIT
+                    if context.scene != scene or preflight.signature(context) != initial:
+                        raise ValueError("The capture setup changed. Save the scene and start again.")
+                LF_OT_start.launch(context, capture, export_directory)
             finally:
                 work.close()
                 try:
