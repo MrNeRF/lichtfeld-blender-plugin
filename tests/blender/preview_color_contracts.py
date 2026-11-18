@@ -209,6 +209,12 @@ try:
   raise AssertionError('Closing removed the scene during its preview update')
 finally:
  s.lichtfeld_training.operation_busy = False
+preview = bpy.context.scene
+s.background_set = preview
+colors.close_view(bpy.context);assert bpy.context.scene==s
+assert preview_name in bpy.data.scenes, 'Closing unlinked a preview used as the background scene'
+s.background_set = None
+bpy.context.window.scene = preview
 colors.close_view(bpy.context);assert bpy.context.scene==s
 assert preview_name not in bpy.data.scenes
 assert s.lichtfeld_training.result_object is not None

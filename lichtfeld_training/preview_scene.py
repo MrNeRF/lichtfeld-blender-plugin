@@ -366,7 +366,7 @@ def close_view(context):
 
 def discard_closed_view(scene, context):
     from .rig_edit import render_busy
-    if (render_busy(context) or scene.users or scene.collection.children or
+    if (render_busy(context) or scene.use_fake_user or scene.collection.children or
             any(window.scene == scene for window in context.window_manager.windows)):
         return
     clone = scene_result(scene)
@@ -378,6 +378,10 @@ def discard_closed_view(scene, context):
         owned.add(camera)
     if (set(scene.objects) != owned or
             any(tuple(obj.users_collection) != (scene.collection,) for obj in owned)):
+        return
+    references = bpy.data.user_map(subset={scene, *owned})
+    inside = {scene, scene.collection, *owned}
+    if references.get(scene) or any(references.get(obj, set()) - inside for obj in owned):
         return
 
     world = scene.world
