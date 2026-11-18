@@ -403,8 +403,9 @@ def render_dataset(job_path, reuse_images=False):
 
 if __name__ == "__main__":
     job_path = Path(sys.argv[sys.argv.index("--") + 1])
+    reuse_images = "--finalize-capture" in sys.argv
     try:
-        render_dataset(job_path, reuse_images="--finalize-capture" in sys.argv)
+        render_dataset(job_path, reuse_images=reuse_images)
     except Exception as error:
         try:
             failure_root = Path(read_job_json(job_path)['root'])
@@ -415,3 +416,10 @@ if __name__ == "__main__":
         except Exception:
             pass  # Preserve the actual render exception if diagnostics cannot be saved.
         raise
+    finally:
+        if not reuse_images:
+            from jobs import release_source
+            try:
+                release_source(read_job_json(job_path))
+            except (KeyError, OSError, ValueError):
+                pass  # The supervisor still owns cleanup if job metadata is unavailable.
