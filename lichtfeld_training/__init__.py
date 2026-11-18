@@ -2068,7 +2068,7 @@ def draw_capture_reference(box, rig):
         subject = (entry.object.name if entry.object else 'Missing: ' + entry.name) if entry else 'No reference objects'
         if len(reference.objects) > 1:
             subject += f' (+{len(reference.objects)-1:,})'
-    box.label(text='Rig reference: ' + subject)
+    box.label(text='Rig reference: ' + subject, icon='BLANK1')
 
 
 
@@ -2132,7 +2132,7 @@ def draw_capture_cameras(box, context, settings, ready, rig_changed, wrapped):
                        'Checking cameras…' if ready.get('checking') else f"{len(ready['cameras']):,} capture cameras", icon='BLANK1')
         additional = len(ready['cameras']) - ready.get('generated_cameras', 0)
         if managed and additional > 0:
-            box.label(text=f"{ready.get('generated_cameras', 0):,} generated · {additional:,} additional")
+            box.label(text=f"{ready.get('generated_cameras', 0):,} generated · {additional:,} additional", icon='BLANK1')
         if managed:
             draw_capture_reference(box, rig)
         if managed and settings.rig_parameter_source != rig:
@@ -2265,9 +2265,7 @@ def draw_capture_actions(setup, settings, ready, errors, capture_only, wrapped):
     if checking:
         setup.label(text='Updating setup…' if settings.operation_busy else 'Checking capture setup…', icon='TIME')
     elif errors:
-        if errors[0] in ready.get('camera_issues', {}):
-            setup.label(text='Review cameras in Capture checks')
-        else:
+        if errors[0] not in ready.get('camera_issues', {}):
             wrapped(setup, errors[0])
     else:
         setup.label(text='Ready to capture', icon='CHECKMARK')
@@ -2421,28 +2419,33 @@ def draw_training(self, context):
     backend_required = draw_backend_requirement(start, prefs, installation, wrapped)
     if not backend_required:
         draw_capture_actions(start, settings, ready, errors, capture_only, wrapped)
-    checks = layout.column()
-    checks.enabled = not settings.operation_busy
-    box = draw_disclosure(checks, 'validation_details', 'Capture checks')
-    if box is not None:
-        box.enabled = not settings.operation_busy
+    camera_issues = ready.get('camera_issues')
+    if rig:
+        row = start.row()
+        row.operator_context = 'INVOKE_DEFAULT'
+        count = len(camera_issues or {})
+        row.operator('lichtfeld.camera_report', text='Check cameras…')
+        if count:
+            start.label(text=f"{count:,} camera {'issue' if count == 1 else 'issues'}", icon='ERROR')
         report = rig_analysis.last_result(context)
-        camera_issues = ready.get('camera_issues')
-        if camera_issues is not None:
-            count = len(camera_issues)
-            box.label(text=f"Camera issue{'s' if count != 1 else ''}: {count:,}")
+        if report is None:
+            start.label(text='Poses not checked yet', icon='BLANK1')
         else:
-            box.label(text='Camera issues: checking…')
-        box.label(text=f"Repeated poses: {len(report['repeats']):,} (last check)" if report is not None else 'Repeated poses: not checked')
-        box.operator('lichtfeld.camera_report', text='Camera checks...')
-        covered = set(preflight.save_issues()) if not backend_required else set()
-        if backend_required:covered.add(installation.get('message', 'Choose your LichtFeld Studio installation.'))
-        other_errors = [error for error in errors if error not in (camera_issues or {}) and error not in covered]
+            repeats = len(report['repeats'])
+            start.label(text=f"{repeats:,} repeated {'pose' if repeats == 1 else 'poses'} (last check)",
+                        icon='BLANK1')
+    covered = set(preflight.save_issues()) if not backend_required else set()
+    if backend_required:
+        covered.add(installation.get('message', 'Choose your LichtFeld Studio installation.'))
+    other_errors = [error for error in errors if error not in (camera_issues or {}) and error not in covered]
+    checks = layout.box() if other_errors else None
+    if checks is not None:
+        checks.enabled = not settings.operation_busy
+    box = draw_disclosure(checks, 'validation_details', 'Capture checks', nested=False) if checks is not None else None
+    if box is not None:
         for error in other_errors[:5]:wrapped(box, error)
         if len(other_errors) > 5:
             wrapped(box, f'{len(other_errors)-5:,} more issues; resolve the listed issues first.')
-        if not errors:
-            box.label(text="Capture setup is ready", icon="CHECKMARK")
     draw_job_navigation(layout, settings)
 
 

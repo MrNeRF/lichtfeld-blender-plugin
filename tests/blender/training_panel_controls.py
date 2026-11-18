@@ -15,7 +15,11 @@ s.result_object=result;s.running=True;s.status='Training';s.job_directory='/fixt
 status={'state':'training','control_available':True,'iteration':100,'iterations':1000,'best':{'iteration':80},'job':{'id':'fixture'}}
 binding=SimpleNamespace(status=status,reader=SimpleNamespace(error='',status_error=False,commands=queue.Queue(),external=False))
 class Layout:
-    def __init__(self,records=None,parent=None):self.records=[] if records is None else records;self.parent=parent;self.enabled=True
+    def __init__(self,records=None,parent=None):
+        self.records=[] if records is None else records
+        self.parent=parent
+        self.enabled=True
+        self.operator_context=parent.operator_context if parent else 'EXEC_DEFAULT'
     def child(self):return Layout(self.records,self)
     def row(self,**kw):return self.child()
     def split(self,**kw):return self.child()
@@ -28,6 +32,8 @@ class Layout:
     def separator(self,**kw):pass
     def prop(self,*args,**kw):pass
     def operator(self,name,**kw):
+        if name=='lichtfeld.camera_report':
+            assert self.operator_context=='INVOKE_DEFAULT', 'Sidebar must invoke the camera popup'
         item=self;enabled=True
         while item:enabled=enabled and item.enabled;item=item.parent
         self.records.append((name,kw.get('text'),enabled))
@@ -86,6 +92,8 @@ panels=bpy.context.window_manager.lichtfeld_panels
 panels.setup_content=False;panels.setup_cameras=False
 panels.setup_output=False;panels.setup_training=False;panels.validation_details=True
 camera_error='Camera Unsupported: capture requires a Perspective camera'
+s.camera_collection=bpy.data.collections.new('Camera checks fixture')
+bpy.context.scene.collection.children.link(s.camera_collection)
 for backend in (True,False):
     installation={'backend':backend,'ok':False,'message':'Job folder is unavailable' if backend else 'Choose your installation'}
     ready={'errors':[camera_error],'camera_issues':{camera_error:'Unsupported'},'environment':installation}
@@ -93,10 +101,20 @@ for backend in (True,False):
     with patch.object(ext.ui_runtime,'peek',return_value=None),patch.object(ext.preflight,'environment',return_value=installation),patch.object(ext.preflight,'cached',return_value=ready):
         ext.draw_training(SimpleNamespace(layout=layout),context)
     labels=' '.join(text or '' for name,text,enabled in layout.records if name=='label')
-    assert 'Camera issue: 1' in labels and 'Repeated poses: not checked' in labels
+    assert ('lichtfeld.camera_report', 'Check cameras…', True) in layout.records
+    assert '1 camera issue' in labels and 'Poses not checked yet' in labels
     assert installation['message'] in labels
     assert camera_error not in labels
     assert sum(name=='lichtfeld.camera_report' for name,text,enabled in layout.records)==1
     assert not any(name=='lichtfeld.inspect_capture_camera' for name,text,enabled in layout.records)
     if not backend:assert all(message in labels for message in ext.preflight.save_issues())
+
+installation = {'backend': True, 'ok': True}
+ready = {'errors': [], 'camera_issues': {}, 'environment': installation}
+layout = Layout()
+with patch.object(ext.ui_runtime, 'peek', return_value=None), patch.object(ext.preflight, 'environment', return_value=installation), patch.object(ext.preflight, 'cached', return_value=ready), patch.object(ext.rig_analysis, 'last_result', return_value={'repeats': [('Capture 001', 'Repeated view')]}):
+    ext.draw_training(SimpleNamespace(layout=layout), context)
+assert ('lichtfeld.camera_report', 'Check cameras…', True) in layout.records
+assert ('label', '1 repeated pose (last check)', True) in layout.records
+assert not any(name == 'label' and 'camera issue' in (label or '') for name, label, _ in layout.records)
 print('CAMERA_SUMMARY_PRESERVES_ENVIRONMENT_AND_SAVE_ERRORS_PASS',flush=True)

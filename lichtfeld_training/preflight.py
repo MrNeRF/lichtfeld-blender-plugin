@@ -240,6 +240,7 @@ def tick(context,prefs):
    changed = _cache.get(pointer) != stop.value
    _cache[pointer]=stop.value;_work=None;_next=time.monotonic()+.4
    if changed:
+    rig_analysis.refresh_report()
     for screen in bpy.data.screens:
      for area in screen.areas:
       if area.type=='VIEW_3D':area.tag_redraw()

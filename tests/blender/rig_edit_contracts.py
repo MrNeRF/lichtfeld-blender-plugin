@@ -755,6 +755,28 @@ with tempfile.TemporaryDirectory() as directory:
     assert all(max(abs(a-b) for ra,rb in zip(matrix,obj.matrix_world) for a,b in zip(ra,rb))==0 for matrix,obj in zip(before,(original,copy,invalid)))
     assert bpy.ops.lichtfeld.check_camera_poses()=={'FINISHED'}
     assert not bpy.data.is_dirty
+    snapshot = ext.rig_analysis.last_result(bpy.context)
+    assert snapshot is not None and set(snapshot['repeats'][0]) == {original.name, copy.name}
+    frame = bpy.context.scene.frame_current
+    bpy.context.scene.frame_set(frame + 1)
+    assert ext.rig_analysis.last_result(bpy.context) is None
+    bpy.context.scene.frame_set(frame)
+    assert ext.rig_analysis.last_result(bpy.context) is snapshot
+
+    # A completed readiness refresh after selection must update the open report.
+    from unittest.mock import Mock
+    region = Mock()
+    with patch.object(ext.rig_analysis, '_report_region', region):
+        for camera in (invalid, copy):
+            assert bpy.ops.lichtfeld.inspect_capture_camera(camera_name=camera.name) == {'FINISHED'}
+            assert bpy.context.view_layer.objects.active == camera
+            ext.preflight.invalidate(bpy.context.scene)
+            deadline = time.monotonic() + 5
+            while ext.preflight.camera_status(bpy.context) is None and time.monotonic() < deadline:
+                ext.preflight.tick(bpy.context, ext.preferences())
+            readiness = ext.preflight.camera_status(bpy.context)
+            assert readiness is not None and invalid.name in readiness['camera_issues'].values()
+        assert region.tag_refresh_ui.call_count == 2
 print('POSE_CHECK_PANORAMA_NESTED_COPY_INVALID_READ_ONLY_CANCEL_PASS',flush=True)
 
 # Existing Select camera must not choose an arbitrary linked namesake.

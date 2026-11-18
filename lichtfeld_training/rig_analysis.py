@@ -3,12 +3,19 @@
 """Explicit pose diagnostics with one transient repeated-pose snapshot; no scene state."""
 import time
 import bpy
-from bpy.props import BoolProperty
 from . import preflight, rig_geometry, rig_edit, capture_preview
-from .ui_text import draw_disclosure, draw_paragraph
+from .ui_text import draw_paragraph
 
 _active = None
 _report = None
+_report_region = None
+_REPORT_WIDTH = 420
+
+
+def draw_camera_row(layout, name):
+    row = layout.split(factor=.78)
+    row.label(text=f'Camera: “{name}”')
+    row.operator('lichtfeld.inspect_capture_camera', text='Select').camera_name = name
 
 
 def analyze_steps(context):
@@ -38,56 +45,78 @@ def show_result(context, result):
     names = [name for name, matrix in result['poses']]
     _report = dict(scene_id=context.scene.session_uid,
                    collection_id=context.scene.lichtfeld_training.camera_collection.session_uid,
-                   frame=result['frame'], count=result['camera_count'],
+                   frame=result['frame'],
                    repeats=[(names[first], names[repeated]) for first, repeated in result['matches']])
-    bpy.ops.lichtfeld.camera_report('INVOKE_DEFAULT')
+    refresh_report()
+
+
+def refresh_report():
+    global _report_region
+    if _report_region is not None:
+        try:
+            _report_region.tag_refresh_ui()
+        except ReferenceError:
+            _report_region = None
 
 
 class LF_OT_camera_report(bpy.types.Operator):
     bl_idname = 'lichtfeld.camera_report'
     bl_label = 'Camera checks'
     bl_description = 'Review current camera issues and the last explicit repeated-pose check'
-    issues_open: BoolProperty(name='Camera issues', default=False, options={'SKIP_SAVE'},
-        description='Expand invalid camera settings and select a camera to inspect')
-    repeats_open: BoolProperty(name='Repeated poses', default=False, options={'SKIP_SAVE'},
-        description='Expand cameras with exactly matching evaluated position and orientation; different optics may still produce different images')
 
     @classmethod
     def poll(cls, context):
         return bool(context.scene.lichtfeld_training.camera_collection) and not capture_preview.is_preview(context.scene)
 
     def invoke(self, context, event):
-        return context.window_manager.invoke_popup(self, width=420)
+        return context.window_manager.invoke_popup(self, width=_REPORT_WIDTH)
+
+    def execute(self, context):
+        self.cancel(context)
+        return {'FINISHED'}
+
+    def cancel(self, context):
+        global _report_region
+        _report_region = None
 
     def draw(self, context):
+        global _report_region
+        _report_region = context.region_popup
+        scale = context.preferences.system.ui_scale
+        # Blender can draw before assigning the popup its final region width.
+        width = _REPORT_WIDTH * scale
         layout = self.layout
         layout.label(text='Camera checks')
         layout.separator()
         ready = preflight.camera_status(context)
         report = last_result(context)
         issues = list(ready['camera_issues'].items()) if ready is not None else None
-        groups = (('issues_open', 'Camera issues', issues),
-                  ('repeats_open', 'Repeated poses', report['repeats'] if report is not None else None))
-        for field, title, entries in groups:
-            if entries is None:
-                layout.label(text=title + (': checking…' if field == 'issues_open' else ': not checked'))
-                continue
-            if not entries:
-                layout.label(text=title + ': 0')
-                continue
-            body = draw_disclosure(layout, field, f'{title} ({len(entries):,})', nested=False, owner=self)
-            if body is None:continue
-            if field == 'repeats_open':
-                body.label(text=f"Last check · frame {report['frame']} · {report['count']:,} cameras")
-            for first, name in entries[:8]:
-                row = body.split(factor=.78)
-                row.label(text=name)
-                row.operator('lichtfeld.inspect_capture_camera', text='Select').camera_name = name
-                detail = first.removeprefix(f'Camera {name}: ') if field == 'issues_open' else 'Same pose: ' + first
-                region = context.region_popup or context.region
-                draw_paragraph(body, detail, region.width, context.preferences.system.ui_scale)
-                body.separator(factor=.35)
-            if len(entries)>8:body.label(text=f'First 8 of {len(entries):,}; inspect and check again')
+        if issues is None:
+            layout.label(text='Camera issues: checking…')
+        else:
+            layout.label(text=f'Camera issues: {len(issues):,}')
+            for message, name in issues[:8]:
+                body = layout.column(align=True)
+                draw_camera_row(body, name)
+                reason = message.removeprefix(f'Camera {name}: ')
+                draw_paragraph(body, f'Issue: {reason}', width, scale)
+            if len(issues) > 8:
+                layout.label(text=f'Showing 8 of {len(issues):,} issues')
+
+        layout.separator()
+        if report is None:
+            layout.label(text='Repeated poses: not checked')
+        else:
+            repeats = report['repeats']
+            layout.label(text=f'Repeated poses (last check): {len(repeats):,}')
+            for index, (first, repeated) in enumerate(repeats[:8], start=1):
+                pair = layout.box().column(align=True)
+                pair.label(text=f'Pair {index}: same position and orientation' if len(repeats) > 1
+                           else 'Same position and orientation')
+                draw_camera_row(pair, first)
+                draw_camera_row(pair, repeated)
+            if len(repeats) > 8:
+                layout.label(text=f'Showing 8 of {len(repeats):,} matches')
         layout.separator()
         row = layout.row()
         row.alignment = 'RIGHT'
@@ -100,8 +129,9 @@ def is_running():
 
 
 def clear():
-    global _report
+    global _report, _report_region
     _report = None
+    _report_region = None
     if _active is not None:
         _active.release()
 
@@ -145,6 +175,7 @@ class LF_OT_check_poses(bpy.types.Operator):
                 while True:next(self.work)
             except StopIteration as done:
                 result=done.value
+                show_result(context, result)
                 self.report({'INFO'}, f"{len(result['matches']):,} repeated camera poses; {len(result['camera_issues']):,} pose issues")
                 return {'FINISHED'}
             except (ValueError, RuntimeError) as error:

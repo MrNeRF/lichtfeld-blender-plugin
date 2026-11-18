@@ -583,7 +583,7 @@ def pose_checks():
                 assert snapshot is not None and len(snapshot['repeats'])==1 and 'poses' not in snapshot
                 reopened=time.perf_counter()
                 with patch.object(extension.rig_analysis,'analyze_steps',side_effect=AssertionError('Reopen started a second scan')):
-                    assert bpy.ops.lichtfeld.camera_report('INVOKE_DEFAULT',issues_open=True,repeats_open=True)=={'RUNNING_MODAL'}
+                    assert bpy.ops.lichtfeld.camera_report('INVOKE_DEFAULT')=={'RUNNING_MODAL'}
                 assert extension.rig_analysis._active is None
                 assert not bpy.data.is_dirty
                 proof[proof['phase']+'_reopen_seconds']=time.perf_counter()-reopened

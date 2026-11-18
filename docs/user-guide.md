@@ -307,7 +307,7 @@ surfaces and sufficient overlap still need inspection.
 
 ### Camera checks
 
-Open **Capture checks → Camera checks** to review the cameras currently in
+Open **Check cameras** to review the cameras currently in
 the capture collection, including nested collections and custom cameras. The
 check reads evaluated poses, so parent and tracking constraints are included.
 It reports unsupported/invalid camera poses and exact repetitions of an earlier
@@ -316,9 +316,8 @@ are distinct. Different lenses can produce different images at the same pose;
 this is a diagnostic, not a recommendation to delete cameras.
 
 **Camera issues** follows the current capture readiness. **Repeated poses** shows
-the last explicit check, or **not checked** before the first run. Expand either
-group and use **Select** beside a camera to inspect it. The repeated-pose details
-name its matching camera and the frame/count of that snapshot.
+the last explicit check, or **not checked** before the first run. Use **Select**
+beside a camera to inspect it. Each repeated pose names its matching camera.
 
 Use **Run check** or **Run again** to update repeated poses after editing cameras.
 Reopening the result does not start another scan. One transient result is kept
