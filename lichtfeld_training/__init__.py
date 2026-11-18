@@ -1135,10 +1135,18 @@ class LF_OT_read_rig(bpy.types.Operator):
     bl_label = "Load selected rig"
     bl_description = "Replace the current rig controls with the selected rig's saved settings without moving cameras"
     bl_options = {"REGISTER", "UNDO"}
+    @classmethod
+    def poll(cls, context):
+        settings = context.scene.lichtfeld_training
+        collection = settings.camera_collection
+        return bool(collection and collection.get('lichtfeld_generated') and not settings.running
+                    and not settings.operation_busy and not rig_edit.live_root(settings)
+                    and not rig_edit.render_busy(context))
+
     def execute(self, context):
         s = context.scene.lichtfeld_training
         collection = s.camera_collection
-        if not collection or not collection.get("lichtfeld_generated") or s.running or s.operation_busy:
+        if not self.poll(context):
             return {"CANCELLED"}
         encoded = collection.get("lichtfeld_rig_recipe", "")
         try:
