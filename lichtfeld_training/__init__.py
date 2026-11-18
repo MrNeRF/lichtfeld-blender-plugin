@@ -2201,7 +2201,7 @@ def draw_rig_actions(layout, settings, pending, *, edit=False):
     if managed and not pending and settings.rig_parameter_source == rig and settings.rig_mode in {'SPHERE', 'HEMISPHERE', 'RINGS'}:
         row.operator('lichtfeld.live_rig', text='Edit live')
     if preflight.camera_collections(settings):
-        row.operator('lichtfeld.capture_framing', text='Check framing')
+        layout.operator('lichtfeld.capture_framing', text='Check framing')
     if managed:
         layout.operator('lichtfeld.create_rig', text='Create another rig').new_rig = True
 
