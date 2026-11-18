@@ -630,7 +630,7 @@ class LF_PT_portal(bpy.types.Panel):
         account_controls(self.layout)
         snapshot = state()
         account = snapshot.get("account")
-        if account and account.signed_in:
+        if bpy.app.online_access and account and account.signed_in:
             row = self.layout.row()
             row.operator_context = "INVOKE_DEFAULT"
             row.operator("lichtfeld.portal_gallery", text="Browse gallery…")
