@@ -343,8 +343,11 @@ Enable **Check rig reference framing** to flag cameras where the applied rig
 reference bounds lie completely beyond one image edge or clipping plane. The
 check uses the current output aspect ratio and evaluated camera pose, and
 honours capture clipping overrides. It is a conservative check of bounds.
-Use **Check framing** to inspect capture lens or shift overrides and to review
-partially visible, occluded or otherwise questionable views.
+The automatic check skips capture lens or shift overrides. Use **Check framing**
+in capture setup to inspect those overrides and to review partially visible or
+occluded views. The automatic check also skips references with active Geometry
+Nodes modifiers because evaluated bounds can omit instances. Cameras that intentionally face away from
+the reference can also be reported.
 
 ## Images, renderer and devices
 

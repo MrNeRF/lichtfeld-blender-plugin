@@ -79,6 +79,8 @@ def clearance_steps(context, poses, distance):
 def outside_frame(points, pose, projection, near, far):
     inverse = pose.inverted()
     camera_space = [inverse @ point for point in points]
+    if all(point.z >= 0 for point in camera_space):
+        return 'Behind camera'
     if all(-point.z < near for point in camera_space):
         return 'Before near clip'
     if all(-point.z > far for point in camera_space):
@@ -94,13 +96,17 @@ def framing_steps(context, findings):
     settings = context.scene.lichtfeld_training
     reference = settings.camera_collection.lichtfeld_rig_reference
     if reference.mode == 'UNSET':
-        return None, 'The camera collection has no applied rig reference.'
+        return None, 'Existing camera poses have no applied rig reference to check.'
     try:
         output = capture_settings.format_for(context.scene, settings)
         overrides = capture_settings.camera_for(settings)
         if settings.override_optics or settings.override_shift:
-            return None, 'Use Check framing to inspect capture lens or shift overrides.'
+            return None, 'Skipped because capture lens or shift overrides are enabled. Inspect those views with Check framing in capture setup.'
         sources = yield from rig_edit.reference_sources(context, reference)
+        for source in sources:
+            if any(modifier.type == 'NODES' and modifier.show_viewport for modifier in source.modifiers):
+                return None, 'Skipped because the reference uses Geometry Nodes. Object bounds can omit instances.'
+            yield
         low, high = yield from rig_edit.reference_bounds_steps(sources, context.evaluated_depsgraph_get())
     except ValueError as error:
         return None, str(error)
@@ -268,7 +274,7 @@ class LF_OT_camera_report(bpy.types.Operator):
         layout.prop(self, 'framing')
         if report is not None and report['framing']:
             if report['framing_note']:
-                draw_paragraph(layout, report['framing_note'], width, scale)
+                draw_paragraph(layout, 'Framing (last check): ' + report['framing_note'], width, scale)
             else:
                 outside = report['outside']
                 layout.label(text=f'Reference outside frame (last check): {len(outside):,}')
@@ -276,6 +282,8 @@ class LF_OT_camera_report(bpy.types.Operator):
                     draw_camera_row(layout, name, ' · ' + reason)
                 if len(outside) > 5:
                     layout.label(text=f'Showing 5 of {len(outside):,} cameras')
+        elif self.framing:
+            layout.label(text='Reference framing: not checked')
         row = layout.row()
         row.alignment = 'RIGHT'
         check = row.operator('lichtfeld.check_camera_poses', text='Run again' if report is not None else 'Run check')

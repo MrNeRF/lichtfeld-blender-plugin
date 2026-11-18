@@ -91,6 +91,8 @@ def reference_bounds_steps(sources, graph):
         world = evaluated.matrix_world
         for corner in evaluated.bound_box:
             point = world @ Vector(corner)
+            if not all(math.isfinite(value) for value in point):
+                raise ValueError('The rig reference has invalid bounds: ' + obj.name)
             for axis in range(3):
                 low[axis] = min(low[axis], point[axis])
                 high[axis] = max(high[axis], point[axis])

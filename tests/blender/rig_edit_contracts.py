@@ -845,16 +845,22 @@ reference.mode = 'OBJECTS'
 reference.objects.add().object = subject_object
 optics = bpy.data.cameras.new('Reference framing optics')
 optics.clip_start, optics.clip_end = .1, 20
+shifted_optics = optics.copy()
+shifted_optics.shift_x = 1
 for name, position in {
     'Framing centred': (0, 0, 5),
     'Framing partial': (2, 0, 5),
     'Framing outside': (10, 0, 5),
     'Framing before near': (0, 0, .05),
     'Framing beyond far': (0, 0, 30),
+    'Framing facing away': (0, 0, 5),
+    'Framing shifted': (0, 0, 5),
 }.items():
-    camera = bpy.data.objects.new(name, optics)
+    camera = bpy.data.objects.new(name, shifted_optics if name == 'Framing shifted' else optics)
     framing_rig.objects.link(camera)
     camera.location = position
+    if name == 'Framing facing away':
+        camera.rotation_euler.x = math.pi
 s.camera_collection = framing_rig
 bpy.context.view_layer.update()
 with tempfile.TemporaryDirectory() as directory:
@@ -866,22 +872,34 @@ with tempfile.TemporaryDirectory() as directory:
         'Framing outside': 'Outside image',
         'Framing before near': 'Before near clip',
         'Framing beyond far': 'Beyond far clip',
+        'Framing facing away': 'Behind camera',
+        'Framing shifted': 'Outside image',
     }
     assert not bpy.data.is_dirty
     s.override_clipping = True
     s.capture_clip_start, s.capture_clip_end = .01, 40
     assert bpy.ops.lichtfeld.check_camera_poses(framing=True) == {'FINISHED'}
-    assert dict(ext.rig_analysis.last_result(bpy.context)['outside']) == {'Framing outside': 'Outside image'}
+    assert dict(ext.rig_analysis.last_result(bpy.context)['outside']) == {
+        'Framing outside': 'Outside image',
+        'Framing facing away': 'Behind camera',
+        'Framing shifted': 'Outside image',
+    }
     s.override_clipping = False
     s.override_shift = True
     assert bpy.ops.lichtfeld.check_camera_poses(framing=True) == {'FINISHED'}
     report = ext.rig_analysis.last_result(bpy.context)
-    assert not report['outside'] and 'Use Check framing' in report['framing_note']
+    assert not report['outside'] and 'Skipped because capture lens or shift overrides are enabled' in report['framing_note']
     s.override_shift = False
+    nodes = subject_object.modifiers.new('Potential instance geometry', 'NODES')
+    assert bpy.ops.lichtfeld.check_camera_poses(framing=True) == {'FINISHED'}
+    report = ext.rig_analysis.last_result(bpy.context)
+    assert not report['outside'] and 'reference uses Geometry Nodes' in report['framing_note']
+    subject_object.modifiers.remove(nodes)
 s.camera_collection = previous_rig
 for camera in list(framing_rig.objects):
     bpy.data.objects.remove(camera, do_unlink=True)
 bpy.data.cameras.remove(optics)
+bpy.data.cameras.remove(shifted_optics)
 bpy.data.collections.remove(framing_rig)
 bpy.data.objects.remove(subject_object, do_unlink=True)
 bpy.data.meshes.remove(subject_mesh)
