@@ -327,8 +327,17 @@ cameras, selection, save state or undo history. While the check runs, scene inpu
 is held to keep the scan consistent;
 press Esc or right-click to cancel. Rerun after editing the scene; results are snapshots
 and unapplied rig settings are not used. Small position/rotation differences are
-not considered exact matches. This check does not measure collisions, clearance,
-visibility, overlap or training quality.
+not considered exact matches.
+
+Set **Minimum distance** above zero to check how close valid camera centres are
+to visible, evaluated mesh surfaces in the capture scope. The report counts
+the cameras below the threshold and lets you select the five closest. Zero runs the
+pose check alone. The distance is measured in world space, including object
+scale and evaluated viewport modifiers. Visibility follows the active view layer,
+including meshes visible there but disabled for rendering. This diagnostic does not include
+instances, non-mesh objects or render-only geometry, and does not determine
+whether a camera is inside a mesh, what it can see or how well it will train.
+If the geometry exceeds the check's budget, narrow the capture scope and rerun.
 
 ## Images, renderer and devices
 
