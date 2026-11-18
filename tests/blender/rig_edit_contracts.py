@@ -874,6 +874,7 @@ with tempfile.TemporaryDirectory() as directory:
         'Framing facing away': 'Behind camera',
         'Framing shifted': 'Outside image',
     }
+    assert all(ext.rig_analysis._FRAMING_HINTS.get(reason) for _, reason in report['outside'])
     assert not bpy.data.is_dirty
     s.override_clipping = True
     s.capture_clip_start, s.capture_clip_end = .01, 40

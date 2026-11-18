@@ -370,7 +370,8 @@ Enable **Check rig reference framing** to flag cameras where the applied rig
 reference bounds lie completely beyond one image edge or clipping plane. The
 check uses the current output aspect ratio and evaluated camera pose, and
 honours capture clipping overrides. The report groups camera examples by
-finding and suggests what to inspect, such as aim, lens or clipping. Use
+finding and suggests what to inspect, such as aim, lens or clipping. Clipping
+can come from the camera or **Common clipping** in capture setup. Use
 **Select** beside an example to find the camera. The check leaves all camera
 settings untouched. It is a conservative check of bounds.
 The automatic check skips capture lens or shift overrides. Use **Check framing**

@@ -24,10 +24,10 @@ _MIN_INCIDENCE = math.sin(math.radians(5))
 
 
 _FRAMING_HINTS = {
-    'Outside image': 'Use Check framing to inspect the aim, focal length or lens shift.',
-    'Behind camera': 'Check where the camera points. If it tracks a target, check the target position.',
-    'Before near clip': 'Check the clip start or move the camera farther from the reference.',
-    'Beyond far clip': 'Check the clip end or move the camera closer to the reference.',
+    'Outside image': 'In Check framing, inspect aim, focal length or lens shift.',
+    'Behind camera': 'Check the camera direction or its tracking target.',
+    'Before near clip': 'Check clip start (camera or Common clipping) and rig distance.',
+    'Beyond far clip': 'Check clip end (camera or Common clipping) and rig distance.',
 }
 
 def draw_camera_row(layout, name, detail=''):
@@ -407,11 +407,12 @@ class LF_OT_camera_report(bpy.types.Operator):
                 for reason, names in examples.items():
                     body = layout.box().column(align=True)
                     body.label(text=reason)
-                    draw_paragraph(body, _FRAMING_HINTS[reason], width, scale)
+                    if hint := _FRAMING_HINTS.get(reason):
+                        draw_paragraph(body, hint, width, scale)
                     for name in names:
                         draw_camera_row(body, name)
                 if len(outside) > 5:
-                    layout.label(text=f'Showing 5 of {len(outside):,} cameras')
+                    layout.label(text=f'First 5 of {len(outside):,} cameras shown')
         elif self.framing:
             layout.label(text='Reference framing: not checked')
         layout.prop(self, 'coverage')
