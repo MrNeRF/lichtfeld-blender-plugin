@@ -18,6 +18,9 @@ _report = None
 _report_region = None
 _REPORT_WIDTH = 420
 _SURFACE_BUDGET = 200_000
+_COVERAGE_SAMPLES = 96
+_DIRECTION_COSINE = math.cos(math.radians(15))
+_MIN_INCIDENCE = math.sin(math.radians(5))
 
 
 def draw_camera_row(layout, name, detail=''):
@@ -26,12 +29,13 @@ def draw_camera_row(layout, name, detail=''):
     row.operator('lichtfeld.inspect_capture_camera', text='Select').camera_name = name
 
 
-def clearance_steps(context, poses, distance):
-    """Measure camera centres against the evaluated viewport mesh surfaces."""
+def surface_steps(context, *, keep_geometry=False):
+    """Collect one evaluated viewport surface for distance and visibility queries."""
     graph = context.evaluated_depsgraph_get()
     settings = context.scene.lichtfeld_training
     helpers = preflight.capture_helpers(settings)
     vertices, polygons = [], []
+    owners = []
     corners = 0
     for obj in object_steps(preflight.capture_objects(context)):
         yield None
@@ -43,13 +47,13 @@ def clearance_steps(context, poses, distance):
         if not mesh.polygons:
             continue
         if len(vertices) + len(mesh.vertices) > _SURFACE_BUDGET or corners + len(mesh.loops) > _SURFACE_BUDGET:
-            return [], 'Mesh budget exceeded. Narrow the capture scope to run this check.'
+            return None, 'Mesh budget exceeded. Narrow the capture scope to run this check.'
         local = np.empty(len(mesh.vertices) * 3, dtype=np.float32)
         mesh.vertices.foreach_get('co', local)
         world = np.array(evaluated.matrix_world, dtype=np.float64)
         points = local.reshape(-1, 3) @ world[:3, :3].T + world[:3, 3]
         if not np.isfinite(points).all():
-            return [], 'A mesh has invalid coordinates. Check its geometry and transform.'
+            return None, 'A mesh has invalid coordinates. Check its geometry and transform.'
         mesh.calc_loop_triangles()
         indices = np.empty(len(mesh.loop_triangles) * 3, dtype=np.int32)
         mesh.loop_triangles.foreach_get('vertices', indices)
@@ -59,12 +63,18 @@ def clearance_steps(context, poses, distance):
         if usable.any():
             polygons.extend((triangles[usable] + len(vertices)).tolist())
             vertices.extend(points.tolist())
+            if keep_geometry:
+                owners.append((len(polygons), obj.name))
         corners += len(mesh.loops)
     if not polygons:
-        return [], 'No visible mesh surfaces in the capture scope.'
+        return None, 'No visible mesh surfaces in the capture scope.'
     yield None
     tree = BVHTree.FromPolygons(vertices, polygons, all_triangles=True)
-    del vertices, polygons
+    geometry = (vertices, polygons, owners) if keep_geometry else None
+    return (tree, geometry), ''
+
+
+def clearance_steps(tree, poses, distance):
     hits = []
     for name, matrix in poses:
         centre = tuple(matrix[axis][3] for axis in range(3))
@@ -73,7 +83,73 @@ def clearance_steps(context, poses, distance):
             hits.append((name, nearest))
         yield None
     hits.sort(key=lambda hit: hit[1])
-    return hits, ''
+    return hits
+
+
+def coverage_steps(surface, views):
+    """Estimate sampled visibility and angular diversity on opaque mesh surfaces."""
+    tree, (vertices, faces, owners) = surface
+    a, b, c = np.asarray(vertices)[np.asarray(faces)].transpose(1, 0, 2)
+    normals = np.cross(b - a, c - a)
+    areas = np.linalg.norm(normals, axis=1)
+    cumulative = np.cumsum(areas)
+    ranks = np.arange(_COVERAGE_SAMPLES)
+    indices = np.searchsorted(cumulative, cumulative[-1] * (ranks + .5) / _COVERAGE_SAMPLES)
+    u = np.sqrt(((ranks + 1) * .754877666) % 1)
+    v = ((ranks + 1) * .569840291) % 1
+    sampled = (1-u[:, None])*a[indices] + (u*(1-v))[:, None]*b[indices] + (u*v)[:, None]*c[indices]
+    points = tuple(zip(map(Vector, sampled), map(Vector, normals[indices] / areas[indices, None])))
+    directions = [[None, None] for _ in points]
+    diverse = [False] * len(points)
+    for pose, projection, near, far in views:
+        inverse = pose.inverted()
+        centre = pose.translation
+        for index, (point, normal) in enumerate(points):
+            if diverse[index]:
+                continue
+            local = inverse @ point
+            depth = -local.z
+            if not near <= depth <= far:
+                continue
+            projected = projection @ local.to_4d()
+            if abs(projected.x) > projected.w or abs(projected.y) > projected.w:
+                continue
+            delta = point - centre
+            length = delta.length
+            if not length:
+                continue
+            direction = delta / length
+            incidence = direction.dot(normal)
+            if abs(incidence) < _MIN_INCIDENCE:
+                continue
+            side = int(incidence > 0)
+            first = directions[index][side]
+            if first is not None and direction.dot(first) > _DIRECTION_COSINE:
+                continue
+            # Start at the near plane. Geometry before it cannot obscure a capture.
+            start = length * near / depth
+            stop = length - max(1e-6, length * 1e-5)
+            if stop > start and tree.ray_cast(centre + direction * start, direction, stop - start)[0] is not None:
+                continue
+            if first is None:
+                directions[index][side] = direction
+            else:
+                diverse[index] = True
+        yield None
+        if all(diverse):
+            break
+    counts = [0, 0, 0]
+    uncovered = {}
+    owner_index = 0
+    for face, sides, has_angle in zip(indices, directions, diverse):
+        while face >= owners[owner_index][0]:
+            owner_index += 1
+        kind = 2 if has_angle else 1 if any(side is not None for side in sides) else 0
+        counts[kind] += 1
+        if kind == 0:
+            name = owners[owner_index][1]
+            uncovered[name] = uncovered.get(name, 0) + 1
+    return counts, sorted(uncovered.items(), key=lambda item: (-item[1], item[0]))[:3]
 
 
 def outside_frame(points, pose, projection, near, far):
@@ -92,16 +168,12 @@ def outside_frame(points, pose, projection, near, far):
     return ''
 
 
-def framing_steps(context, findings):
+def framing_steps(context):
     settings = context.scene.lichtfeld_training
     reference = settings.camera_collection.lichtfeld_rig_reference
     if reference.mode == 'UNSET':
         return None, 'Existing camera poses have no applied rig reference to check.'
     try:
-        output = capture_settings.format_for(context.scene, settings)
-        overrides = capture_settings.camera_for(settings)
-        if settings.override_optics or settings.override_shift:
-            return None, 'Skipped because capture lens or shift overrides are enabled. Inspect those views with Check framing in capture setup.'
         sources = yield from rig_edit.reference_sources(context, reference)
         for source in sources:
             if any(modifier.type == 'NODES' and modifier.show_viewport for modifier in source.modifiers):
@@ -112,44 +184,74 @@ def framing_steps(context, findings):
         return None, str(error)
     if not all(math.isfinite(value) for value in (*low, *high)):
         return None, 'The applied rig reference has invalid bounds.'
-    points = tuple(Vector(corner) for corner in product(*zip(low, high)))
-
-    def inspect(camera, graph, pose):
-        evaluated = camera.evaluated_get(graph)
-        projection = capture_settings.camera_projection(evaluated, graph, output)
-        near = overrides.get('clip_start', evaluated.data.clip_start)
-        far = overrides.get('clip_end', evaluated.data.clip_end)
-        reason = outside_frame(points, pose, projection, near, far)
-        if reason:
-            findings.append((camera.name, reason))
-
-    return inspect, ''
+    return tuple(Vector(corner) for corner in product(*zip(low, high))), ''
 
 
-def analyze_steps(context, clearance=0.0, framing=False):
+def analyze_steps(context, clearance=0.0, framing=False, coverage=False):
     if not math.isfinite(clearance):
         raise ValueError('Minimum distance must be finite')
     signature = preflight.signature(context)
     scene, frame = context.scene.name, context.scene.frame_current
-    outside, framing_note = [], ''
+    settings = context.scene.lichtfeld_training
+    outside, views = [], []
+    framing_note = coverage_note = projection_note = ''
+    points = None
     inspect = None
-    if framing and context.scene.lichtfeld_training.camera_collection:
-        inspect, framing_note = yield from framing_steps(context, outside)
+    if (framing or coverage) and settings.camera_collection:
+        try:
+            output = capture_settings.format_for(context.scene, settings)
+            overrides = capture_settings.camera_for(settings)
+        except ValueError as error:
+            projection_note = str(error)
+        if settings.override_optics or settings.override_shift:
+            projection_note = 'Skipped because capture lens or shift overrides are enabled. Inspect those views with Check framing in capture setup.'
+        if framing:
+            if projection_note:
+                framing_note = projection_note
+            else:
+                points, framing_note = yield from framing_steps(context)
+        if coverage:
+            coverage_note = projection_note
+        if points is not None or (coverage and not coverage_note):
+            def inspect(camera, graph, pose):
+                evaluated = camera.evaluated_get(graph)
+                projection = capture_settings.camera_projection(evaluated, graph, output)
+                near = overrides.get('clip_start', evaluated.data.clip_start)
+                far = overrides.get('clip_end', evaluated.data.clip_end)
+                if points is not None:
+                    reason = outside_frame(points, pose, projection, near, far)
+                    if reason:
+                        outside.append((camera.name, reason))
+                if coverage and not coverage_note:
+                    views.append((pose, projection, near, far))
     checks = yield from preflight.camera_checks(context, poses=True, inspect=inspect)
     if not checks['camera_count']:
         raise ValueError('Choose a collection containing cameras')
     matches = yield from rig_geometry.repeated_poses([matrix for name, matrix in checks['poses']])
     nearby, clearance_note = [], ''
-    if clearance > 0 and checks['poses']:
-        yield 'Checking distance to mesh surfaces — Esc to cancel'
-        nearby, clearance_note = yield from clearance_steps(context, checks['poses'], clearance)
-    elif clearance > 0:
-        clearance_note = 'No valid camera centres to check.'
+    sampled = None
+    if clearance > 0 or (coverage and not coverage_note):
+        if checks['poses']:
+            yield 'Preparing mesh surfaces — Esc to cancel'
+            surface, surface_note = yield from surface_steps(context, keep_geometry=coverage and not coverage_note)
+        else:
+            surface, surface_note = None, 'No valid cameras to check.'
+        if clearance > 0:
+            clearance_note = surface_note
+            if surface is not None:
+                yield 'Checking distance to mesh surfaces — Esc to cancel'
+                nearby = yield from clearance_steps(surface[0], checks['poses'], clearance)
+        if coverage and not coverage_note:
+            coverage_note = surface_note
+            if surface is not None:
+                yield 'Checking sampled surface coverage — Esc to cancel'
+                sampled = yield from coverage_steps(surface, views)
     if signature != preflight.signature(context):
         raise ValueError('The capture setup changed during the check; run it again')
     return dict(checks, matches=matches, scene=scene, frame=frame,
                 clearance=clearance, nearby=nearby, clearance_note=clearance_note,
-                framing=framing, outside=outside, framing_note=framing_note)
+                framing=framing, outside=outside, framing_note=framing_note,
+                coverage=coverage, sampled=sampled, coverage_note=coverage_note)
 
 
 def last_result(context):
@@ -171,6 +273,7 @@ def show_result(context, result):
                    clearance=result['clearance'], nearby=result['nearby'],
                    clearance_note=result['clearance_note'],
                    framing=result['framing'], outside=result['outside'], framing_note=result['framing_note'],
+                   coverage=result['coverage'], sampled=result['sampled'], coverage_note=result['coverage_note'],
                    repeats=[(names[first], names[repeated]) for first, repeated in result['matches']])
     refresh_report()
 
@@ -198,6 +301,9 @@ class LF_OT_camera_report(bpy.types.Operator):
     framing: BoolProperty(name='Check rig reference framing', options={'SKIP_SAVE'},
         update=report_options_changed,
         description='Flag views where the applied rig reference bounds are entirely outside the image or clipping range')
+    coverage: BoolProperty(name='Estimate surface coverage', options={'SKIP_SAVE'},
+        update=report_options_changed,
+        description='Sample visible meshes in the capture scope. Compare viewing angles at least 15° apart on the same face side')
 
     @classmethod
     def poll(cls, context):
@@ -209,6 +315,8 @@ class LF_OT_camera_report(bpy.types.Operator):
             self.clearance = report['clearance']
         if report is not None and not self.properties.is_property_set('framing'):
             self.framing = report['framing']
+        if report is not None and not self.properties.is_property_set('coverage'):
+            self.coverage = report['coverage']
         return context.window_manager.invoke_popup(self, width=_REPORT_WIDTH)
 
     def execute(self, context):
@@ -284,11 +392,27 @@ class LF_OT_camera_report(bpy.types.Operator):
                     layout.label(text=f'Showing 5 of {len(outside):,} cameras')
         elif self.framing:
             layout.label(text='Reference framing: not checked')
+        layout.prop(self, 'coverage')
+        if report is not None and report['coverage']:
+            if report['coverage_note']:
+                draw_paragraph(layout, 'Coverage (last check): ' + report['coverage_note'], width, scale)
+            elif report['sampled'] is not None:
+                (unseen, similar, diverse), uncovered = report['sampled']
+                box = layout.box()
+                box.label(text=f'Coverage (last check): {unseen + similar + diverse} samples')
+                box.label(text=f'Not seen: {unseen} · Limited angles: {similar} · Diverse angles: {diverse}')
+                if uncovered:
+                    box.label(text='Objects with most unseen samples')
+                    for name, count in uncovered:
+                        box.label(text=f'{count} · {name}')
+        elif self.coverage:
+            layout.label(text='Surface coverage: not checked')
         row = layout.row()
         row.alignment = 'RIGHT'
         check = row.operator('lichtfeld.check_camera_poses', text='Run again' if report is not None else 'Run check')
         check.clearance = self.clearance
         check.framing = self.framing
+        check.coverage = self.coverage
 
 
 def format_distance(scene, distance):
@@ -315,8 +439,9 @@ class LF_OT_check_poses(bpy.types.Operator):
     bl_idname = 'lichtfeld.check_camera_poses'
     clearance: FloatProperty(min=0.0, default=0.0, options={'HIDDEN', 'SKIP_SAVE'})
     framing: BoolProperty(options={'HIDDEN', 'SKIP_SAVE'})
+    coverage: BoolProperty(options={'HIDDEN', 'SKIP_SAVE'})
     bl_label = 'Check camera poses'
-    bl_description = 'Check evaluated camera poses, with optional surface distance and reference framing checks'
+    bl_description = 'Check evaluated camera poses with optional distance, framing and sampled coverage diagnostics'
 
     @classmethod
     def poll(cls, context):
@@ -345,7 +470,7 @@ class LF_OT_check_poses(bpy.types.Operator):
         self.frame = self.scene.frame_current
         self.manager = context.window_manager
         self.workspace = context.workspace
-        self.work = analyze_steps(context, self.clearance, self.framing)
+        self.work = analyze_steps(context, self.clearance, self.framing, self.coverage)
         self.timer = None
         if bpy.app.background:
             try:

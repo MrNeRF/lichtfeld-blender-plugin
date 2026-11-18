@@ -905,6 +905,63 @@ bpy.data.objects.remove(subject_object, do_unlink=True)
 bpy.data.meshes.remove(subject_mesh)
 print('RIG_REFERENCE_FRAMING_OUTSIDE_PARTIAL_CLIPPING_READ_ONLY_PASS', flush=True)
 
+# Two equally sized surfaces, one fully occluded from the initial cameras.
+capture_scope, capture_collection = s.scope, s.source_collection
+sample_sources = bpy.data.collections.new('Coverage fixture surfaces')
+sample_cameras = bpy.data.collections.new('Coverage fixture cameras')
+for collection in (sample_sources, sample_cameras):
+    bpy.context.scene.collection.children.link(collection)
+mesh = bpy.data.meshes.new('Coverage sample plane')
+mesh.from_pydata([(-1, -1, 0), (1, -1, 0), (1, 1, 0), (-1, 1, 0)], [], [(0, 1, 2, 3)])
+front = bpy.data.objects.new('Coverage front', mesh)
+rear = bpy.data.objects.new('Coverage rear', mesh)
+for obj in (front, rear):
+    sample_sources.objects.link(obj)
+rear.location.z = -2
+optics = bpy.data.cameras.new('Coverage optics')
+optics.lens = 18
+views = [bpy.data.objects.new(name, optics) for name in ('Coverage A', 'Coverage B')]
+for camera, x in zip(views, (-.1, .1)):
+    sample_cameras.objects.link(camera)
+    camera.location = (x, 0, 5)
+s.scope, s.source_collection, s.camera_collection = 'COLLECTION', sample_sources, sample_cameras
+bpy.context.view_layer.update()
+with tempfile.TemporaryDirectory() as directory:
+    bpy.ops.wm.save_as_mainfile(filepath=str(Path(directory) / 'coverage.blend'))
+    assert bpy.ops.lichtfeld.check_camera_poses(coverage=True, clearance=.1) == {'FINISHED'}
+    report = ext.rig_analysis.last_result(bpy.context)
+    assert not report['coverage_note'] and not report['nearby']
+    assert report['sampled'] == ([48, 48, 0], [(rear.name, 48)])
+    assert not bpy.data.is_dirty
+    front.hide_set(True)
+    bpy.context.view_layer.update()
+    assert bpy.ops.lichtfeld.check_camera_poses(coverage=True) == {'FINISHED'}
+    assert ext.rig_analysis.last_result(bpy.context)['sampled'] == ([0, 96, 0], [])
+    for camera, x in zip(views, (-2, 2)):
+        camera.location.x = x
+        camera.rotation_euler = (rear.location - camera.location).to_track_quat('-Z', 'Y').to_euler()
+    bpy.context.view_layer.update()
+    assert bpy.ops.lichtfeld.check_camera_poses(coverage=True) == {'FINISHED'}
+    assert ext.rig_analysis.last_result(bpy.context)['sampled'] == ([0, 0, 96], [])
+    for camera, z in zip(views, (5, -9)):
+        camera.location = (0, 0, z)
+        camera.rotation_euler = (rear.location - camera.location).to_track_quat('-Z', 'Y').to_euler()
+    bpy.context.view_layer.update()
+    assert bpy.ops.lichtfeld.check_camera_poses(coverage=True) == {'FINISHED'}
+    assert ext.rig_analysis.last_result(bpy.context)['sampled'] == ([0, 96, 0], [])
+    optics.clip_end = 6
+    bpy.context.view_layer.update()
+    assert bpy.ops.lichtfeld.check_camera_poses(coverage=True) == {'FINISHED'}
+    assert ext.rig_analysis.last_result(bpy.context)['sampled'] == ([96, 0, 0], [(rear.name, 96)])
+s.scope, s.source_collection, s.camera_collection = capture_scope, capture_collection, previous_rig
+for obj in (front, rear, *views):
+    bpy.data.objects.remove(obj, do_unlink=True)
+for collection in (sample_sources, sample_cameras):
+    bpy.data.collections.remove(collection)
+bpy.data.meshes.remove(mesh)
+bpy.data.cameras.remove(optics)
+print('RIG_SAMPLED_COVERAGE_OCCLUSION_DIVERSITY_READ_ONLY_PASS', flush=True)
+
 # Existing Select camera must not choose an arbitrary linked namesake.
 with tempfile.TemporaryDirectory() as directory:
     path=str(Path(directory)/'linked-camera.blend')
