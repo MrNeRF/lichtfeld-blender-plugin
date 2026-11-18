@@ -1300,8 +1300,7 @@ def capture_job(context, capture):
     sources = capture["sources"]
     cameras = capture["cameras"]
     render_settings = scene_render.snapshot(context.scene)
-    directory = (Path(bpy.path.abspath(prefs.jobs_directory)) if prefs.jobs_directory else
-                 Path(bpy.utils.user_resource("DATAFILES", path="lichtfeld/jobs", create=False)))
+    directory = Path(preflight.jobs_folder(prefs))
     job_id = uuid.uuid4().hex
     root = directory / job_id
     job = {"schema": SCHEMA, "id": job_id, "root": str(root),
