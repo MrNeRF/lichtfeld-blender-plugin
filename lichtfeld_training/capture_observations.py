@@ -9,6 +9,10 @@ import os
 from mathutils import Matrix
 
 
+class DepthCoverageError(ValueError):
+    """The frozen capture cannot supply enough depth correspondences."""
+
+
 def write_visible(output, frames, points, colors):
     """One globally bounded colored cloud, shared by all valid image tracks."""
     from geometry_maps import read_depth_tiff
@@ -41,7 +45,7 @@ def write_visible(output, frames, points, colors):
         if len(indices) > 4096:
             indices = indices[np.linspace(0, len(indices)-1, 4096, dtype=np.int32)]
         if len(indices) < 256:
-            raise ValueError(f'View {index+1} has only {len(indices)} visible depth correspondences. Increase the initial point budget or improve capture coverage (256 are required).')
+            raise DepthCoverageError(f'View {index+1} has only {len(indices)} visible depth correspondences. Increase the initial point budget or improve capture coverage (256 are required).')
         observations.append((indices, np.column_stack((u[indices], v[indices]))))
     counts = np.bincount(np.concatenate([item[0] for item in observations]), minlength=len(points))
     point_indices = np.concatenate([item[0] for item in observations])

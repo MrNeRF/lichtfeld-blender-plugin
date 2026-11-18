@@ -13,6 +13,7 @@ from mathutils import Vector
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from bridge_core import atomic_json, read_json, read_job_json, read_dataset_json, digest, artifact_path
+from capture_observations import DepthCoverageError
 
 
 def intrinsics(scene, camera, width, height):
@@ -408,6 +409,8 @@ if __name__ == "__main__":
         try:
             failure_root = Path(read_job_json(job_path)['root'])
             report = read_json(failure_root/'capture-render.json', {})
+            if isinstance(error, DepthCoverageError):
+                report['retry_finalization'] = False
             atomic_json(failure_root/'capture-render.json', {**report, 'state':'failed', 'error':str(error)})
         except Exception:
             pass  # Preserve the actual render exception if diagnostics cannot be saved.
