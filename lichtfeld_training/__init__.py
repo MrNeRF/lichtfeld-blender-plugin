@@ -125,13 +125,16 @@ def cameras_for(settings):
 
 
 def quality_get(settings):
-    if settings.get('quality_custom'):
-        return 3
     try:
         value = capture_settings.format_for(settings.id_data, settings)
         values = {name: getattr(settings, name) for name in workflow.PRESET_FIELDS}
         values['resolution'] = max(value['width'], value['height'])
         name = workflow.preset_name(values)
+        selected = settings.get('quality_preset')
+        if selected is not None:
+            name = selected if name == selected else 'CUSTOM'
+        elif settings.get('quality_custom'):
+            name = 'CUSTOM'
         return {'DRAFT': 0, 'BALANCED': 1, 'HIGH': 2, 'CUSTOM': 3}[name]
     except (ValueError, AttributeError):
         return 3
@@ -139,23 +142,14 @@ def quality_get(settings):
 
 def quality_set(settings, selected):
     if selected == 3:
-        settings['quality_custom'] = True
+        settings['quality_preset'] = ''
         return
-    settings["applying_preset"] = True
-    try:
-        preset = ('DRAFT', 'BALANCED', 'HIGH')[selected]
-        for name, value in zip(workflow.PRESET_FIELDS, workflow.PRESETS[preset]):
-            setattr(settings, name, value)
-        settings.capture_format = 'PRESET'
-        capture_settings.apply_format(settings.id_data, capture_settings.preset_format(settings))
-        settings['quality_custom'] = False
-    finally:
-        settings["applying_preset"] = False
-
-
-def custom_changed(settings, _context):
-    if not settings.get("applying_preset"):
-        settings.quality = "CUSTOM"
+    preset = ('DRAFT', 'BALANCED', 'HIGH')[selected]
+    for name, value in zip(workflow.PRESET_FIELDS, workflow.PRESETS[preset]):
+        setattr(settings, name, value)
+    settings.capture_format = 'PRESET'
+    capture_settings.apply_format(settings.id_data, capture_settings.preset_format(settings))
+    settings['quality_preset'] = preset
 
 
 
@@ -165,7 +159,6 @@ def strategy_changed(settings, context):
         setattr(settings, name, profile[name])
     for name, field in training_options.SCHEDULE_FIELDS.items():
         setattr(settings, name, profile[field] / profile["iterations"])
-    custom_changed(settings, context)
 
 
 def rig_recipe(settings, applied=None):
@@ -218,7 +211,6 @@ def appearance_update(name):
                 settings.use_bilateral_grid = False
             else:
                 settings.use_exposure_correction = False
-        custom_changed(settings,context)
     return update
 
 
@@ -317,11 +309,11 @@ class LichtFeldSettings(bpy.types.PropertyGroup):
     camera_collection: PointerProperty(name="Capture cameras", type=bpy.types.Collection)
     capture_collections: CollectionProperty(type=LichtFeldCaptureCollection,
         description='Explicit camera collections for capture, independent of the rig being edited')
-    quality: EnumProperty(name="Quality", items=[
+    quality: EnumProperty(name="Preset", items=[
         ("DRAFT", "Draft", "Fast iteration to check coverage and appearance"),
         ("BALANCED", "Balanced", "More views and a larger model"),
         ("HIGH", "High", "More capture and training time"),
-        ("CUSTOM", "Custom", "Individually adjusted settings")], get=quality_get, set=quality_set)
+        ("CUSTOM", "Scene settings", "Keep the current render and training settings")], get=quality_get, set=quality_set)
     rig_mode: EnumProperty(name="Distribution", items=[
         ("HEMISPHERE", "Hemisphere / cap", "Equal-area coverage between elevation limits"),
         ("SPHERE", "Sphere", "Uniform coverage around the whole object"),
@@ -432,20 +424,20 @@ class LichtFeldSettings(bpy.types.PropertyGroup):
     cycles_device: EnumProperty(name="Cycles device", items=[("CPU","CPU","Render with the CPU"),
         ("GPU","GPU Compute","Use exactly the backend and devices enabled in Blender System Preferences")],
         get=scene_render.device_get, set=scene_render.device_set)
-    views: IntProperty(name="Rig camera count", default=48, min=4, max=1000, update=custom_changed)
-    resolution: IntProperty(name="Longest side", default=512, min=64, max=4096, update=custom_changed,
+    views: IntProperty(name="Rig camera count", default=48, min=4, max=1000)
+    resolution: IntProperty(name="Longest side", default=1024, min=64, max=4096,
                             description="Pixels on the longest side; the aspect ratio determines the other side")
     capture_format: EnumProperty(name="Image format", items=[
         ('PRESET', 'Aspect preset', 'Choose an aspect ratio and size; square pixels'),
         ('SCENE', 'From scene', 'Use scene width, height, percentage and pixel aspect; ignores render border'),
-        ('CUSTOM', 'Custom dimensions', 'Explicit output width and height; square pixels')], update=custom_changed)
+        ('CUSTOM', 'Custom dimensions', 'Explicit output width and height; square pixels')])
     capture_aspect: EnumProperty(name="Aspect ratio", items=[
         ('SQUARE', '1:1', ''), ('FOUR_THREE', '4:3', ''), ('THREE_TWO', '3:2', ''),
-        ('WIDE', '16:9', ''), ('CINEMA', '21:9', '')], update=custom_changed)
+        ('WIDE', '16:9', ''), ('CINEMA', '21:9', '')])
     capture_orientation: EnumProperty(name="Orientation", items=[
-        ('LANDSCAPE', 'Landscape', ''), ('PORTRAIT', 'Portrait', '')], update=custom_changed)
-    capture_width: IntProperty(name="Width", default=1920, min=64, max=4096, update=custom_changed)
-    capture_height: IntProperty(name="Height", default=1080, min=64, max=4096, update=custom_changed)
+        ('LANDSCAPE', 'Landscape', ''), ('PORTRAIT', 'Portrait', '')])
+    capture_width: IntProperty(name="Width", default=1920, min=64, max=4096)
+    capture_height: IntProperty(name="Height", default=1080, min=64, max=4096)
     override_optics: BoolProperty(name="Common lens and sensor", description="Override optics on all capture copies; camera positions and originals are kept")
     capture_lens: FloatProperty(name="Focal length (mm)", default=35, min=1, max=500)
     capture_sensor_width: FloatProperty(name="Sensor width (mm)", default=36, min=1, max=100)
@@ -462,11 +454,11 @@ class LichtFeldSettings(bpy.types.PropertyGroup):
         description="Camera number in name order; the framing view updates automatically",
         get=capture_preview.camera_index, set=capture_preview.set_camera_index,
         update=capture_preview.camera_changed)
-    samples: IntProperty(name="Render samples", min=1, max=2147483647, get=scene_render.sample_get, set=scene_render.sample_set, update=custom_changed)
-    iterations: IntProperty(name="Training steps", default=training_options.PROFILES['mrnf']['iterations'], min=4, max=1000000, update=custom_changed)
-    eval_interval: IntProperty(name="Evaluate every", default=training_options.PROFILES['mrnf']['eval_steps'][0], min=1, max=100000, update=custom_changed,
+    samples: IntProperty(name="Render samples", min=1, max=2147483647, get=scene_render.sample_get, set=scene_render.sample_set)
+    iterations: IntProperty(name="Training steps", default=training_options.PROFILES['mrnf']['iterations'], min=4, max=1000000)
+    eval_interval: IntProperty(name="Evaluate every", default=training_options.PROFILES['mrnf']['eval_steps'][0], min=1, max=100000,
                                description="Choose the best model using reserved views at this step interval")
-    max_points: IntProperty(name="Gaussian budget", default=training_options.PROFILES['mrnf']['max_cap'], min=1000, update=custom_changed)
+    max_points: IntProperty(name="Gaussian budget", default=training_options.PROFILES['mrnf']['max_cap'], min=1000)
     sh_degree: IntProperty(name="SH degree", default=training_options.PROFILES['mrnf']['sh_degree'], min=0, max=3)
     preview_mode: EnumProperty(name="Preview updates", items=[
         ("LIVE", "Live (adaptive)", "Frequent full-quality updates within a 5% capture-time budget"),
@@ -500,13 +492,13 @@ for _name in training_options.FIELDS:
     _default = training_options.PROFILES['mrnf'][_name]
     _label = training_options.LABELS.get(_name, _name.replace('_',' ').capitalize())
     if isinstance(_default, bool):
-        _property = BoolProperty(name=_label, default=_default, update=appearance_update(_name) if _name in {"use_exposure_correction","use_ppisp","use_bilateral_grid"} else custom_changed)
+        _property = BoolProperty(name=_label, default=_default, update=appearance_update(_name) if _name in {"use_exposure_correction","use_ppisp","use_bilateral_grid"} else None)
     elif isinstance(_default, int):
-        _property = IntProperty(name=_label, default=_default, min=1, update=custom_changed)
+        _property = IntProperty(name=_label, default=_default, min=1)
     else:
         _property = FloatProperty(name=_label, default=_default,
             min=-1 if _name in {'shs_lr','grow_fraction'} else 0,
-            max=1 if _name in training_options.PROBABILITIES else 1e20, precision=6, update=custom_changed)
+            max=1 if _name in training_options.PROBABILITIES else 1e20, precision=6)
     LichtFeldSettings.__annotations__[_name] = _property
 
 
@@ -2580,7 +2572,10 @@ def draw_training(self, context):
     setup.use_property_decorate = False
     setup.prop(settings, "dataset_mode", text="Task")
     if settings.dataset_mode != 'REUSE':
-        setup.prop(settings, 'quality', text='Quality')
+        setup.prop(settings, 'quality', text='Preset')
+        preset = settings.get('quality_preset')
+        if preset and settings.quality == 'CUSTOM':
+            setup.label(text=f'{preset.title()} · modified')
     if settings.previous_job:
         back = setup.row()
         back.operator('lichtfeld.previous_job', text='Back to previous job', icon='BACK')
