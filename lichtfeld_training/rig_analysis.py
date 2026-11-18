@@ -26,8 +26,8 @@ _MIN_INCIDENCE = math.sin(math.radians(5))
 _FRAMING_HINTS = {
     'Outside image': 'In Check framing, inspect aim, focal length or lens shift.',
     'Behind camera': 'Check the camera direction or its tracking target.',
-    'Before near clip': 'Check clip start (camera or Common clipping) and rig distance.',
-    'Beyond far clip': 'Check clip end (camera or Common clipping) and rig distance.',
+    'Before near clip': 'Check clip start (camera or Common clipping) and distance to the reference.',
+    'Beyond far clip': 'Check clip end (camera or Common clipping) and distance to the reference.',
 }
 
 def draw_camera_row(layout, name, detail=''):
