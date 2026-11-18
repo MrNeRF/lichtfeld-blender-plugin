@@ -59,15 +59,34 @@ def guide_path(shape, radius, start, sweep, turns, minimum, maximum, height):
     return points, closed
 
 
+def _angular_sweep(sweep):
+    # Blender stores RNA angles as float32, including a full turn.
+    if math.isclose(sweep, math.tau, rel_tol=0, abs_tol=1e-6):
+        return math.tau
+    if not 0 < sweep <= math.tau:
+        raise ValueError('Use an angular sweep greater than zero and no larger than 360 degrees')
+    return sweep
+
+
+def panorama_views_for_step(sweep, maximum_step):
+    """Suggest views per horizontal row, including both ends of a partial sweep."""
+    sweep = _angular_sweep(sweep)
+    if not math.isfinite(maximum_step) or maximum_step <= 0:
+        raise ValueError('Use a positive azimuth step')
+    ratio = sweep / maximum_step
+    nearest = round(ratio)
+    # The two RNA angles are rounded independently to float32. Absorb their
+    # combined rounding error at exact divisors before taking the ceiling.
+    intervals = nearest if math.isclose(ratio, nearest, rel_tol=2**-23) else math.ceil(ratio)
+    return max(4, intervals + (sweep != math.tau))
+
+
 def directions(count, mode, minimum=0.0, maximum=90.0, rings=3, phase=0.0, *, sweep=2*math.pi, centered=False, aligned=False):
     if count < 4:
         raise ValueError("Use at least four cameras")
-    if not math.isfinite(sweep) or not math.isfinite(phase):
+    if not math.isfinite(phase):
         raise ValueError('Distribution angles must be finite')
-    if math.isclose(sweep, 2*math.pi, rel_tol=0, abs_tol=1e-6):
-        sweep = 2*math.pi
-    if not 0 < sweep <= 2*math.pi:
-        raise ValueError('Use an angular sweep greater than zero and no larger than 360 degrees')
+    sweep = _angular_sweep(sweep)
     if centered and sweep != 2*math.pi:
         phase -= sweep/2
     if mode == "SPHERE":

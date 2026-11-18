@@ -6,11 +6,36 @@ import math
 import unittest
 import numpy as np
 sys.path.insert(0,str(Path(__file__).resolve().parents[2]/'lichtfeld_training'))
-from rig_geometry import directions, sample_path, guide_path, seeded_offset, station_directions, repeated_poses
+from rig_geometry import directions, sample_path, guide_path, seeded_offset, station_directions, repeated_poses, panorama_views_for_step
 from geometry_maps import convert
 
 
 class GeometryTests(unittest.TestCase):
+    def test_panorama_density_counts_full_turn_and_partial_endpoints(self):
+        step = math.radians(30)
+        for sweep, expected in ((math.tau, 12), (math.pi, 7), (math.pi / 6, 4)):
+            with self.subTest(sweep=sweep):
+                count = panorama_views_for_step(sweep, step)
+                self.assertEqual(count, expected)
+                row = list(station_directions(count, 'BAND', 0, sweep, 0, 0))
+                pairs = list(zip(row, row[1:]))
+                if sweep == math.tau:
+                    pairs.append((row[-1], row[0]))
+                for a, b in pairs:
+                    dot = sum(x * y for x, y in zip(a, b))
+                    self.assertLessEqual(math.acos(min(1, dot)), step + 1e-12)
+        for step in (0, -1, float('nan')):
+            with self.assertRaises(ValueError):
+                panorama_views_for_step(math.pi, step)
+
+    def test_panorama_density_tolerates_rna_rounding_at_exact_divisors(self):
+        for degrees, step, expected in ((360, 10, 36), (360, 20, 18), (360, 40, 9),
+                                        (180, 10, 19), (180, 20, 10), (180, 30, 7),
+                                        (180, 19.999, 11)):
+            with self.subTest(sweep=degrees, step=step):
+                sweep, maximum_step = (float(np.float32(math.radians(v))) for v in (degrees, step))
+                self.assertEqual(panorama_views_for_step(sweep, maximum_step), expected)
+
     def test_repeated_poses_keep_orientation_roll_and_first_representative(self):
         def run(frames):
             work=repeated_poses(frames)

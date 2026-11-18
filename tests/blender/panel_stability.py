@@ -268,10 +268,18 @@ names=dict(layout.fields)
 assert all(name in names for name in ('rig_station_views','rig_station_sweep','rig_phase'))
 assert all(name not in names for name in ('rig_aim_mode','rig_aim_offset','rig_path_reverse','rig_position_variation','rig_rotation_variation'))
 assert '4 stations × 8 = 32 cameras' in layout.labels
+assert 'lichtfeld.panorama_density' in dict(layout.operations)
+for shape in ('GRID', 'ELEVATION', 'SPHERE', 'HEMISPHERE'):
+    s.rig_station_shape = shape
+    layout = Layout()
+    ext.draw_capture_cameras(layout, context, s, ready, False, lambda *args: None)
+    assert ('lichtfeld.panorama_density' in dict(layout.operations)) == (shape == 'GRID')
+s.rig_station_shape = 'BAND'
 s.rig_path_sampling='SPACING'
 layout=Layout()
 ext.draw_capture_cameras(layout,context,s,ready,True,lambda *args:None)
 assert 'Station total updates on Apply' in layout.labels
+assert 'lichtfeld.panorama_density' not in dict(layout.operations)
 assert not any('= 32' in text for text in layout.labels)
 for facing in ('GUIDE','PATH','TARGET'):
     s.rig_station_frame=facing

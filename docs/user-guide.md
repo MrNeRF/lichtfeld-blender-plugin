@@ -251,6 +251,12 @@ Horizontal band retains its existing guide/world-up yaw behavior. Increase
 **Views/station** (or views per row and rows for Panorama grid) and check framing for the desired overlap: a spherical direction
 distribution alone does not guarantee complete image coverage at every focal length.
 
+With station sampling set to **Count**, use **Suggest view count…** for a
+Horizontal band or Panorama grid. Set the maximum azimuth step to preview the
+proposed horizontal count and the total across stations and rows. Confirm to
+set the count, then apply the rig when ready. The step describes camera axes.
+Check framing to assess image overlap with your lens and output format.
+
 Enable **Follow guide** and apply the rig to link generated cameras
 to the guide's movement, rotation and uniform scaling in Object Mode. This uses
 Blender's native constraints, so it continues working after saving and reopening
