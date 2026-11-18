@@ -120,8 +120,14 @@ def supervise(job_path):
         atomic_json(root / "state.json", {"job_id": job["id"], "control_protocol": 1, "state": phase,
                                          "supervisor_pid": os.getpid(), "updated": time.time(), **values})
 
+    next_heartbeat = 0.0
+
     def heartbeat():
-        atomic_json(root / "heartbeat.json", {"updated": time.time(), "supervisor_pid": os.getpid()})
+        nonlocal next_heartbeat
+        now = time.monotonic()
+        if now >= next_heartbeat:
+            atomic_json(root / "heartbeat.json", {"updated": time.time(), "supervisor_pid": os.getpid()})
+            next_heartbeat = now + 1.0
 
     try:
         if not job.get("capture_only"):
