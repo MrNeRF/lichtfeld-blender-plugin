@@ -610,7 +610,11 @@ class LF_PT_portal(bpy.types.Panel):
 
     def draw_header_preset(self, context):
         self.layout.operator("lichtfeld.setup", text="", icon="PREFERENCES")
-        self.layout.operator('wm.url_open', text='', icon='QUESTION').url = 'https://github.com/MrNeRF/lichtfeld-blender-plugin/blob/main/docs/user-guide.md'
+        guide = Path(__file__).with_name('docs') / 'user-guide.md'
+        if guide.is_file():
+            self.layout.operator('wm.path_open', text='', icon='QUESTION').filepath = str(guide)
+        else:
+            self.layout.operator('wm.url_open', text='', icon='QUESTION').url = 'https://github.com/MrNeRF/lichtfeld-blender-plugin/blob/main/docs/user-guide.md'
 
     def draw(self, context):
         tabs = self.layout.row()
