@@ -314,16 +314,21 @@ def captured_dataset(directory, options=None):
         previous = previous.parent
     job = read_job(previous / "job.json")
     origin = job
+    origin_directory = previous
     visited = set()
     for _ in range(64):
-        candidate = Path(origin.get("dataset_root") or Path(origin.get("root", str(previous))) / "dataset").resolve()
+        if origin.get("capture_only") and origin.get("dataset_root") == origin.get("root"):
+            candidate = origin_directory
+        else:
+            candidate = Path(origin.get("dataset_root") or Path(origin.get("root", str(origin_directory))) / "dataset").resolve()
         if (candidate / "manifest.json").is_file():
             break
         parent = origin.get("parent_job")
         if not parent or parent in visited:
             raise ValueError("The saved dataset is missing. Choose its original job folder.")
         visited.add(parent)
-        origin = read_job(Path(parent) / "job.json")
+        origin_directory = Path(parent).resolve()
+        origin = read_job(origin_directory / "job.json")
     else:
         raise ValueError("The dataset ancestry is too deep")
     manifest = read_dataset_json(candidate / "manifest.json", {})
