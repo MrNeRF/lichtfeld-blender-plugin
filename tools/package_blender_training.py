@@ -22,7 +22,7 @@ __init__.py backend_hook.py blender_manifest.toml bridge_core.py
 capture_observations.py capture_passes.py capture_preview.py capture_seed.py
 capture_settings.py geometry_maps.py job_control.py job_panel.py jobs.py
 mrnf_defaults.json preflight.py preview_scene.py render_devices.py render_worker.py
-rig_edit.py rig_geometry.py rig_mesh.py rig_path.py scene_render.py
+rig_analysis.py rig_edit.py rig_geometry.py rig_mesh.py rig_path.py scene_render.py
 scene_render_worker.py session_cameras.py session_geometry.py session_reader.py
 supervisor.py training_options.py training_profiles.json
 ui_help.py ui_runtime.py ui_text.py visibility.py workflow.py portal_runtime.py portal_ui.py portal_bridge.py

@@ -26,7 +26,7 @@ from .visibility import set_hidden, source_steps
 from .ui_text import draw_disclosure, draw_paragraph
 from .session_geometry import source_model_transform
 from . import ui_runtime
-from . import jobs, preflight, workflow, rig_geometry, rig_path, rig_edit, training_options, preview_scene, capture_settings, capture_preview, scene_render, ui_help, portal_ui
+from . import jobs, preflight, workflow, rig_geometry, rig_path, rig_edit, rig_analysis, training_options, preview_scene, capture_settings, capture_preview, scene_render, ui_help, portal_ui
 
 _PACKAGE = __package__
 _ROOT = Path(__file__).resolve().parent
@@ -1121,8 +1121,12 @@ class LF_OT_inspect_camera(bpy.types.Operator):
         return context.mode == 'OBJECT' and not s.running and not s.operation_busy
 
     def execute(self, context):
-        camera = context.view_layer.objects.get(self.camera_name)
-        if not camera or camera.type != 'CAMERA':
+        candidates = [obj for obj in context.view_layer.objects if obj.name == self.camera_name and obj.type == 'CAMERA']
+        if len(candidates) > 1:
+            self.report({'ERROR'}, 'Several linked cameras share this name; select the intended camera in the Outliner')
+            return {'CANCELLED'}
+        camera = candidates[0] if candidates else None
+        if camera is None:
             self.report({'ERROR'}, 'Camera is not in this view layer; enable its collection in the Outliner')
             return {'CANCELLED'}
         for obj in context.selected_objects:
@@ -2064,7 +2068,7 @@ def draw_capture_reference(box, rig):
         subject = (entry.object.name if entry.object else 'Missing: ' + entry.name) if entry else 'No reference objects'
         if len(reference.objects) > 1:
             subject += f' (+{len(reference.objects)-1:,})'
-    box.label(text='Rig reference: ' + subject)
+    box.label(text='Rig reference: ' + subject, icon='BLANK1')
 
 
 
@@ -2128,7 +2132,7 @@ def draw_capture_cameras(box, context, settings, ready, rig_changed, wrapped):
                        'Checking cameras…' if ready.get('checking') else f"{len(ready['cameras']):,} capture cameras", icon='BLANK1')
         additional = len(ready['cameras']) - ready.get('generated_cameras', 0)
         if managed and additional > 0:
-            box.label(text=f"{ready.get('generated_cameras', 0):,} generated · {additional:,} additional")
+            box.label(text=f"{ready.get('generated_cameras', 0):,} generated · {additional:,} additional", icon='BLANK1')
         if managed:
             draw_capture_reference(box, rig)
         if managed and settings.rig_parameter_source != rig:
@@ -2261,7 +2265,8 @@ def draw_capture_actions(setup, settings, ready, errors, capture_only, wrapped):
     if checking:
         setup.label(text='Updating setup…' if settings.operation_busy else 'Checking capture setup…', icon='TIME')
     elif errors:
-        wrapped(setup, errors[0])
+        if errors[0] not in ready.get('camera_issues', {}):
+            wrapped(setup, errors[0])
     else:
         setup.label(text='Ready to capture', icon='CHECKMARK')
     if not bpy.data.filepath or bpy.data.is_dirty:
@@ -2411,21 +2416,36 @@ def draw_training(self, context):
             draw_training_controls(box, settings, wrapped)
     start = layout.column()
     start.enabled = not settings.operation_busy
-    if not draw_backend_requirement(start, prefs, installation, wrapped):
+    backend_required = draw_backend_requirement(start, prefs, installation, wrapped)
+    if not backend_required:
         draw_capture_actions(start, settings, ready, errors, capture_only, wrapped)
-    checks = layout.column()
-    checks.enabled = not settings.operation_busy
-    box = draw_disclosure(checks, 'validation_details', 'Capture checks')
+    camera_issues = ready.get('camera_issues')
+    if rig:
+        row = start.row()
+        row.operator_context = 'INVOKE_DEFAULT'
+        count = len(camera_issues or {})
+        row.operator('lichtfeld.camera_report', text='Check cameras…')
+        if count:
+            start.label(text=f"{count:,} camera {'issue' if count == 1 else 'issues'}", icon='ERROR')
+        report = rig_analysis.last_result(context)
+        if report is None:
+            start.label(text='Poses not checked yet', icon='BLANK1')
+        else:
+            repeats = len(report['repeats'])
+            start.label(text=f"{repeats:,} repeated {'pose' if repeats == 1 else 'poses'} (last check)",
+                        icon='BLANK1')
+    covered = set(preflight.save_issues()) if not backend_required else set()
+    if backend_required:
+        covered.add(installation.get('message', 'Choose your LichtFeld Studio installation.'))
+    other_errors = [error for error in errors if error not in (camera_issues or {}) and error not in covered]
+    checks = layout.box() if other_errors else None
+    if checks is not None:
+        checks.enabled = not settings.operation_busy
+    box = draw_disclosure(checks, 'validation_details', 'Capture checks', nested=False) if checks is not None else None
     if box is not None:
-        box.enabled = not settings.operation_busy
-        for error in errors[:5]:
-            wrapped(box, error)
-            if name := ready.get('camera_issues', {}).get(error):
-                box.operator('lichtfeld.inspect_capture_camera', icon='CAMERA_DATA').camera_name = name
-        if len(errors) > 5:
-            wrapped(box, f'{len(errors)-5:,} more issues; resolve the listed issues first.')
-        if not errors:
-            box.label(text="Capture setup is ready", icon="CHECKMARK")
+        for error in other_errors[:5]:wrapped(box, error)
+        if len(other_errors) > 5:
+            wrapped(box, f'{len(other_errors)-5:,} more issues; resolve the listed issues first.')
     draw_job_navigation(layout, settings)
 
 
@@ -2437,6 +2457,7 @@ def poll_jobs():
 
 @persistent
 def history_changing(_):
+    rig_analysis.clear()
     portal_ui.before_history()
     # RNA collection iterators cannot survive Blender replacing Main on Undo.
     # Close the cooperative scan while its datablocks are still valid.
@@ -2467,6 +2488,7 @@ def saved(_):
 
 @persistent
 def unloading(_):
+    rig_analysis.clear()
     portal_ui.invalidate()
     global _session_scan_pending, _sessions, _session_items
     _session_scan_pending = False
@@ -2515,7 +2537,7 @@ def loaded(_):
 _CLASSES = (LichtFeldPanelState, LichtFeldPreferences, LichtFeldSourceRef, LichtFeldRigReference, LichtFeldSettings, LF_OT_notice, LF_OT_verify, LF_OT_setup, LF_OT_tight_framing, LF_OT_rig, LF_OT_live_rig, rig_edit.LF_GGT_live_rig,
             LF_OT_start, LF_OT_export_dataset, LF_OT_pick_sources, LF_OT_select_aim, LF_OT_inspect_camera, LF_OT_read_rig, LF_OT_command, LF_OT_import, LF_OT_resume, LF_OT_dataset, LF_OT_new_capture, LF_OT_inspect_dataset, LF_OT_restart, LF_OT_folder, LF_OT_reconnect, LF_OT_load_job, LF_OT_compare,
             LF_OT_setup_view, LF_OT_scan_sessions, LF_OT_attach_session, LF_OT_detach_session, LF_OT_previous_job, LF_OT_color_look, LF_OT_color_command, LF_OT_model_view, LF_OT_color_view, LF_OT_capture_lighting,
-            *rig_path.CLASSES, *capture_preview.CLASSES, *scene_render.CLASSES, *portal_ui.CLASSES)
+            *rig_path.CLASSES, *rig_analysis.CLASSES, *capture_preview.CLASSES, *scene_render.CLASSES, *portal_ui.CLASSES)
 
 ui_help.apply(_CLASSES)
 

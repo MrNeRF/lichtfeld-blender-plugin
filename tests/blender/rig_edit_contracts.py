@@ -712,3 +712,83 @@ assert 'lichtfeld_rig_target' in s.camera_collection
 assert bpy.ops.lichtfeld.read_rig()=={'FINISHED'}
 assert s.rig_target is None
 print('REMOVED_AIM_ID_NEVER_REBINDS_TO_REUSED_NAME_PASS')
+
+
+# The explicit pose check is read-only and treats panorama directions as distinct.
+bpy.ops.mesh.primitive_cube_add()
+s.rig_reference.objects.clear();s.rig_reference.objects.add().object=bpy.context.object
+s.rig_reference.mode='OBJECTS';s.rig_aim_mode='SOURCE';s.rig_target=None
+s.rig_mode='PATH';s.rig_orientation='PANORAMA';s.rig_station_frame='TARGET';s.rig_path_link=True
+s.rig_station_shape='GRID';s.rig_station_rows=3;s.rig_station_views=8;s.views=4
+s.rig_station_sweep=2*math.pi;s.rig_phase=0;s.rig_station_min=-60;s.rig_station_max=60
+assert bpy.ops.lichtfeld.create_path_guide(shape='ORBIT',radius=4)=={'FINISHED'}
+assert bpy.ops.lichtfeld.create_rig()=={'FINISHED'}
+
+def checked():
+    work=ext.rig_analysis.analyze_steps(bpy.context)
+    while True:
+        try:next(work)
+        except StopIteration as done:return done.value
+
+assert checked()['matches']==[]
+original=next(o for o in s.camera_collection.objects if o.type=='CAMERA')
+nested=bpy.data.collections.new('Pose check nested')
+s.camera_collection.children.link(nested)
+copy=original.copy();copy.data=original.data.copy();nested.objects.link(copy)
+copy.data.lens=80  # Same pose does not claim identical images.
+invalid=original.copy();invalid.data=original.data.copy();nested.objects.link(invalid)
+invalid.data.type='ORTHO'
+with tempfile.TemporaryDirectory() as directory:
+    bpy.ops.wm.save_as_mainfile(filepath=str(Path(directory)/'pose-check.blend'))
+    identities=(tuple(o.as_pointer() for o in bpy.data.objects),tuple(o.as_pointer() for o in bpy.data.cameras))
+    selection=(bpy.context.view_layer.objects.active,tuple(bpy.context.selected_objects))
+    before=(original.matrix_world.copy(),copy.matrix_world.copy(),invalid.matrix_world.copy())
+    result=checked()
+    assert result['camera_count']==98 and len(result['matches'])==1
+    names=[name for name,matrix in result['poses']]
+    pair=result['matches'][0]
+    assert {names[pair[0]],names[pair[1]]}=={original.name,copy.name}
+    assert list(result['camera_issues'].values())==[invalid.name]
+    assert not bpy.data.is_dirty
+    assert identities==(tuple(o.as_pointer() for o in bpy.data.objects),tuple(o.as_pointer() for o in bpy.data.cameras))
+    assert selection==(bpy.context.view_layer.objects.active,tuple(bpy.context.selected_objects))
+    assert all(max(abs(a-b) for ra,rb in zip(matrix,obj.matrix_world) for a,b in zip(ra,rb))==0 for matrix,obj in zip(before,(original,copy,invalid)))
+    assert bpy.ops.lichtfeld.check_camera_poses()=={'FINISHED'}
+    assert not bpy.data.is_dirty
+    snapshot = ext.rig_analysis.last_result(bpy.context)
+    assert snapshot is not None and set(snapshot['repeats'][0]) == {original.name, copy.name}
+    frame = bpy.context.scene.frame_current
+    bpy.context.scene.frame_set(frame + 1)
+    assert ext.rig_analysis.last_result(bpy.context) is None
+    bpy.context.scene.frame_set(frame)
+    assert ext.rig_analysis.last_result(bpy.context) is snapshot
+
+    # A completed readiness refresh after selection must update the open report.
+    from unittest.mock import Mock
+    region = Mock()
+    with patch.object(ext.rig_analysis, '_report_region', region):
+        for camera in (invalid, copy):
+            assert bpy.ops.lichtfeld.inspect_capture_camera(camera_name=camera.name) == {'FINISHED'}
+            assert bpy.context.view_layer.objects.active == camera
+            ext.preflight.invalidate(bpy.context.scene)
+            deadline = time.monotonic() + 5
+            while ext.preflight.camera_status(bpy.context) is None and time.monotonic() < deadline:
+                ext.preflight.tick(bpy.context, ext.preferences())
+            readiness = ext.preflight.camera_status(bpy.context)
+            assert readiness is not None and invalid.name in readiness['camera_issues'].values()
+        assert region.tag_refresh_ui.call_count == 2
+print('POSE_CHECK_PANORAMA_NESTED_COPY_INVALID_READ_ONLY_CANCEL_PASS',flush=True)
+
+# Existing Select camera must not choose an arbitrary linked namesake.
+with tempfile.TemporaryDirectory() as directory:
+    path=str(Path(directory)/'linked-camera.blend')
+    bpy.data.libraries.write(path,{original})
+    with bpy.data.libraries.load(path,link=True) as (available,loaded):loaded.objects=[original.name]
+    linked=loaded.objects[0];bpy.context.scene.collection.objects.link(linked)
+    bpy.context.view_layer.update()
+    selection=(bpy.context.view_layer.objects.active,tuple(bpy.context.selected_objects))
+    try:bpy.ops.lichtfeld.inspect_capture_camera(camera_name=original.name)
+    except RuntimeError as error:assert 'Several linked cameras' in str(error)
+    else:raise AssertionError('Selected an ambiguous linked camera name')
+    assert selection==(bpy.context.view_layer.objects.active,tuple(bpy.context.selected_objects))
+print('POSE_ISSUE_SELECTION_REJECTS_LINKED_NAME_AMBIGUITY_PASS',flush=True)

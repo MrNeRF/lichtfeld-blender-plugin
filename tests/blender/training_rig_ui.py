@@ -521,7 +521,100 @@ def path_guides():
     bpy.app.timers.register(tick, first_interval=.02)
 
 
-bpy.app.timers.register(path_guides if '--path-guides' in sys.argv else
+def pose_checks():
+    """Read-only modal scan at capture scale, including native lifecycle changes."""
+    collection=bpy.data.collections.new('Pose check scale')
+    bpy.context.scene.collection.children.link(collection)
+    data=bpy.data.cameras.new('Pose check optics')
+    cameras=[]
+    for index in range(10000):
+        camera=bpy.data.objects.new(f'Check {index:05d}',data)
+        collection.objects.link(camera);camera.location=(index%100,index//100,2)
+        cameras.append(camera)
+    cameras[-2].location=cameras[0].location
+    cameras[-1].data=data.copy();cameras[-1].data.type='ORTHO'
+    bpy.context.scene.lichtfeld_training.camera_collection=collection
+    path=str(output.with_suffix('.blend'))
+    bpy.ops.wm.save_as_mainfile(filepath=path)
+    bpy.ops.ed.undo_push(message='Pose check saved baseline')
+    proof={'phase':'first','results':[],'ticks':0,'max_gap_ms':0}
+    from unittest.mock import patch
+    original_show=extension.rig_analysis.show_result
+    def shown(context,result):
+        proof['results'].append(result)
+        original_show(context,result)
+    extension.rig_analysis.show_result=shown
+    selection=(bpy.context.view_layer.objects.active,tuple(bpy.context.selected_objects))
+    identities=tuple(obj.as_pointer() for obj in bpy.data.objects)
+    def begin():
+        proof['started']=proof['last']=time.perf_counter()
+        assert bpy.ops.lichtfeld.check_camera_poses()=={'RUNNING_MODAL'}
+    def finish():
+        proof['ok']=True
+        extension.rig_analysis.show_result=original_show
+        output.write_text(json.dumps(proof),encoding='utf-8')
+        print('POSE_CHECK_NATIVE_READ_ONLY_10000_CANCEL_UNDO_LOAD_UNREGISTER_PASS',proof,flush=True)
+        bpy.ops.wm.quit_blender()
+    def after_load():
+        try:
+            assert extension.rig_analysis._active is None
+            assert bpy.ops.lichtfeld.check_camera_poses()=={'RUNNING_MODAL'}
+            bpy.ops.preferences.addon_disable(module=module)
+            assert extension.rig_analysis._active is None
+            proof['unregister']=True
+            finish()
+        except Exception:
+            output.write_text(traceback.format_exc(),encoding='utf-8');bpy.ops.wm.quit_blender()
+        return None
+    def tick():
+        try:
+            now=time.perf_counter();proof['ticks']+=1
+            proof['max_gap_ms']=max(proof['max_gap_ms'],(now-proof['last'])*1000);proof['last']=now
+            assert now-proof['started']<60
+            if extension.rig_analysis._active is not None:return .01
+            assert not bpy.data.is_dirty
+            assert identities==tuple(obj.as_pointer() for obj in bpy.data.objects)
+            assert selection==(bpy.context.view_layer.objects.active,tuple(bpy.context.selected_objects))
+            if proof['phase'] in {'first','repeat'}:
+                result=proof['results'].pop()
+                assert result['camera_count']==10000 and len(result['matches'])==1
+                assert len(result['camera_issues'])==1
+                snapshot=extension.rig_analysis.last_result(bpy.context)
+                assert snapshot is not None and len(snapshot['repeats'])==1 and 'poses' not in snapshot
+                reopened=time.perf_counter()
+                with patch.object(extension.rig_analysis,'analyze_steps',side_effect=AssertionError('Reopen started a second scan')):
+                    assert bpy.ops.lichtfeld.camera_report('INVOKE_DEFAULT')=={'RUNNING_MODAL'}
+                assert extension.rig_analysis._active is None
+                assert not bpy.data.is_dirty
+                proof[proof['phase']+'_reopen_seconds']=time.perf_counter()-reopened
+                proof[proof['phase']+'_seconds']=now-proof['started']
+                print('POSE_CHECK_TIMING',proof['phase'],now-proof['started'],proof['max_gap_ms'],flush=True)
+                if proof['phase']=='first':proof['phase']='repeat';begin();return .01
+                proof['phase']='cancel'
+                begin()
+                owner=extension.rig_analysis._active
+                assert owner.modal(bpy.context,SimpleNamespace(type='ESC'))=={'CANCELLED'}
+                proof['escape']=True
+                return .02
+            bpy.ops.ed.undo_push(message='Before read-only pose check')
+            begin()
+            assert bpy.ops.ed.undo()=={'FINISHED'}
+            assert extension.rig_analysis._active is None and extension.rig_analysis.last_result(bpy.context) is None
+            proof['undo']=True
+            begin()
+            bpy.ops.wm.open_mainfile(filepath=path,use_scripts=False)
+            assert extension.rig_analysis._active is None and extension.rig_analysis.last_result(bpy.context) is None
+            proof['load']=True
+            bpy.app.timers.register(after_load,first_interval=.1)
+            return None
+        except Exception:
+            output.write_text(traceback.format_exc(),encoding='utf-8');bpy.ops.wm.quit_blender();return None
+    begin()
+    bpy.app.timers.register(tick,first_interval=.01)
+
+
+bpy.app.timers.register(pose_checks if '--pose-checks' in sys.argv else
+    path_guides if '--path-guides' in sys.argv else
     history_interleave if '--history-interleave' in sys.argv else
     live_controls if '--live' in sys.argv else
     render_interleave if '--render-interleave' in sys.argv else start, first_interval=1)
