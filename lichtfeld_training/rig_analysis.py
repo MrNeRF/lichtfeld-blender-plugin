@@ -281,13 +281,22 @@ def last_result(context):
 def show_result(context, result):
     global _report
     names = [name for name, matrix in result['poses']]
+    outside = result['outside']
+    examples_by_reason = {}
+    for example in outside:
+        examples_by_reason.setdefault(example[1], example)
+    representatives = list(examples_by_reason.values())[:5]
+    if len(representatives) < 5:
+        selected = set(representatives)
+        representatives.extend(example for example in outside[:5] if example not in selected)
     _report = dict(scene_id=context.scene.session_uid,
                    collection_ids=tuple(collection.session_uid for collection in
                                         preflight.camera_collections(context.scene.lichtfeld_training)),
                    frame=result['frame'],
                    clearance=result['clearance'], nearby=result['nearby'],
                    clearance_note=result['clearance_note'],
-                   framing=result['framing'], outside=result['outside'], framing_note=result['framing_note'],
+                   framing=result['framing'], outside=representatives[:5], outside_count=len(outside),
+                   framing_note=result['framing_note'],
                    coverage=result['coverage'], sampled=result['sampled'], coverage_note=result['coverage_note'],
                    repeats=[(names[first], names[repeated]) for first, repeated in result['matches']])
     refresh_report()
@@ -400,7 +409,8 @@ class LF_OT_camera_report(bpy.types.Operator):
                 draw_paragraph(layout, 'Framing (last check): ' + report['framing_note'], width, scale)
             else:
                 outside = report['outside']
-                layout.label(text=f'Reference outside frame (last check): {len(outside):,}')
+                count = report['outside_count']
+                layout.label(text=f'Reference outside frame (last check): {count:,}')
                 examples = {}
                 for name, reason in outside[:5]:
                     examples.setdefault(reason, []).append(name)
@@ -411,8 +421,8 @@ class LF_OT_camera_report(bpy.types.Operator):
                         draw_paragraph(body, hint, width, scale)
                     for name in names:
                         draw_camera_row(body, name)
-                if len(outside) > 5:
-                    layout.label(text=f'First 5 of {len(outside):,} cameras shown')
+                if count > 5:
+                    layout.label(text=f'Showing 5 of {count:,} cameras')
         elif self.framing:
             layout.label(text='Reference framing: not checked')
         layout.prop(self, 'coverage')
