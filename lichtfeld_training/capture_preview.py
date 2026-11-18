@@ -13,6 +13,10 @@ _pending = {}
 _indices = {}
 
 
+def clear_camera_indices():
+    _indices.clear()
+
+
 def camera_index(settings):
     return _indices.get(settings.id_data.session_uid, settings.get('capture_preview_index', 1))
 

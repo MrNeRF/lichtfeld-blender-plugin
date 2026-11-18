@@ -2635,6 +2635,7 @@ def unloading(_):
 
 @persistent
 def loaded(_):
+    capture_preview.clear_camera_indices()
     preflight.clear()
     ui_runtime.clear()
     _imported.clear()

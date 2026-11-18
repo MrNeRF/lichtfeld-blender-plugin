@@ -377,8 +377,9 @@ with tempfile.TemporaryDirectory() as directory:
 preview=bpy.context.scene;source=ext.capture_preview.source_scene(preview)
 assert source is not None,'The saved preview lost its source'
 while ext.capture_preview.camera_pending(preview):ext.ui_runtime.tick()
-assert preview['capture_camera_name']=='Reload 1'
-source.lichtfeld_training.capture_preview_index=3
+assert preview['capture_camera_name']=='Reload 0'
+assert 'capture_preview_index' not in source.lichtfeld_training
+bpy.context.window_manager.lichtfeld_panels.framing_camera=3
 while ext.capture_preview.camera_pending(preview):ext.ui_runtime.tick()
 assert preview['capture_camera_name']=='Reload 2'
 assert bpy.ops.lichtfeld.close_capture_framing()=={'FINISHED'}
