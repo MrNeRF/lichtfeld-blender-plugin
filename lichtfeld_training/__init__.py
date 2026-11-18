@@ -1735,8 +1735,7 @@ class LF_OT_restart(bpy.types.Operator):
             return {"CANCELLED"}
         s.operation_busy = True
         def work():
-            job, previous = jobs.restart_data(directory, options, backend=backend, jobs_directory=jobs_directory, connection_directory=connection)
-            launch_supervisor(job)
+            job, _ = jobs.restart_data(directory, options, backend=backend, jobs_directory=jobs_directory, connection_directory=connection)
             return job
         def done(job):
             def activate():
@@ -1745,6 +1744,8 @@ class LF_OT_restart(bpy.types.Operator):
                 s.operation_busy = False
                 s.running = True
                 ui_runtime.reconnect(scene)
+                ui_runtime.submit(lambda: launch_supervisor(job),
+                                  failure=lambda error: ui_runtime.fail(scene, error))
             ui_runtime.reset_for_new_training(scene, activate)
         def failed(error):
             s.operation_busy = False
