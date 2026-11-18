@@ -30,6 +30,15 @@ with tempfile.TemporaryDirectory() as directory:
  ext.capture_settings.apply_format(bpy.context.scene, ext.capture_settings.preset_format(s))
  s.refine_start=.9;s.refine_end=.1 # Irrelevant training settings must not block export.
  bpy.ops.lichtfeld.create_rig()
+ expected_cameras={obj.name for obj in s.camera_collection.objects if obj.type=='CAMERA'}
+ if '--multi-rig' in sys.argv:
+  first=s.camera_collection
+  s.rig_phase=.3
+  assert bpy.ops.lichtfeld.create_rig(new_rig=True)=={'FINISHED'}
+  s.capture_collections.add().collection=first
+  s.capture_collections.add().collection=s.camera_collection
+  expected_cameras.update(obj.name for obj in s.camera_collection.objects if obj.type=='CAMERA')
+  assert len(expected_cameras)==8
  bpy.ops.wm.save_as_mainfile(filepath=str(area/'source.blend'))
  destination=area/'exports';destination.mkdir()
  result=bpy.ops.lichtfeld.export_dataset('EXEC_DEFAULT',directory=str(destination))
@@ -40,6 +49,7 @@ with tempfile.TemporaryDirectory() as directory:
   if state.get('state') in {'completed','failed','stopped'}:break
   time.sleep(.2)
  assert state.get('state')=='completed',state
+ assert set(ext.read_json(root/'job.json')['cameras'])==expected_cameras
  before={p.name:(p.stat().st_mtime_ns,p.read_bytes()) for p in (root/'dataset/images').glob('*.png')}
  journal=ext.read_json(root/'capture-frames.json')
  ext.atomic_json(root/'capture-frames.json',{**journal,'frames':journal['frames'][:-1]})
@@ -85,13 +95,13 @@ with tempfile.TemporaryDirectory() as directory:
  print('FINALIZE_CAPTURE_REUSES_IMAGES_PASS',flush=True)
  output=Path(state['export_directory'])
  assert output.parent.samefile(destination)
- assert len(list((output/'images').glob('*.png')))==4
+ assert len(list((output/'images').glob('*.png')))==len(expected_cameras)
  assert (output/'pointcloud.ply').is_file()
  geometry=json.loads((output/'view_geometry.json').read_text())
- assert geometry['source_frame']=='blender-world' and len(geometry['cameras'])==4
+ assert geometry['source_frame']=='blender-world' and len(geometry['cameras'])==len(expected_cameras)
  assert not (root/'training.json').exists() and not (root/'training.log').exists() and not (root/'backend.json').exists()
  job,_,data,manifest=ext.jobs.captured_dataset(output)
- assert data==output and manifest['views']==4
+ assert data==output and manifest['views']==len(expected_cameras)
  assert manifest['initialization']['method']=='visible_rendered'
  assert 4 <= manifest['initialization']['points'] <= s.seed_points
  assert manifest['view_geometry_file']=='view_geometry.json'

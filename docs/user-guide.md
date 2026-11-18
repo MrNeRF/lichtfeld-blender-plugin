@@ -282,6 +282,17 @@ adjust the settings for the new rig and choose **Create another rig**. The new
 collection becomes the capture collection. Choose the original collection and
 use **Load selected rig** to return to its saved settings.
 
+To capture more than one rig, expand **Capture collections** in **Cameras** and
+choose **Add collection**. The list starts with the current collection. Add
+the other collections and check the total camera count. A camera linked to
+multiple included collections is captured once. The **Rig to edit** selector
+changes which rig you edit without changing the capture list. Remove the last
+entry to return to single-collection capture.
+
+**Check framing**, **Check cameras** and dataset capture use the same
+camera list. The optional reference-framing diagnostic uses a single rig
+reference and is skipped when more than one collection is included.
+
 Rig creation and updates are unavailable while Blender is rendering or a job has
 locked the interface. If a render starts during an update, rig work pauses until
 the render finishes, including rollback and temporary-data cleanup. Cancellation

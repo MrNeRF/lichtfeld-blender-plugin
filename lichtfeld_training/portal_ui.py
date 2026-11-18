@@ -131,7 +131,7 @@ def select_workspace(context):
         return  # Keep the current workspace until Blender replaces its UI state.
     settings = context.scene.lichtfeld_training
     training = (settings.job_directory or settings.attached_session or settings.running or
-                settings.camera_collection or settings.dataset_mode == "REUSE" or
+                settings.camera_collection or settings.capture_collections or settings.dataset_mode == "REUSE" or
                 capture_preview.is_preview(context.scene) or preview_scene.is_preview(context.scene))
     if training:
         context.window_manager.lichtfeld_workspace = "TRAINING"

@@ -106,13 +106,8 @@ def prepare_camera(source, window):
     """Use the capture copy contract for both opening and changing a view."""
     settings = source.lichtfeld_training
     scene = window.scene
-    cameras = []
-    if settings.camera_collection:
-        for obj in object_steps(settings.camera_collection.all_objects):
-            if obj.type == 'CAMERA':
-                cameras.append(obj)
-            yield
-    cameras.sort(key=lambda obj: obj.name)
+    from .preflight import camera_objects
+    cameras = yield from camera_objects(source, settings)
     if not cameras:
         raise ValueError('Choose a camera collection first')
     # Read the latest request after the cooperative scene walk, without another
@@ -338,7 +333,8 @@ class LF_OT_capture_framing(bpy.types.Operator):
             return False
         source = source_scene(context.scene) or context.scene
         s = source.lichtfeld_training
-        return bool(s.camera_collection) and not s.running and not s.operation_busy and not s.job_directory
+        from .preflight import camera_collections
+        return bool(camera_collections(s)) and not s.running and not s.operation_busy and not s.job_directory
 
     def execute(self, context):
         source = source_scene(context.scene) or context.scene
@@ -535,7 +531,8 @@ class LF_OT_render_capture_test(bpy.types.Operator):
         if not bpy.data.filepath:
             cls.poll_message_set('Save the scene once before rendering a test image')
             return False
-        return bool(s.camera_collection)
+        from .preflight import camera_collections
+        return bool(camera_collections(s))
 
     def execute(self, context):
         if not self.poll(context):

@@ -1002,3 +1002,27 @@ assert s.camera_collection == second_rig
 assert sum(obj.type == 'CAMERA' for obj in second_rig.objects) == 10
 assert {obj.as_pointer() for obj in first_rig.objects} == first_objects
 print('ADDITIONAL_RIG_PRESERVES_ORIGINAL_AND_EDITS_INDEPENDENTLY_PASS', flush=True)
+
+assert bpy.ops.lichtfeld.capture_collection_entry() == {'FINISHED'}
+assert s.capture_collections[0].collection == second_rig
+try:
+    checked()
+except ValueError as error:
+    assert 'empty entries' in str(error)
+else:
+    raise AssertionError('Incomplete capture collection did not block the check')
+s.capture_collections[1].collection = first_rig
+s.camera_collection = first_rig
+assert bpy.ops.lichtfeld.read_rig() == {'FINISHED'}
+shared = next(obj for obj in second_rig.objects if obj.type == 'CAMERA')
+first_rig.objects.link(shared)
+expected = {obj.name for rig in (first_rig, second_rig) for obj in rig.all_objects if obj.type == 'CAMERA'}
+assert len(expected) == sum(obj.type == 'CAMERA' for obj in first_rig.all_objects) + 9
+result = checked()
+assert set(result['cameras']) == expected and result['camera_count'] == len(expected)
+assert bpy.ops.lichtfeld.capture_collection_entry(index=1) == {'FINISHED'}
+assert checked()['camera_count'] == 10
+assert bpy.ops.lichtfeld.capture_collection_entry(index=0) == {'FINISHED'}
+assert set(checked()['cameras']) == expected - {obj.name for obj in second_rig.objects if obj.type == 'CAMERA' and obj != shared}
+first_rig.objects.unlink(shared)
+print('MULTI_RIG_CAPTURE_DEDUPLICATES_CAMERAS_AND_KEEPS_EDIT_TARGET_INDEPENDENT_PASS', flush=True)

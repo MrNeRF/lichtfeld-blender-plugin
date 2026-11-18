@@ -59,7 +59,15 @@ for checking, errors, changed in ((True, ["Checking source and cameras…"], Fal
     layout = Layout()
     with patch.object(ext.preflight, "cached", return_value=ready), patch.object(ext.preflight, "issues", return_value=errors), patch.object(ext, "preferences", return_value=None), patch.object(ext.preflight, 'environment', return_value={'backend': True, 'ok': True}):
         ext.draw_training(SimpleNamespace(layout=layout), context)
-    orders.append((layout.fields, layout.rows))
+    # Capture checks only appears when there are additional messages to inspect.
+    fields = []
+    rows = layout.rows.copy()
+    for name, index in layout.fields:
+        if name == 'validation_details':
+            del rows[index]
+        else:
+            fields.append((name, index))
+    orders.append((fields, rows))
 assert all(order == orders[0] for order in orders), orders
 assert any(name == "iterations" for name, row in orders[0][0])
 print("WHOLE_SETUP_LAYOUT_STABLE_PASS", len(orders[0][1]))

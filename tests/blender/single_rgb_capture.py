@@ -36,6 +36,16 @@ s.scope = 'SELECTION'
 for _ in ext.preflight.remember_sources(s, [bpy.data.objects['Cube']]):
     pass
 capture_name='Camera';capture_index=1
+if '--multi-rig' in sys.argv:
+    second = bpy.data.collections.new('Second capture collection')
+    scene.collection.children.link(second)
+    camera = scene.camera.copy()
+    camera.data = scene.camera.data.copy()
+    camera.name = 'Second capture camera'
+    second.objects.link(camera)
+    s.capture_collections.add().collection = s.camera_collection
+    s.capture_collections.add().collection = second
+    capture_name, capture_index = camera.name, 2
 if '--linked-guide' in sys.argv or '--position-variation' in sys.argv or '--rotation-variation' in sys.argv or '--panorama' in sys.argv:
     s.views=4
     if '--linked-guide' in sys.argv or '--panorama' in sys.argv:

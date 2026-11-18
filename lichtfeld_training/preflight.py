@@ -49,19 +49,51 @@ def capture_objects(context):
  if s.scope=='SELECTION':return selection_objects(context)
  return context.scene.objects
 
+def camera_collections(settings):
+ rows=getattr(settings,'capture_collections',())
+ if rows:return tuple(dict.fromkeys(row.collection for row in rows if row.collection is not None))
+ collection=getattr(settings,'camera_collection',None)
+ return (collection,) if collection is not None else ()
+
+
+def camera_objects(scene, settings):
+ cameras=set()
+ rows=getattr(settings,'capture_collections',())
+ if any(row.collection is None for row in rows):
+  raise ValueError('Choose a collection for each capture entry, or remove the empty entries.')
+ collections=camera_collections(settings)
+ if rows:
+  members=set(scene.collection.children_recursive)
+  members.add(scene.collection)
+  if any(collection not in members for collection in collections):
+   raise ValueError('Choose capture collections linked to this scene.')
+ for collection in collections:
+  for obj in object_steps(collection.all_objects):
+   if obj is not None and obj.type=='CAMERA':
+    cameras.add(obj)
+   yield
+ if rows and len({camera.name for camera in cameras}) != len(cameras):
+  raise ValueError('Capture cameras must have unique names across the included collections.')
+ return sorted(cameras,key=lambda obj:(obj.name,obj.library.filepath if obj.library else ''))
+
+
 def capture_helpers(settings):
  helper=getattr(settings,'rig_mesh',None)
  curve=getattr(settings,'rig_curve',None)
- collection=getattr(settings,'camera_collection',None)
- committed=collection.get('lichtfeld_placement_mesh') if collection else None
- committed_curve=collection.get('lichtfeld_rig_curve') if collection else None
- return tuple(sorted(set(obj for obj in (helper,committed,curve,committed_curve) if obj is not None),key=lambda obj:obj.as_pointer()))
+ collections=set(camera_collections(settings))
+ active=getattr(settings,'camera_collection',None)
+ if active:collections.add(active)
+ committed=(collection.get(key) for collection in collections
+            for key in ('lichtfeld_placement_mesh','lichtfeld_rig_curve'))
+ return tuple(sorted({obj for obj in (helper,curve,*committed) if obj is not None},key=lambda obj:obj.as_pointer()))
 
 
 def signature(context):
  s=context.scene.lichtfeld_training
  return (context.scene.as_pointer(),context.view_layer.as_pointer(),s.scope,s.source_collection.as_pointer() if s.source_collection else 0,
-  s.camera_collection.as_pointer() if s.camera_collection else 0,context.scene.frame_current,
+  s.camera_collection.as_pointer() if s.camera_collection else 0,
+  tuple(row.collection.session_uid if row.collection else None for row in getattr(s,'capture_collections',())),
+  context.scene.frame_current,
   tuple(obj.as_pointer() for obj in capture_helpers(s)),
   bpy.data.filepath,bpy.data.is_dirty,_save_generation,capture_settings.signature(context.scene,s),scene_render.signature(context.scene),
   tuple(sorted(obj.as_pointer() for obj in selection_objects(context))) if s.scope=="SELECTION" else (),
@@ -104,13 +136,11 @@ def environment(prefs,force=False,capture_only=False):
 def camera_checks(context, *, single_render=False, poses=False, inspect=None):
  """Canonical camera enumeration and evaluated-pose validation, on the UI thread."""
  s=context.scene.lichtfeld_training
- cameras=[];issues={};frames=[]
+ issues={};frames=[];selection_error=''
  graph=context.evaluated_depsgraph_get()
- if s.camera_collection:
-  for obj in object_steps(s.camera_collection.all_objects):
-   if obj.type=='CAMERA':cameras.append(obj)
-   yield
- cameras.sort(key=lambda obj:obj.name)
+ try:cameras=yield from camera_objects(context.scene,s)
+ except ValueError as error:
+  cameras=[];selection_error=str(error)
  count=len(cameras);generated=sum(bool(obj.get('lichtfeld_generated')) for obj in cameras)
  if single_render:
   index=min(s.capture_preview_index,count)-1
@@ -123,7 +153,8 @@ def camera_checks(context, *, single_render=False, poses=False, inspect=None):
    if inspect is not None:inspect(camera,graph,matrix)
   yield (index+1,len(cameras)) if poses else None
  return {'cameras':[obj.name for obj in cameras],'camera_count':count,
-         'generated_cameras':generated,'camera_issues':issues,'poses':frames}
+         'generated_cameras':generated,'camera_issues':issues,'poses':frames,
+         'camera_selection_error':selection_error}
 
 
 def collect(context,capture_only=False,*,single_render=False):
@@ -149,6 +180,7 @@ def collect(context,capture_only=False,*,single_render=False):
  checks=yield from camera_checks(context,single_render=single_render)
  cameras=checks['cameras'];camera_count=checks['camera_count']
  generated_cameras=checks['generated_cameras'];camera_issues=checks['camera_issues']
+ if checks['camera_selection_error']:errors.append(checks['camera_selection_error'])
  errors.extend(camera_issues)
  reference_changed=False
  if s.camera_collection and s.camera_collection.get('lichtfeld_generated'):
