@@ -58,6 +58,12 @@ def camera_collections(settings):
  return (collection,) if collection is not None else ()
 
 
+def capture_name_error(obj, label):
+ if bpy.data.objects.get(obj.name) != obj:
+  return f'{label} name is ambiguous in this file: {obj.name}. Rename the {label.lower()} or make it local with a unique name.'
+ return None
+
+
 def camera_objects(scene, settings):
  cameras=set()
  rows=getattr(settings,'capture_collections',())
@@ -76,8 +82,8 @@ def camera_objects(scene, settings):
  if len({camera.name for camera in cameras}) != len(cameras):
   raise ValueError('Capture cameras must have unique names across the included collections.')
  for camera in cameras:
-  if bpy.data.objects.get(camera.name) != camera:
-   raise ValueError(f'Camera name is ambiguous in this file: {camera.name}. Rename the camera or make the linked camera local with a unique name.')
+  if error := capture_name_error(camera, 'Camera'):
+   raise ValueError(error)
   yield
  def sort_key(obj):
   name = tuple(int(part) if index % 2 else part for index, part in enumerate(re.split(r'([0-9]+)', obj.name)))
@@ -187,6 +193,8 @@ def collect(context,capture_only=False,*,single_render=False):
  except (ValueError,KeyError) as error:errors.append(str(error))
  for obj in object_steps(capture_objects(context)):
   if is_surface(obj, helpers):
+   if error := capture_name_error(obj, 'Source object'):
+    errors.append(error)
    sources.append(obj.name);visibility[obj.name]=is_hidden(obj,context.view_layer,members=members)
   yield
  if not sources:errors.append('Choose at least one surface object.')
