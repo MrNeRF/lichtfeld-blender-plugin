@@ -1360,6 +1360,10 @@ class LF_OT_start(bpy.types.Operator):
                 cameras_for(context.scene.lichtfeld_training)
                 sources_for(context)
                 return True
+            # Search/keymap launches validate cooperatively in execute even
+            # when the hidden sidebar has not requested a readiness scan.
+            if not capture_setup_visible(context):
+                return True
             errors = preflight.issues(preflight.cached(context, preferences(context)))
             if errors:
                 cls.poll_message_set(errors[0])
@@ -1487,7 +1491,7 @@ class LF_OT_export_dataset(bpy.types.Operator):
         if not bpy.data.filepath or bpy.data.is_dirty:
             cls.poll_message_set("Save the .blend before exporting its exact saved revision")
             return False
-        if bpy.app.background:
+        if bpy.app.background or not capture_setup_visible(context):
             return True
         errors = preflight.issues(preflight.cached(context, preferences(context), capture_only=True))
         if errors:
@@ -2617,9 +2621,33 @@ def draw_training(self, context):
     draw_job_navigation(layout, settings)
 
 
+def capture_setup_visible(context, *, screen=None):
+    if context.window_manager.lichtfeld_workspace != 'TRAINING':
+        return False
+    screen = screen or context.screen
+    return screen is not None and any(
+        area.spaces.active.show_region_ui and any(
+            region.type == 'UI' and region.active_panel_category == 'LichtFeld'
+            for region in area.regions
+        )
+        for area in screen.areas if area.type == 'VIEW_3D'
+    )
+
+
 def poll_jobs():
-    if bpy.context.scene and not preview_scene.source_scene(bpy.context.scene):
-        preflight.tick(bpy.context, preferences())
+    context = bpy.context
+    if bpy.app.background:
+        if context.scene and not preview_scene.source_scene(context.scene):
+            preflight.tick(context, preferences())
+    else:
+        for window in context.window_manager.windows:
+            if (not preview_scene.source_scene(window.scene)
+                    and capture_setup_visible(context, screen=window.screen)):
+                with context.temp_override(window=window):
+                    preflight.tick(context, preferences())
+                break
+        else:
+            preflight.suspend()
     return ui_runtime.tick()
 
 

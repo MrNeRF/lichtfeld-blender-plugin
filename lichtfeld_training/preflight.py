@@ -255,6 +255,14 @@ def issues(result,require_saved=True):
  errors.extend(save_issues(require_saved))
  return errors
 
+def suspend():
+ global _work,_next
+ if _work:
+  _work[1].close()
+  _work=None
+ _next=0
+
+
 def tick(context,prefs):
  from . import rig_analysis
  if rig_analysis.is_running():return
