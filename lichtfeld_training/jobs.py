@@ -350,9 +350,9 @@ def captured_dataset(directory, options=None):
         raise ValueError("Whole-scene captures have no foreground mask. Choose Automatic or None.")
     for enabled, folder, extension in (("use_depth_loss", "depths", ".tiff"),
                                         ("use_normal_loss", "normals", ".tiff")):
-        if options.get(enabled) and not job.get(enabled):
-            raise ValueError("This dataset has no " + folder + ". Capture those maps first.")
         if options.get(enabled):
+            if not (candidate / folder).is_dir():
+                raise ValueError("This dataset has no " + folder + ". Capture those maps first.")
             # Capture uses the image basename for each supervision map.
             for frame in frames:
                 name = Path(frame["file_path"]).stem + extension

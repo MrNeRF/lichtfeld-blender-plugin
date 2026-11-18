@@ -197,6 +197,19 @@ class DatasetReuse(unittest.TestCase):
             self.assertEqual(second["dataset_root"],job["dataset_root"])
             self.assertNotEqual(second["root"],job["root"])
 
+    def test_normals_can_be_enabled_after_training_without_them(self):
+        with tempfile.TemporaryDirectory() as directory:
+            original = fixture(directory)
+            dataset = original / 'dataset'
+            normals = dataset / 'normals'
+            normals.mkdir()
+            for image in (dataset / 'images').glob('*.png'):
+                (normals / f'{image.stem}.tiff').write_bytes(b'map fixture')
+            options = {'use_normal_loss': False}
+            job, _ = jobs.restart_data(original, options, backend='TRUSTED', jobs_directory=directory)
+            atomic_json(Path(job['root']) / 'job.json', job)
+            self.assertEqual(jobs.captured_dataset(job['root'], {'use_normal_loss': True})[2], dataset.resolve())
+
     def test_missing_modified_or_escaping_capture_fails_without_new_job(self):
         with tempfile.TemporaryDirectory() as directory:
             old=fixture(directory)
