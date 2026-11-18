@@ -133,8 +133,6 @@ def quality_get(settings):
         selected = settings.get('quality_preset')
         if selected is not None:
             name = selected if name == selected else 'CUSTOM'
-        elif settings.get('quality_custom'):
-            name = 'CUSTOM'
         return {'DRAFT': 0, 'BALANCED': 1, 'HIGH': 2, 'CUSTOM': 3}[name]
     except (ValueError, AttributeError):
         return 3

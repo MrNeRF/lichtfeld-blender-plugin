@@ -63,7 +63,7 @@ PROPERTIES = {
     'normal_start_fraction': 'Fraction of total steps at which normal supervision begins',
     'normal_end_fraction': 'Fraction of total steps at which normal supervision ends; must be after its start',
     'cycles_device': 'Alias of the scene’s official Cycles Device setting; GPU Compute uses enabled devices from System Preferences',
-    'views': 'Generated camera count, or curve stations for Panorama stations. Quality presets change this count; views per station multiply it. Custom cameras remain additional capture views',
+    'views': 'Generated camera count, or curve stations for Panorama stations. Presets change this count; views per station multiply it. Custom cameras remain additional capture views',
     'resolution': 'Longest output dimension for the size preset; press Apply size preset to update official Output Properties',
     'capture_format': 'Legacy size-preset helper; actual capture dimensions always come from official Blender Output Properties',
     'capture_aspect': 'Aspect ratio for the size preset; takes effect when Apply size preset is pressed',
