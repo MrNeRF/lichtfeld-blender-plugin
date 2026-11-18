@@ -277,6 +277,11 @@ Updating it preserves generated camera identities where possible and retains
 additional custom cameras in the collection. Inspect coverage after changing
 placement, count, lens, aspect ratio or target.
 
+To keep the selected generated rig and create a separate one, open **Rig settings**,
+adjust the settings for the new rig and choose **Create another rig**. The new
+collection becomes the capture collection. Choose the original collection and
+use **Load selected rig** to return to its saved settings.
+
 Rig creation and updates are unavailable while Blender is rendering or a job has
 locked the interface. If a render starts during an update, rig work pauses until
 the render finishes, including rollback and temporary-data cleanup. Cancellation

@@ -667,6 +667,13 @@ class LF_OT_rig(_RigOperation, bpy.types.Operator):
     bl_label = "Create capture rig"
     bl_description = "Create or update cameras around the rig reference without changing the content to capture"
     bl_options = {"REGISTER", "UNDO"}
+    new_rig: BoolProperty(options={'HIDDEN', 'SKIP_SAVE'})
+
+    @classmethod
+    def description(cls, context, properties):
+        if properties.new_rig:
+            return "Create a separate rig from these settings and make it the active camera collection"
+        return cls.bl_description
 
     @classmethod
     def poll(cls, context):
@@ -684,7 +691,9 @@ class LF_OT_rig(_RigOperation, bpy.types.Operator):
     def generate(self, context):
         settings = context.scene.lichtfeld_training
         reference = settings.rig_reference
-        legacy = settings.camera_collection and settings.camera_collection.get('lichtfeld_generated')
+        create_separately = getattr(self, 'new_rig', False)
+        previous = None if create_separately else settings.camera_collection
+        legacy = previous and previous.get('lichtfeld_generated')
         if reference.mode == 'UNSET' and not legacy:
             sources = sources_for(context)
         else:
@@ -721,7 +730,7 @@ class LF_OT_rig(_RigOperation, bpy.types.Operator):
                     f'Panorama guide {path_curve.name}', shear_hint='apply scale on the guide and inspect rotated parents')
                 path_rotation = frame.to_quaternion().normalized()
             if settings.rig_path_link:
-                path_inverse = rig_edit.validate_path_link(path_curve, settings.camera_collection, depsgraph)
+                path_inverse = rig_edit.validate_path_link(path_curve, previous, depsgraph)
             for point in rig_path.positions(context, path_curve, settings.views,
                     spacing=settings.rig_path_spacing if settings.rig_path_sampling == 'SPACING' else None):
                 if point is not None:
@@ -755,8 +764,7 @@ class LF_OT_rig(_RigOperation, bpy.types.Operator):
                         path_curve.data.splines[0].use_cyclic_u, settings.rig_path_reverse):
                     station_rotations.append(rotation)
                     yield
-        previous = settings.camera_collection
-        collection = bpy.data.collections.new("LichtFeld Capture Cameras")
+        collection = bpy.data.collections.new("Capture Rig" if create_separately else "LichtFeld Capture Cameras")
         context.scene.collection.children.link(collection)
         self.collection = collection
         if settings.rig_mode not in {'PATH', 'MESH'}:
@@ -2091,6 +2099,8 @@ def draw_rig_actions(layout, settings, pending, *, edit=False):
         row.operator('lichtfeld.live_rig', text='Edit live')
     if rig:
         row.operator('lichtfeld.capture_framing', text='Check framing')
+    if edit and managed and settings.rig_parameter_source == rig:
+        layout.operator('lichtfeld.create_rig', text='Create another rig').new_rig = True
 
 
 def draw_capture_cameras(box, context, settings, ready, rig_changed, wrapped):

@@ -975,3 +975,30 @@ with tempfile.TemporaryDirectory() as directory:
     else:raise AssertionError('Selected an ambiguous linked camera name')
     assert selection==(bpy.context.view_layer.objects.active,tuple(bpy.context.selected_objects))
 print('POSE_ISSUE_SELECTION_REJECTS_LINKED_NAME_AMBIGUITY_PASS',flush=True)
+
+# Creating an additional rig keeps the original objects and saved recipe.
+first_rig = s.camera_collection
+first_recipe = first_rig['lichtfeld_rig_recipe']
+first_objects = {obj.as_pointer() for obj in first_rig.objects}
+first_poses = {obj.as_pointer(): obj.matrix_world.copy() for obj in first_rig.objects if obj.type == 'CAMERA'}
+s.rig_mode = 'HEMISPHERE'
+s.views = 8
+assert bpy.ops.lichtfeld.create_rig(new_rig=True) == {'FINISHED'}
+second_rig = s.camera_collection
+assert second_rig != first_rig and s.rig_parameter_source == second_rig
+assert sum(obj.type == 'CAMERA' for obj in second_rig.objects) == 8
+assert {obj.as_pointer() for obj in first_rig.objects} == first_objects
+assert {obj.as_pointer(): obj.matrix_world for obj in first_rig.objects if obj.type == 'CAMERA'} == first_poses
+assert first_rig['lichtfeld_rig_recipe'] == first_recipe
+s.camera_collection = first_rig
+assert bpy.ops.lichtfeld.read_rig() == {'FINISHED'}
+assert s.rig_parameter_source == first_rig and s.rig_mode == 'PATH'
+s.camera_collection = second_rig
+assert bpy.ops.lichtfeld.read_rig() == {'FINISHED'}
+assert s.rig_parameter_source == second_rig and s.rig_mode == 'HEMISPHERE'
+s.views = 10
+assert bpy.ops.lichtfeld.create_rig() == {'FINISHED'}
+assert s.camera_collection == second_rig
+assert sum(obj.type == 'CAMERA' for obj in second_rig.objects) == 10
+assert {obj.as_pointer() for obj in first_rig.objects} == first_objects
+print('ADDITIONAL_RIG_PRESERVES_ORIGINAL_AND_EDITS_INDEPENDENTLY_PASS', flush=True)
