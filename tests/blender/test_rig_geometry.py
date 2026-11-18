@@ -28,6 +28,14 @@ class GeometryTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 panorama_views_for_step(math.pi, step)
 
+    def test_panorama_density_tolerates_rna_rounding_at_exact_divisors(self):
+        for degrees, step, expected in ((360, 10, 36), (360, 20, 18), (360, 40, 9),
+                                        (180, 10, 19), (180, 20, 10), (180, 30, 7),
+                                        (180, 19.999, 11)):
+            with self.subTest(sweep=degrees, step=step):
+                sweep, maximum_step = (float(np.float32(math.radians(v))) for v in (degrees, step))
+                self.assertEqual(panorama_views_for_step(sweep, maximum_step), expected)
+
     def test_repeated_poses_keep_orientation_roll_and_first_representative(self):
         def run(frames):
             work=repeated_poses(frames)

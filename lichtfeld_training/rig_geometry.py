@@ -73,7 +73,11 @@ def panorama_views_for_step(sweep, maximum_step):
     sweep = _angular_sweep(sweep)
     if not math.isfinite(maximum_step) or maximum_step <= 0:
         raise ValueError('Use a positive azimuth step')
-    intervals = math.ceil(sweep / maximum_step)
+    ratio = sweep / maximum_step
+    nearest = round(ratio)
+    # The two RNA angles are rounded independently to float32. Absorb their
+    # combined rounding error at exact divisors before taking the ceiling.
+    intervals = nearest if math.isclose(ratio, nearest, rel_tol=2**-23) else math.ceil(ratio)
     return max(4, intervals + (sweep != math.tau))
 
 

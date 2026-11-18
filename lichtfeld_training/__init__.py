@@ -572,7 +572,7 @@ class LF_OT_panorama_density(bpy.types.Operator):
     bl_options = {"UNDO", "INTERNAL"}
 
     maximum_step: FloatProperty(name="Maximum azimuth step", subtype='ANGLE',
-        default=math.radians(30), min=math.radians(.1), max=math.pi,
+        default=math.radians(30), min=math.radians(.1), max=math.pi, options={'SKIP_SAVE'},
         description="Maximum spacing between consecutive camera axes around a row")
 
     @classmethod
