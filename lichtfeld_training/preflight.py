@@ -101,7 +101,7 @@ def environment(prefs,force=False,capture_only=False):
   ui_runtime.submit(lambda:jobs.check_environment(*key,backend_version=version,backend_identity=identity),done,fail)
  return current if current.get('generation') == _save_generation else {**current,'backend':known_backend or bool(current.get('backend')),'ok':False,'message':'Checking installation and job folder…','checking':True}
 
-def camera_checks(context, *, single_render=False, poses=False):
+def camera_checks(context, *, single_render=False, poses=False, inspect=None):
  """Canonical camera enumeration and evaluated-pose validation, on the UI thread."""
  s=context.scene.lichtfeld_training
  cameras=[];issues={};frames=[]
@@ -116,10 +116,11 @@ def camera_checks(context, *, single_render=False, poses=False):
   index=min(s.capture_preview_index,count)-1
   cameras=cameras[index:index+1] if cameras else []
  for index,camera in enumerate(cameras):
-  try:
-   matrix=capture_settings.camera_pose(camera,graph)
-   if poses:frames.append((camera.name,tuple(tuple(row) for row in matrix)))
+  try:matrix=capture_settings.camera_pose(camera,graph)
   except ValueError as error:issues[str(error)]=camera.name
+  else:
+   if poses:frames.append((camera.name,tuple(tuple(row) for row in matrix)))
+   if inspect is not None:inspect(camera,graph,matrix)
   yield (index+1,len(cameras)) if poses else None
  return {'cameras':[obj.name for obj in cameras],'camera_count':count,
          'generated_cameras':generated,'camera_issues':issues,'poses':frames}

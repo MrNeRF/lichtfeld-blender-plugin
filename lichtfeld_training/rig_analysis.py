@@ -3,11 +3,13 @@
 """Explicit camera diagnostics with one transient report; no scene state."""
 import math
 import time
+from itertools import product
 import bpy
 import numpy as np
-from bpy.props import FloatProperty
+from bpy.props import BoolProperty, FloatProperty
+from mathutils import Vector
 from mathutils.bvhtree import BVHTree
-from . import preflight, rig_geometry, rig_edit, capture_preview
+from . import preflight, rig_geometry, rig_edit, capture_preview, capture_settings
 from .ui_text import draw_paragraph
 from .visibility import object_steps
 
@@ -74,12 +76,66 @@ def clearance_steps(context, poses, distance):
     return hits, ''
 
 
-def analyze_steps(context, clearance=0.0):
+def outside_frame(points, pose, projection, near, far):
+    inverse = pose.inverted()
+    camera_space = [inverse @ point for point in points]
+    if all(point.z >= 0 for point in camera_space):
+        return 'Behind camera'
+    if all(-point.z < near for point in camera_space):
+        return 'Before near clip'
+    if all(-point.z > far for point in camera_space):
+        return 'Beyond far clip'
+    projected = [projection @ point.to_4d() for point in camera_space]
+    if any(all(sign * point[axis] > point.w for point in projected)
+           for axis, sign in product((0, 1), (-1, 1))):
+        return 'Outside image'
+    return ''
+
+
+def framing_steps(context, findings):
+    settings = context.scene.lichtfeld_training
+    reference = settings.camera_collection.lichtfeld_rig_reference
+    if reference.mode == 'UNSET':
+        return None, 'Existing camera poses have no applied rig reference to check.'
+    try:
+        output = capture_settings.format_for(context.scene, settings)
+        overrides = capture_settings.camera_for(settings)
+        if settings.override_optics or settings.override_shift:
+            return None, 'Skipped because capture lens or shift overrides are enabled. Inspect those views with Check framing in capture setup.'
+        sources = yield from rig_edit.reference_sources(context, reference)
+        for source in sources:
+            if any(modifier.type == 'NODES' and modifier.show_viewport for modifier in source.modifiers):
+                return None, 'Skipped because the reference uses Geometry Nodes. Object bounds can omit instances.'
+            yield
+        low, high = yield from rig_edit.reference_bounds_steps(sources, context.evaluated_depsgraph_get())
+    except ValueError as error:
+        return None, str(error)
+    if not all(math.isfinite(value) for value in (*low, *high)):
+        return None, 'The applied rig reference has invalid bounds.'
+    points = tuple(Vector(corner) for corner in product(*zip(low, high)))
+
+    def inspect(camera, graph, pose):
+        evaluated = camera.evaluated_get(graph)
+        projection = capture_settings.camera_projection(evaluated, graph, output)
+        near = overrides.get('clip_start', evaluated.data.clip_start)
+        far = overrides.get('clip_end', evaluated.data.clip_end)
+        reason = outside_frame(points, pose, projection, near, far)
+        if reason:
+            findings.append((camera.name, reason))
+
+    return inspect, ''
+
+
+def analyze_steps(context, clearance=0.0, framing=False):
     if not math.isfinite(clearance):
         raise ValueError('Minimum distance must be finite')
     signature = preflight.signature(context)
     scene, frame = context.scene.name, context.scene.frame_current
-    checks = yield from preflight.camera_checks(context, poses=True)
+    outside, framing_note = [], ''
+    inspect = None
+    if framing and context.scene.lichtfeld_training.camera_collection:
+        inspect, framing_note = yield from framing_steps(context, outside)
+    checks = yield from preflight.camera_checks(context, poses=True, inspect=inspect)
     if not checks['camera_count']:
         raise ValueError('Choose a collection containing cameras')
     matches = yield from rig_geometry.repeated_poses([matrix for name, matrix in checks['poses']])
@@ -92,7 +148,8 @@ def analyze_steps(context, clearance=0.0):
     if signature != preflight.signature(context):
         raise ValueError('The capture setup changed during the check; run it again')
     return dict(checks, matches=matches, scene=scene, frame=frame,
-                clearance=clearance, nearby=nearby, clearance_note=clearance_note)
+                clearance=clearance, nearby=nearby, clearance_note=clearance_note,
+                framing=framing, outside=outside, framing_note=framing_note)
 
 
 def last_result(context):
@@ -113,6 +170,7 @@ def show_result(context, result):
                    frame=result['frame'],
                    clearance=result['clearance'], nearby=result['nearby'],
                    clearance_note=result['clearance_note'],
+                   framing=result['framing'], outside=result['outside'], framing_note=result['framing_note'],
                    repeats=[(names[first], names[repeated]) for first, repeated in result['matches']])
     refresh_report()
 
@@ -126,7 +184,7 @@ def refresh_report():
             _report_region = None
 
 
-def clearance_changed(self, context):
+def report_options_changed(self, context):
     refresh_report()
 
 
@@ -135,8 +193,11 @@ class LF_OT_camera_report(bpy.types.Operator):
     bl_label = 'Camera checks'
     bl_description = 'Review camera issues and check repeated poses or distance to mesh surfaces'
     clearance: FloatProperty(name='Minimum distance', subtype='DISTANCE', unit='LENGTH', min=0.0,
-        default=0.0, options={'SKIP_SAVE'}, update=clearance_changed,
+        default=0.0, options={'SKIP_SAVE'}, update=report_options_changed,
         description='Flag camera centres closer than this distance to visible evaluated meshes in the capture scope. Zero disables this check')
+    framing: BoolProperty(name='Check rig reference framing', options={'SKIP_SAVE'},
+        update=report_options_changed,
+        description='Flag views where the applied rig reference bounds are entirely outside the image or clipping range')
 
     @classmethod
     def poll(cls, context):
@@ -146,6 +207,8 @@ class LF_OT_camera_report(bpy.types.Operator):
         report = last_result(context)
         if report is not None and not self.properties.is_property_set('clearance'):
             self.clearance = report['clearance']
+        if report is not None and not self.properties.is_property_set('framing'):
+            self.framing = report['framing']
         return context.window_manager.invoke_popup(self, width=_REPORT_WIDTH)
 
     def execute(self, context):
@@ -208,9 +271,24 @@ class LF_OT_camera_report(bpy.types.Operator):
                 if len(nearby) > 5:
                     layout.label(text='Showing the 5 closest cameras')
             layout.label(text='Checked distance: ' + format_distance(context.scene, report['clearance']))
+        layout.prop(self, 'framing')
+        if report is not None and report['framing']:
+            if report['framing_note']:
+                draw_paragraph(layout, 'Framing (last check): ' + report['framing_note'], width, scale)
+            else:
+                outside = report['outside']
+                layout.label(text=f'Reference outside frame (last check): {len(outside):,}')
+                for name, reason in outside[:5]:
+                    draw_camera_row(layout, name, ' · ' + reason)
+                if len(outside) > 5:
+                    layout.label(text=f'Showing 5 of {len(outside):,} cameras')
+        elif self.framing:
+            layout.label(text='Reference framing: not checked')
         row = layout.row()
         row.alignment = 'RIGHT'
-        row.operator('lichtfeld.check_camera_poses', text='Run again' if report is not None else 'Run check').clearance = self.clearance
+        check = row.operator('lichtfeld.check_camera_poses', text='Run again' if report is not None else 'Run check')
+        check.clearance = self.clearance
+        check.framing = self.framing
 
 
 def format_distance(scene, distance):
@@ -236,8 +314,9 @@ def clear():
 class LF_OT_check_poses(bpy.types.Operator):
     bl_idname = 'lichtfeld.check_camera_poses'
     clearance: FloatProperty(min=0.0, default=0.0, options={'HIDDEN', 'SKIP_SAVE'})
+    framing: BoolProperty(options={'HIDDEN', 'SKIP_SAVE'})
     bl_label = 'Check camera poses'
-    bl_description = 'Check for repeated evaluated poses and, when enabled, measure distance to mesh surfaces'
+    bl_description = 'Check evaluated camera poses, with optional surface distance and reference framing checks'
 
     @classmethod
     def poll(cls, context):
@@ -266,7 +345,7 @@ class LF_OT_check_poses(bpy.types.Operator):
         self.frame = self.scene.frame_current
         self.manager = context.window_manager
         self.workspace = context.workspace
-        self.work = analyze_steps(context, self.clearance)
+        self.work = analyze_steps(context, self.clearance, self.framing)
         self.timer = None
         if bpy.app.background:
             try:

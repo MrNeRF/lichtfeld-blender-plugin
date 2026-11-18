@@ -83,6 +83,23 @@ def render_busy(context):
     return bpy.app.is_job_running('RENDER') or context.window_manager.is_interface_locked
 
 
+def reference_bounds_steps(sources, graph):
+    """World bounds of the evaluated rig reference used for placement and checks."""
+    low, high = Vector((float('inf'),) * 3), Vector((float('-inf'),) * 3)
+    for obj in sources:
+        evaluated = obj.evaluated_get(graph)
+        world = evaluated.matrix_world
+        for corner in evaluated.bound_box:
+            point = world @ Vector(corner)
+            if not all(math.isfinite(value) for value in point):
+                raise ValueError('The rig reference has invalid bounds: ' + obj.name)
+            for axis in range(3):
+                low[axis] = min(low[axis], point[axis])
+                high[axis] = max(high[axis], point[axis])
+        yield
+    return low, high
+
+
 def remember_objects(collection, settings):
     for key, value in (('lichtfeld_placement_mesh', settings.rig_mesh),
                        ('lichtfeld_rig_curve', settings.rig_curve), ('lichtfeld_rig_target', settings.rig_target)):
