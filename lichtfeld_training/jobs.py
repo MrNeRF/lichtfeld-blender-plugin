@@ -12,10 +12,10 @@ import subprocess
 import uuid
 if __package__:
     from .bridge_core import atomic_json, read_json, read_job_json, read_dataset_json, verify_artifact, preview_sh_limit, SCHEMA
-    from .capture_settings import validate_view_count
+    from .capture_settings import TEST_IMAGE, validate_view_count
 else:
     from bridge_core import atomic_json, read_json, read_job_json, read_dataset_json, verify_artifact, preview_sh_limit, SCHEMA
-    from capture_settings import validate_view_count
+    from capture_settings import TEST_IMAGE, validate_view_count
 
 
 def verify_backend(path):
@@ -156,6 +156,28 @@ def read_job(path):
         if name in job and (not isinstance(job[name], str) or "\0" in job[name]):
             raise ValueError(f"Invalid training job field: {name}")
     return job
+
+
+def discard_superseded_test_image(image_path):
+    """Remove a completed, owned test job after its image has been replaced."""
+    image = Path(image_path)
+    root = image.parent
+    if image.name != TEST_IMAGE or root.is_symlink():
+        return
+    try:
+        job = read_job(root / "job.json")
+        state = read_json(root / "state.json", {})
+        if (job.get("purpose") == "test_render" and job["id"] == root.name
+                and Path(job.get("root", "")) == root
+                and state.get("job_id") == job["id"] and state.get("state") == "completed"):
+            managed = {TEST_IMAGE, "job.json", "state.json", "runtime.json", "heartbeat.json", "command.json",
+                       "controller.json", "controller.lock", "supervisor.lock", "supervisor.log", "render.log",
+                       "supervisor-console.log", "capture-render.json", "capture-progress.json"}
+            if all(entry.name in managed and entry.is_file() and not entry.is_symlink()
+                   for entry in root.iterdir()):
+                shutil.rmtree(root)
+    except (ValueError, OSError):
+        pass  # Retain files if their ownership or cleanup cannot be confirmed.
 
 
 def load_job(path):

@@ -163,6 +163,13 @@ with patch.object(ext.capture_preview,'open_steps',side_effect=ValueError('Frami
 assert not errors,errors
 assert s.test_render_image != previous_image
 assert ext.read_json(Path(s.test_render_image).parent/'state.json')['state']=='completed'
+deadline = time.monotonic() + 5
+previous_folder = Path(previous_image).parent
+while previous_folder.exists() and time.monotonic() < deadline:
+    ext.ui_runtime.tick()
+    time.sleep(.01)
+assert not previous_folder.exists(), list(previous_folder.iterdir()) if previous_folder.exists() else []
+
 # Cancellation during validation must not launch a renderer, and a genuine
 # source change must remain visible after the transient operator report fades.
 with bpy.context.temp_override(window=framing_window):
