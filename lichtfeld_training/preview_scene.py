@@ -363,7 +363,7 @@ def close_view(context):
 
 def discard_closed_view(scene, context):
     from .rig_edit import render_busy
-    if (render_busy(context) or scene.use_fake_user or scene.collection.children or
+    if (render_busy(context) or scene.users or scene.collection.children or
             any(window.scene == scene for window in context.window_manager.windows)):
         return
     clone = scene_result(scene)
