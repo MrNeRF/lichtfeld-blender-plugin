@@ -135,14 +135,15 @@ if not bpy.app.background:
 loaded = bpy.data.images.load(str(image))
 assert tuple(loaded.size) == (96, 64)
 bpy.data.images.remove(loaded)
-cancel_job = dict(config, id=uuid.uuid4().hex, root=str(output/'cancel'))
+cancel_id = uuid.uuid4().hex
+cancel_root = output / cancel_id
+cancel_job = dict(config, id=cancel_id, root=str(cancel_root))
 launch = Future()
 launch.set_result(ext.start_capture_test(cancel_job))
 stopped = ext.finish_capture_test(launch)
 assert stopped['state'] == 'stopped', stopped
-assert not (output/'cancel/test-render.png').exists()
+assert not cancel_root.exists()
 assert not Path(cancel_job['capture_staging_file']).exists()
-assert not (output/'cancel/supervisor.lock').exists()
 with bpy.context.temp_override(window=framing_window):
     assert bpy.ops.lichtfeld.close_capture_framing()=={'FINISHED'}
 assert not any(ext.capture_preview.is_preview(item) for item in bpy.data.scenes)

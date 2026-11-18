@@ -161,15 +161,20 @@ def read_job(path):
 def discard_superseded_test_image(image_path):
     """Remove a completed, owned test job after its image has been replaced."""
     image = Path(image_path)
-    root = image.parent
-    if image.name != TEST_IMAGE or root.is_symlink():
+    if image.name == TEST_IMAGE:
+        discard_test_job(image.parent, 'completed')
+
+
+def discard_test_job(root, terminal_state):
+    """Remove only an owned terminal test job with a known file inventory."""
+    if root.is_symlink():
         return
     try:
         job = read_job(root / "job.json")
         state = read_json(root / "state.json", {})
         if (job.get("purpose") == "test_render" and job["id"] == root.name
                 and Path(job.get("root", "")) == root
-                and state.get("job_id") == job["id"] and state.get("state") == "completed"):
+                and state.get("job_id") == job["id"] and state.get("state") == terminal_state):
             managed = {TEST_IMAGE, "job.json", "state.json", "runtime.json", "heartbeat.json", "command.json",
                        "controller.json", "controller.lock", "supervisor.lock", "supervisor.log", "render.log",
                        "supervisor-console.log", "capture-render.json", "capture-progress.json"}

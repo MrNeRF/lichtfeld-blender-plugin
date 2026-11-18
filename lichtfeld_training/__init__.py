@@ -1097,9 +1097,12 @@ def finish_capture_test(launch):
                 atomic_json(controller.root / 'command.json', controller.command(job_id, 'stop'))
                 next_stop = time.monotonic() + 5
             time.sleep(.2)
-        return read_json(controller.root / 'state.json', {})
+        state = read_json(controller.root / 'state.json', {})
     finally:
         controller.close()
+    if state.get('state') == 'stopped':
+        jobs.discard_test_job(controller.root, 'stopped')
+    return state
 
 
 def allowed(context, action):
