@@ -2044,11 +2044,7 @@ class LF_OT_color_view(bpy.types.Operator):
     def execute(self, context):
         scene = context.scene
         if preview_scene.source_scene(scene):
-            try:
-                preview_scene.close_view(context)
-            except ValueError as error:
-                self.report({"WARNING"}, str(error))
-                return {"CANCELLED"}
+            preview_scene.close_view(context)
             return {"FINISHED"}
         settings = scene.lichtfeld_training
         if not settings.result_object or settings.operation_busy:

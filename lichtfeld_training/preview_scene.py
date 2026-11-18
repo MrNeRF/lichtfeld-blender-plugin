@@ -354,14 +354,13 @@ def close_view(context):
     scene=context.scene
     source=source_scene(scene)
     if not source:raise ValueError('The source scene no longer exists')
-    settings = source.lichtfeld_training
-    if settings.operation_busy or settings.importing:
-        raise ValueError('Wait for the current preview update to finish')
     context.window.scene=source
     if context.area and context.area.type=='VIEW_3D':
         shading=context.area.spaces.active.shading
         shading.type,shading.use_compositor=_return_shading.pop((context.window.as_pointer(),context.area.as_pointer()),(scene.get('lichtfeld_return_shading','MATERIAL'),scene.get('lichtfeld_return_compositor','ALWAYS')))
-    discard_closed_view(scene, context)
+    settings = source.lichtfeld_training
+    if not (settings.operation_busy or settings.importing):
+        discard_closed_view(scene, context)
 
 
 def discard_closed_view(scene, context):
@@ -385,7 +384,6 @@ def discard_closed_view(scene, context):
         return
 
     world = scene.world
-    material = clone.material_slots[0].material if clone and clone.material_slots else None
     graphs = {effect.node_group for effect in scene.compositor_effects
               if effect.node_group and effect.node_group.get('lichtfeld_rgb_decode')}
     optics = camera.data if camera in owned else None
@@ -396,8 +394,6 @@ def discard_closed_view(scene, context):
         bpy.data.cameras.remove(optics)
     if world and world.get('lichtfeld_color_world') and not world.users:
         bpy.data.worlds.remove(world)
-    if material and material.get('lichtfeld_encoded_material') and not material.users:
-        bpy.data.materials.remove(material)
     for graph in graphs:
         if not graph.users:
             bpy.data.node_groups.remove(graph)

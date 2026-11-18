@@ -201,15 +201,12 @@ print('COLOR_VIEW_CONTROL_OWNERSHIP_PASS',flush=True)
 preview_name = bpy.context.scene.name
 s.lichtfeld_training.operation_busy = True
 try:
- try:
-  colors.close_view(bpy.context)
- except ValueError as error:
-  assert 'preview update' in str(error) and bpy.context.scene.name == preview_name
- else:
-  raise AssertionError('Closing removed the scene during its preview update')
+ colors.close_view(bpy.context)
+ assert bpy.context.scene == s and preview_name in bpy.data.scenes
 finally:
  s.lichtfeld_training.operation_busy = False
-preview = bpy.context.scene
+preview = bpy.data.scenes[preview_name]
+bpy.context.window.scene = preview
 s.background_set = preview
 colors.close_view(bpy.context);assert bpy.context.scene==s
 assert preview_name in bpy.data.scenes, 'Closing unlinked a preview used as the background scene'
