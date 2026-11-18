@@ -1032,32 +1032,42 @@ class LF_OT_live_rig(_RigOperation, bpy.types.Operator):
         yield from rig_edit.rollback_live(self)
 
 
-def launch_supervisor(job):
+def prepare_supervisor(job):
     root = Path(job["root"])
     root.mkdir(mode=0o700, parents=True, exist_ok=True)
+    if job.get('purpose') == 'test_render':
+        pass
+    elif job.get('capture_only'):
+        jobs.check_export_destination(job)
+    else:
+        environment = jobs.check_environment(job.get("backend", ""), str(root.parent))
+        if not environment.get("ok"):
+            raise ValueError(environment.get("message", "Could not verify LichtFeld Studio"))
+        job["backend_version"] = environment.get("backend_version")
+        job["backend_identity"] = environment.get("backend_identity")
+    if not job.get("resume") and not job.get("reuse_dataset"):
+        jobs.freeze_source(job)
+    atomic_json(root / "job.json", job)
+    if not job.get("capture_only"):
+        jobs.prepare_optimizer(job)
+    atomic_json(root / "job.json", job)
+
+
+def spawn_supervisor(job):
+    root = Path(job["root"])
+    with (root / "supervisor-console.log").open("wb") as log:
+        return subprocess.Popen([python_binary(), str(_ROOT / "supervisor.py"), str(root / "job.json")],
+                         stdout=log, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
+                         **process_options(detach=True))
+
+
+def launch_supervisor(job):
+    root = Path(job["root"])
     try:
-        if job.get('purpose') == 'test_render':
-            pass
-        elif job.get('capture_only'):
-            jobs.check_export_destination(job)
-        else:
-            environment = jobs.check_environment(job.get("backend", ""), str(root.parent))
-            if not environment.get("ok"):
-                raise ValueError(environment.get("message", "Could not verify LichtFeld Studio"))
-            job["backend_version"] = environment.get("backend_version")
-            job["backend_identity"] = environment.get("backend_identity")
-        if not job.get("resume") and not job.get("reuse_dataset"):
-            jobs.freeze_source(job)
-        atomic_json(root / "job.json", job)
-        if not job.get("capture_only"):
-            jobs.prepare_optimizer(job)
-        atomic_json(root / "job.json", job)
+        prepare_supervisor(job)
         if job.get("connection_directory") and job.get('purpose') != 'test_render':
             jobs.remember_job(job["connection_directory"], job)
-        with (root / "supervisor-console.log").open("wb") as log:
-            return subprocess.Popen([python_binary(), str(_ROOT / "supervisor.py"), str(root / "job.json")],
-                             stdout=log, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
-                             **process_options(detach=True))
+        return spawn_supervisor(job)
     except Exception as error:
         jobs.release_source(job)
         try:
@@ -1065,7 +1075,6 @@ def launch_supervisor(job):
         except OSError:
             pass
         raise
-
 
 def start_capture_test(job):
     """Worker-only launch; the UI polls the detached supervisor without waiting."""
@@ -1736,17 +1745,21 @@ class LF_OT_restart(bpy.types.Operator):
         s.operation_busy = True
         def work():
             job, _ = jobs.restart_data(directory, options, backend=backend, jobs_directory=jobs_directory, connection_directory=connection)
+            prepare_supervisor(job)
             return job
         def done(job):
-            def activate():
-                scene["lichtfeld_expected_job"] = job["id"]
-                s.job_directory = job["root"]
-                s.operation_busy = False
-                s.running = True
-                ui_runtime.reconnect(scene)
-                ui_runtime.submit(lambda: launch_supervisor(job),
-                                  failure=lambda error: ui_runtime.fail(scene, error))
-            ui_runtime.reset_for_new_training(scene, activate)
+            if not s.operation_busy:
+                return
+            # Start and attach in this callback. The cooperative scene cleanup
+            # cannot leave a running supervisor without a job bound to Blender.
+            spawn_supervisor(job)
+            ui_runtime.reset_for_new_training(scene)
+            scene["lichtfeld_expected_job"] = job["id"]
+            s.job_directory = job["root"]
+            s.running = True
+            if connection:
+                ui_runtime.submit(lambda: jobs.remember_job(connection, job),
+                                  failure=lambda error: ui_runtime.report_notice("WARNING", error))
         def failed(error):
             s.operation_busy = False
             s.dataset_summary = str(error)
