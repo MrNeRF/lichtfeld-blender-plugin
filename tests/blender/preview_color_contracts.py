@@ -198,6 +198,9 @@ with patch.object(ext.ui_runtime,'peek',return_value=current),patch.object(ext.u
   assert reply=={'CANCELLED'} and commands.empty()
  finally:s.lichtfeld_training.attached_session=''
 print('COLOR_VIEW_CONTROL_OWNERSHIP_PASS',flush=True)
+preview_name = bpy.context.scene.name
 colors.close_view(bpy.context);assert bpy.context.scene==s
+assert preview_name not in bpy.data.scenes
+assert s.lichtfeld_training.result_object is not None
 print('ISOLATED_COLOR_SCENE_NAVIGATION_PASS',flush=True)
 ext.ui_runtime.clear()

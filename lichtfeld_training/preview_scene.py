@@ -310,6 +310,7 @@ def open_steps(source, window, area):
         scene.render.film_transparent=False
         world=bpy.data.worlds.new('LichtFeld trainer black background')
         world.color=(0,0,0)
+        world['lichtfeld_color_world']=True
         scene.world=world
         yield
     yield from sync_steps(source)
@@ -357,3 +358,37 @@ def close_view(context):
     if context.area and context.area.type=='VIEW_3D':
         shading=context.area.spaces.active.shading
         shading.type,shading.use_compositor=_return_shading.pop((context.window.as_pointer(),context.area.as_pointer()),(scene.get('lichtfeld_return_shading','MATERIAL'),scene.get('lichtfeld_return_compositor','ALWAYS')))
+    discard_closed_view(scene, context)
+
+
+def discard_closed_view(scene, context):
+    from .rig_edit import render_busy
+    if (render_busy(context) or scene.use_fake_user or scene.collection.children or
+            any(window.scene == scene for window in context.window_manager.windows)):
+        return
+    clone = scene_result(scene)
+    camera = scene.camera
+    owned = {clone} if clone else set()
+    if camera and camera.get('lichtfeld_color_camera'):
+        owned.add(camera)
+    if (set(scene.objects) != owned or
+            any(tuple(obj.users_collection) != (scene.collection,) for obj in owned)):
+        return
+
+    world = scene.world
+    material = clone.material_slots[0].material if clone and clone.material_slots else None
+    graphs = {effect.node_group for effect in scene.compositor_effects
+              if effect.node_group and effect.node_group.get('lichtfeld_rgb_decode')}
+    optics = camera.data if camera in owned else None
+    for obj in owned:
+        bpy.data.objects.remove(obj, do_unlink=True)
+    bpy.data.scenes.remove(scene)
+    if optics and not optics.users:
+        bpy.data.cameras.remove(optics)
+    if world and world.get('lichtfeld_color_world') and not world.users:
+        bpy.data.worlds.remove(world)
+    if material and material.get('lichtfeld_encoded_material') and not material.users:
+        bpy.data.materials.remove(material)
+    for graph in graphs:
+        if not graph.users:
+            bpy.data.node_groups.remove(graph)
