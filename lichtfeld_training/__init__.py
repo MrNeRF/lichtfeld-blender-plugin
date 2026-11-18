@@ -693,16 +693,8 @@ class LF_OT_rig(_RigOperation, bpy.types.Operator):
         capture_sources = ([obj for obj in preflight.selection_objects(context) if preflight.is_surface(obj, helpers)]
                            if settings.scope == 'SELECTION' else None)
         recipe = rig_recipe(settings)
-        low, high = Vector((float("inf"),) * 3), Vector((float("-inf"),) * 3)
         depsgraph = context.evaluated_depsgraph_get()
-        for obj in sources:
-            evaluated = obj.evaluated_get(depsgraph)
-            for corner in evaluated.bound_box:
-                point = evaluated.matrix_world @ Vector(corner)
-                for axis in range(3):
-                    low[axis] = min(low[axis], point[axis])
-                    high[axis] = max(high[axis], point[axis])
-            yield
+        low, high = yield from rig_edit.reference_bounds_steps(sources, depsgraph)
         settings = context.scene.lichtfeld_training
         center = (low + high) / 2
         uses_aim = rig_edit.uses_aim(settings)

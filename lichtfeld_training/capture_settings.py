@@ -160,6 +160,11 @@ def copy_camera(camera, graph, overrides):
         raise
 
 
+def camera_projection(camera, graph, output):
+    return camera.calc_matrix_camera(graph, x=output['width'], y=output['height'],
+                                     scale_x=output['pixel_aspect_x'], scale_y=output['pixel_aspect_y'])
+
+
 def fitting_factor(scene, settings, graph):
     """Smallest actual half-FOV, including portrait format and optical overrides."""
     import bpy
@@ -170,8 +175,7 @@ def fitting_factor(scene, settings, graph):
         data.lens = settings.rig_lens
         apply_camera(data, camera_for(settings))
         camera = bpy.data.objects.new('LichtFeld framing calculation', data)
-        p = camera.calc_matrix_camera(graph, x=value['width'], y=value['height'],
-                                     scale_x=value['pixel_aspect_x'], scale_y=value['pixel_aspect_y'])
+        p = camera_projection(camera, graph, value)
         limits = ((1 - abs(p[0][2])) / p[0][0], (1 - abs(p[1][2])) / p[1][1])
         if min(limits) <= 0:
             raise ValueError('Automatic framing needs the optical axis inside the capture frame; reduce camera shift')

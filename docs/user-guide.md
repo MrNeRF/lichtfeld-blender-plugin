@@ -339,6 +339,13 @@ instances, non-mesh objects or render-only geometry, and does not determine
 whether a camera is inside a mesh, what it can see or how well it will train.
 If the geometry exceeds the check's budget, narrow the capture scope and rerun.
 
+Enable **Check rig reference framing** to flag cameras where the applied rig
+reference bounds lie completely beyond one image edge or clipping plane. The
+check uses the current output aspect ratio and evaluated camera pose, and
+honours capture clipping overrides. It is a conservative check of bounds.
+Use **Check framing** to inspect capture lens or shift overrides and to review
+partially visible, occluded or otherwise questionable views.
+
 ## Images, renderer and devices
 
 Use **Render settings**, **Output settings**, and **Render devices** to open

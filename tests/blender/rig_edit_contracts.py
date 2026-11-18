@@ -832,6 +832,61 @@ bpy.data.meshes.remove(mesh)
 bpy.data.collections.remove(surfaces)
 print('CAMERA_CLEARANCE_WORLD_SCALE_VISIBILITY_THRESHOLD_BUDGET_PASS', flush=True)
 
+# A partly visible reference must not be reported as entirely out of frame.
+previous_rig = s.camera_collection
+framing_rig = bpy.data.collections.new('Reference framing fixture')
+bpy.context.scene.collection.children.link(framing_rig)
+subject_mesh = bpy.data.meshes.new('Reference plane')
+subject_mesh.from_pydata([(-1, -1, 0), (1, -1, 0), (1, 1, 0), (-1, 1, 0)], [], [(0, 1, 2, 3)])
+subject_object = bpy.data.objects.new('Reference plane', subject_mesh)
+bpy.context.scene.collection.objects.link(subject_object)
+reference = framing_rig.lichtfeld_rig_reference
+reference.mode = 'OBJECTS'
+reference.objects.add().object = subject_object
+optics = bpy.data.cameras.new('Reference framing optics')
+optics.clip_start, optics.clip_end = .1, 20
+for name, position in {
+    'Framing centred': (0, 0, 5),
+    'Framing partial': (2, 0, 5),
+    'Framing outside': (10, 0, 5),
+    'Framing before near': (0, 0, .05),
+    'Framing beyond far': (0, 0, 30),
+}.items():
+    camera = bpy.data.objects.new(name, optics)
+    framing_rig.objects.link(camera)
+    camera.location = position
+s.camera_collection = framing_rig
+bpy.context.view_layer.update()
+with tempfile.TemporaryDirectory() as directory:
+    bpy.ops.wm.save_as_mainfile(filepath=str(Path(directory) / 'reference-framing.blend'))
+    assert bpy.ops.lichtfeld.check_camera_poses(framing=True) == {'FINISHED'}
+    report = ext.rig_analysis.last_result(bpy.context)
+    assert not report['framing_note']
+    assert dict(report['outside']) == {
+        'Framing outside': 'Outside image',
+        'Framing before near': 'Before near clip',
+        'Framing beyond far': 'Beyond far clip',
+    }
+    assert not bpy.data.is_dirty
+    s.override_clipping = True
+    s.capture_clip_start, s.capture_clip_end = .01, 40
+    assert bpy.ops.lichtfeld.check_camera_poses(framing=True) == {'FINISHED'}
+    assert dict(ext.rig_analysis.last_result(bpy.context)['outside']) == {'Framing outside': 'Outside image'}
+    s.override_clipping = False
+    s.override_shift = True
+    assert bpy.ops.lichtfeld.check_camera_poses(framing=True) == {'FINISHED'}
+    report = ext.rig_analysis.last_result(bpy.context)
+    assert not report['outside'] and 'Use Check framing' in report['framing_note']
+    s.override_shift = False
+s.camera_collection = previous_rig
+for camera in list(framing_rig.objects):
+    bpy.data.objects.remove(camera, do_unlink=True)
+bpy.data.cameras.remove(optics)
+bpy.data.collections.remove(framing_rig)
+bpy.data.objects.remove(subject_object, do_unlink=True)
+bpy.data.meshes.remove(subject_mesh)
+print('RIG_REFERENCE_FRAMING_OUTSIDE_PARTIAL_CLIPPING_READ_ONLY_PASS', flush=True)
+
 # Existing Select camera must not choose an arbitrary linked namesake.
 with tempfile.TemporaryDirectory() as directory:
     path=str(Path(directory)/'linked-camera.blend')
