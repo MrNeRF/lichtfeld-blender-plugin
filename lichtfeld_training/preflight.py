@@ -62,23 +62,21 @@ def camera_objects(scene, settings):
  if any(row.collection is None for row in rows):
   raise ValueError('Choose a collection for each capture entry, or remove the empty entries.')
  collections=camera_collections(settings)
- if rows:
-  members=set(scene.collection.children_recursive)
-  members.add(scene.collection)
-  if any(collection not in members for collection in collections):
-   raise ValueError('Choose capture collections linked to this scene.')
+ members=set(scene.collection.children_recursive)
+ members.add(scene.collection)
+ if any(collection not in members for collection in collections):
+  raise ValueError('Choose capture collections linked to this scene.')
  for collection in collections:
   for obj in object_steps(collection.all_objects):
    if obj is not None and obj.type=='CAMERA':
     cameras.add(obj)
    yield
- if rows and len({camera.name for camera in cameras}) != len(cameras):
+ if len({camera.name for camera in cameras}) != len(cameras):
   raise ValueError('Capture cameras must have unique names across the included collections.')
- if rows:
-  for camera in cameras:
-   if bpy.data.objects.get(camera.name) != camera:
-    raise ValueError(f'Camera name is ambiguous in this file: {camera.name}. Rename the camera or make the linked camera local with a unique name.')
-   yield
+ for camera in cameras:
+  if bpy.data.objects.get(camera.name) != camera:
+   raise ValueError(f'Camera name is ambiguous in this file: {camera.name}. Rename the camera or make the linked camera local with a unique name.')
+  yield
  return sorted(cameras,key=lambda obj:(obj.name,obj.library.filepath if obj.library else ''))
 
 
