@@ -163,6 +163,8 @@ def strategy_changed(settings, context):
     profile = training_options.PROFILES[settings.strategy]
     for name in training_options.FIELDS:
         setattr(settings, name, profile[name])
+    for name, field in training_options.SCHEDULE_FIELDS.items():
+        setattr(settings, name, profile[field] / profile["iterations"])
     custom_changed(settings, context)
 
 
