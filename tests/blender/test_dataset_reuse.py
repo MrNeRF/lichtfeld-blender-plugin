@@ -29,7 +29,7 @@ def fixture(directory, views=4):
 
 class DatasetReuse(unittest.TestCase):
     def test_finalization_retries_only_complete_captures_and_honors_stop(self):
-        for case in ('recover', 'partial', 'cancel', 'retry_failed', 'missing_capture', 'first_ok', 'cancel_recovery'):
+        for case in ('recover', 'partial', 'cancel', 'retry_failed', 'missing_capture', 'first_ok', 'cancel_recovery', 'depth_coverage', 'corrupt_report'):
             with self.subTest(case=case), tempfile.TemporaryDirectory() as directory:
                 root = fixture(directory)
                 source = root/'source.blend'
@@ -52,6 +52,10 @@ class DatasetReuse(unittest.TestCase):
                     child.poll.return_value = child.returncode
                     child.wait.return_value = child.returncode
                     launches.append((arguments, child))
+                    if case == 'corrupt_report' and not recovery:
+                        (root/'capture-render.json').write_text('{invalid', encoding='utf-8')
+                    if case == 'depth_coverage':
+                        atomic_json(root/'capture-render.json', {'error': 'Insufficient depth correspondences', 'retry_finalization': False})
                     if case == 'cancel' or case == 'cancel_recovery' and recovery:
                         self.assertTrue(owner.acquire())
                         atomic_json(root/'command.json', owner.command('original', 'stop'))
@@ -64,9 +68,11 @@ class DatasetReuse(unittest.TestCase):
                     with patch.object(supervisor.subprocess, 'Popen', side_effect=launch), patch.object(supervisor.time, 'sleep'):
                         supervisor.supervise(root/'job.json')
                     state = jobs.read_json(root/'state.json')
-                    expected = 'completed' if case in {'recover', 'first_ok'} else 'stopped' if case in {'cancel', 'cancel_recovery'} else 'failed'
+                    expected = 'completed' if case in {'recover', 'first_ok', 'corrupt_report'} else 'stopped' if case in {'cancel', 'cancel_recovery'} else 'failed'
                     self.assertEqual(state['state'], expected, state)
-                    self.assertEqual(len(launches), 2 if case in {'recover', 'retry_failed', 'cancel_recovery'} else 1)
+                    if case == 'depth_coverage':
+                        self.assertEqual(state['error'], 'Insufficient depth correspondences')
+                    self.assertEqual(len(launches), 2 if case in {'recover', 'retry_failed', 'cancel_recovery', 'corrupt_report'} else 1)
                     if len(launches) == 2:
                         capture = Path(launches[1][0][launches[1][0].index('--python-exit-code')-1])
                         self.assertTrue(capture.samefile(root/'capture.blend'))

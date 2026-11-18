@@ -181,7 +181,12 @@ def supervise(job_path):
                             break
                         progress = read_json(root / "capture-progress.json", {})
                         complete = bool(job.get('cameras')) and progress.get('done') == len(job['cameras'])
-                        report = read_json(root / 'capture-render.json', {})
+                        try:
+                            report = read_json(root / 'capture-render.json', {})
+                        except ValueError:
+                            report = {}
+                        if not isinstance(report, dict):
+                            report = {}
                         if (not single_render and not recovering and complete and
                                 report.get('retry_finalization', True) and (root / 'capture.blend').is_file()):
                             continue  # The worker owns journal/image validation, not the supervisor.
