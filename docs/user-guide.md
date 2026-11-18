@@ -349,6 +349,17 @@ occluded views. The automatic check also skips references with active Geometry
 Nodes modifiers because evaluated bounds can omit instances. Cameras that intentionally face away from
 the reference can also be reported.
 
+Enable **Estimate surface coverage** to check 96 deterministic samples spread
+by surface area across visible, evaluated meshes in the capture scope. A view
+counts when the sample is within its image and clipping range and an opaque
+mesh surface does not block the ray. The report separates unseen samples from
+samples with limited angles and those seen from a direction at least 15° away
+from the first view of the same face side. Views less than 5° above the surface
+are ignored. It also names up to three objects with the most
+unseen samples. Small details may receive few or no samples. The diagnostic
+has the same mesh and projection limits as the distance and framing checks.
+It does not evaluate transparency, materials or reconstruction quality.
+
 ## Images, renderer and devices
 
 Use **Render settings**, **Output settings**, and **Render devices** to open
