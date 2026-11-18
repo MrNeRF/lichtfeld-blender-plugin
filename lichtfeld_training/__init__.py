@@ -2657,14 +2657,10 @@ def poll_jobs():
         if context.scene and not preview_scene.source_scene(context.scene):
             preflight.tick(context, preferences())
     else:
-        for window in context.window_manager.windows:
-            if (not preview_scene.source_scene(window.scene)
-                    and capture_setup_visible(context, screen=window.screen)):
-                with context.temp_override(window=window):
-                    preflight.tick(context, preferences())
-                break
-        else:
-            preflight.suspend()
+        windows = [window for window in context.window_manager.windows
+                   if not preview_scene.source_scene(window.scene)
+                   and capture_setup_visible(context, screen=window.screen)]
+        preflight.tick_windows(context, preferences(), windows)
     return ui_runtime.tick()
 
 
