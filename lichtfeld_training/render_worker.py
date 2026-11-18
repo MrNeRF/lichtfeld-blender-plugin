@@ -351,7 +351,10 @@ def render_dataset(job_path, reuse_images=False):
                 finally:
                     bpy.data.images.remove(mask)
             frames.append(frame)
-            atomic_json(root / "capture-frames.json", {"job_id": job["id"], "frames": frames})
+            if not reuse_images and index + 1 == len(cameras):
+                # Recovery only consumes complete calibration. Publish it before
+                # the final progress marker makes this job eligible for recovery.
+                atomic_json(root / "capture-frames.json", {"job_id": job["id"], "frames": frames})
             atomic_json(root / "capture-progress.json", {"done": index + 1, "total": len(cameras)})
         loop_finished = True
     finally:
