@@ -441,7 +441,7 @@ def draw(layout, context, source, *, width=None):
     from .rig_edit import render_busy
     box.enabled = not (render_busy(context) or s.operation_busy or s.running or s.job_directory)
     box.prop(context.window_manager.lichtfeld_panels, 'framing_camera', text='Camera number')
-    box.label(text=f"{context.scene.get('capture_camera_count', 0)} cameras, sorted by name")
+    box.label(text=f"{context.scene.get('capture_camera_count', 0)} cameras, in name order")
     draw_capture_format(box, source, s, wrapped)
     draw_capture_overrides(box, s, wrapped)
     box.operator('lichtfeld.capture_framing', text='Apply preview settings')

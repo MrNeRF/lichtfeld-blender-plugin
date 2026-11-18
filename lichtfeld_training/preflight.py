@@ -3,6 +3,7 @@
 """Bounded Blender-side readiness; filesystem/process checks stay on workers."""
 import time
 import json
+import re
 from pathlib import Path
 import bpy
 from . import jobs,ui_runtime,training_options,capture_settings,capture_preview,scene_render
@@ -77,7 +78,10 @@ def camera_objects(scene, settings):
   if bpy.data.objects.get(camera.name) != camera:
    raise ValueError(f'Camera name is ambiguous in this file: {camera.name}. Rename the camera or make the linked camera local with a unique name.')
   yield
- return sorted(cameras,key=lambda obj:(obj.name,obj.library.filepath if obj.library else ''))
+ def sort_key(obj):
+  name = tuple(int(part) if index % 2 else part for index, part in enumerate(re.split(r'([0-9]+)', obj.name)))
+  return name, obj.name, obj.library.filepath if obj.library else ''
+ return sorted(cameras,key=sort_key)
 
 
 def capture_helpers(settings):
