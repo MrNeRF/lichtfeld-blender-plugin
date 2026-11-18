@@ -2661,7 +2661,8 @@ def poll_jobs():
             preflight.tick(context, preferences())
     else:
         windows = [window for window in context.window_manager.windows
-                   if not preview_scene.source_scene(window.scene)
+                   if not capture_preview.is_preview(window.scene)
+                   and not preview_scene.is_preview(window.scene)
                    and capture_setup_visible(context, screen=window.screen)]
         preflight.tick_windows(context, preferences(), windows)
     return ui_runtime.tick()
