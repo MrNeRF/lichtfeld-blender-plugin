@@ -565,6 +565,52 @@ class LF_OT_tight_framing(bpy.types.Operator):
         return {"FINISHED"}
 
 
+class LF_OT_panorama_density(bpy.types.Operator):
+    bl_idname = "lichtfeld.panorama_density"
+    bl_label = "Suggest view count…"
+    bl_description = "Choose the maximum azimuth step between camera axes. This changes the rig settings only"
+    bl_options = {"UNDO", "INTERNAL"}
+
+    maximum_step: FloatProperty(name="Maximum azimuth step", subtype='ANGLE',
+        default=math.radians(30), min=math.radians(.1), max=math.pi,
+        description="Maximum spacing between consecutive camera axes around a row")
+
+    @classmethod
+    def poll(cls, context):
+        settings = context.scene.lichtfeld_training
+        return (not settings.running and not settings.operation_busy and not rig_edit.live_root(settings)
+                and settings.rig_mode == 'PATH' and settings.rig_orientation == 'PANORAMA'
+                and settings.rig_path_sampling == 'COUNT' and settings.rig_station_shape in {'BAND', 'GRID'})
+
+    def invoke(self, context, event):
+        return context.window_manager.invoke_props_dialog(self, width=300)
+
+    def draw(self, context):
+        self.layout.prop(self, 'maximum_step')
+        settings = context.scene.lichtfeld_training
+        count, total = self.proposal(settings)
+        label = "views per row" if settings.rig_station_shape == 'GRID' else "views per station"
+        self.layout.label(text=f"{count:,} {label} · {total:,} cameras")
+        if total > capture_settings.MAX_VIEWS:
+            self.layout.label(text="Increase step or reduce stations or rows", icon='ERROR')
+
+    def proposal(self, settings):
+        count = rig_geometry.panorama_views_for_step(settings.rig_station_sweep, self.maximum_step)
+        return count, settings.views * rig_geometry.station_view_count(
+            count, settings.rig_station_shape, settings.rig_station_rows)
+
+    def execute(self, context):
+        settings = context.scene.lichtfeld_training
+        count, total = self.proposal(settings)
+        try:
+            capture_settings.validate_view_count(total)
+        except ValueError as error:
+            self.report({'ERROR'}, str(error))
+            return {'CANCELLED'}
+        settings.rig_station_views = count
+        return {'FINISHED'}
+
+
 class _RigOperation:
     """One cooperative, render-safe transaction for managed-rig edits."""
     def execute(self, context):
@@ -2272,6 +2318,8 @@ def draw_capture_cameras(box, context, settings, ready, rig_changed, wrapped):
             station_views = rig_geometry.station_view_count(settings.rig_station_views, settings.rig_station_shape, settings.rig_station_rows)
             if settings.rig_path_sampling == 'COUNT':
                 box.label(text=f'{settings.views:,} stations × {station_views:,} = {settings.views*station_views:,} cameras')
+                if settings.rig_station_shape in {'BAND', 'GRID'}:
+                    box.operator('lichtfeld.panorama_density')
             else:
                 box.label(text='Station total updates on Apply')
         if settings.rig_orientation == 'TANGENT' or settings.rig_orientation == 'PANORAMA' and settings.rig_station_frame == 'PATH':
@@ -2609,7 +2657,7 @@ def loaded(_):
         ui_runtime.submit(lambda name=name: jobs.remembered_job(directory, source, name), done)
 
 
-_CLASSES = (LichtFeldPanelState, LichtFeldPreferences, LichtFeldSourceRef, LichtFeldCaptureCollection, LichtFeldRigReference, LichtFeldSettings, LF_OT_notice, LF_OT_verify, LF_OT_setup, LF_OT_tight_framing, LF_OT_capture_collection, LF_OT_rig, LF_OT_live_rig, rig_edit.LF_GGT_live_rig,
+_CLASSES = (LichtFeldPanelState, LichtFeldPreferences, LichtFeldSourceRef, LichtFeldCaptureCollection, LichtFeldRigReference, LichtFeldSettings, LF_OT_notice, LF_OT_verify, LF_OT_setup, LF_OT_tight_framing, LF_OT_panorama_density, LF_OT_capture_collection, LF_OT_rig, LF_OT_live_rig, rig_edit.LF_GGT_live_rig,
             LF_OT_start, LF_OT_export_dataset, LF_OT_pick_sources, LF_OT_select_aim, LF_OT_inspect_camera, LF_OT_read_rig, LF_OT_command, LF_OT_import, LF_OT_resume, LF_OT_dataset, LF_OT_new_capture, LF_OT_inspect_dataset, LF_OT_restart, LF_OT_folder, LF_OT_reconnect, LF_OT_load_job, LF_OT_compare,
             LF_OT_setup_view, LF_OT_scan_sessions, LF_OT_attach_session, LF_OT_detach_session, LF_OT_previous_job, LF_OT_color_look, LF_OT_color_command, LF_OT_model_view, LF_OT_color_view, LF_OT_capture_lighting,
             *rig_path.CLASSES, *rig_analysis.CLASSES, *capture_preview.CLASSES, *scene_render.CLASSES, *portal_ui.CLASSES)

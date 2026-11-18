@@ -778,3 +778,23 @@ else:raise AssertionError('Grid rows bypassed the expanded capture count')
 assert counts==(len(bpy.data.objects),len(bpy.data.cameras),len(bpy.data.collections))
 assert s.camera_collection['lichtfeld_rig_recipe']==recipe
 print('STATION_ORDERED_FULL_TURN_THREE_ROWS_INCLINED_FRAMES_COUNT_GUARD_PASS',flush=True)
+
+# The density proposal edits only the pending count, using the actual expanded
+# limit for the current stations and rows. Apply owns camera creation.
+try:
+    bpy.ops.lichtfeld.panorama_density(maximum_step=math.radians(20))
+except RuntimeError as error:
+    assert '10,000' in str(error)
+else:
+    raise AssertionError('Accepted a density proposal above the capture limit')
+assert s.rig_station_views == 4
+s.views = 4
+before = tuple(generated())
+assert bpy.ops.lichtfeld.panorama_density(maximum_step=math.radians(30)) == {'FINISHED'}
+assert s.rig_station_views == 12
+assert tuple(generated()) == before and s.camera_collection['lichtfeld_rig_recipe'] == recipe
+assert bpy.ops.lichtfeld.create_rig() == {'FINISHED'}
+assert len(generated()) == 4 * 3 * 12
+s.rig_path_sampling = 'SPACING'
+assert not bpy.ops.lichtfeld.panorama_density.poll()
+print('PANORAMA_DENSITY_PROPOSES_COUNT_AND_PRESERVES_CAMERAS_UNTIL_APPLY_PASS', flush=True)
