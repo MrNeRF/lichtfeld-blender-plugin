@@ -105,7 +105,7 @@ def draw(layout, context, settings, status, reader_error, wrapped, color_view=Fa
     if external:
         wrapped(layout, "Read-only preview. Disconnecting or closing Blender leaves this trainer running.")
         if settings.previous_job:
-            wrapped(layout, "After disconnecting, choose Return to previous job to resume your earlier job view.")
+            wrapped(layout, "After disconnecting, choose Back to previous job to resume your earlier job view.")
         if not color_view:
             layout.operator("lichtfeld.detach_session", text="Disconnect preview", icon="UNLINKED")
     elif not settings.running and not color_view:
