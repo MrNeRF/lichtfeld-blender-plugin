@@ -199,6 +199,16 @@ with patch.object(ext.ui_runtime,'peek',return_value=current),patch.object(ext.u
  finally:s.lichtfeld_training.attached_session=''
 print('COLOR_VIEW_CONTROL_OWNERSHIP_PASS',flush=True)
 preview_name = bpy.context.scene.name
+s.lichtfeld_training.operation_busy = True
+try:
+ try:
+  colors.close_view(bpy.context)
+ except ValueError as error:
+  assert 'preview update' in str(error) and bpy.context.scene.name == preview_name
+ else:
+  raise AssertionError('Closing removed the scene during its preview update')
+finally:
+ s.lichtfeld_training.operation_busy = False
 colors.close_view(bpy.context);assert bpy.context.scene==s
 assert preview_name not in bpy.data.scenes
 assert s.lichtfeld_training.result_object is not None

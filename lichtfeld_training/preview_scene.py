@@ -354,6 +354,9 @@ def close_view(context):
     scene=context.scene
     source=source_scene(scene)
     if not source:raise ValueError('The source scene no longer exists')
+    settings = source.lichtfeld_training
+    if settings.operation_busy or settings.importing:
+        raise ValueError('Wait for the current preview update to finish')
     context.window.scene=source
     if context.area and context.area.type=='VIEW_3D':
         shading=context.area.spaces.active.shading
@@ -367,6 +370,8 @@ def discard_closed_view(scene, context):
             any(window.scene == scene for window in context.window_manager.windows)):
         return
     clone = scene_result(scene)
+    if clone and not clone.get(RESULT):
+        return
     camera = scene.camera
     owned = {clone} if clone else set()
     if camera and camera.get('lichtfeld_color_camera'):
