@@ -276,3 +276,90 @@ bpy.context.view_layer.update()
 assert ext.rig_edit.live_root(s) is None and s.rig_position_variation==5 and s.rig_variation_seed==74
 assert all(max(abs(a-b) for x,y in zip(o.matrix_world,m) for a,b in zip(x,y))<1e-5 for o,m in zip(generated(),before))
 print('SEEDED_VARIATION_LIVE_ENTRY_CANCEL_PASS',flush=True)
+
+# Native rotation is bounded, reproducible and independent of position sampling.
+import math
+for mode in ('SPHERE','HEMISPHERE','RINGS'):
+    s.rig_mode=mode;s.rig_auto_fit=False;s.rig_radius=4;s.rig_rotation_variation=0
+    assert bpy.ops.lichtfeld.create_rig()=={'FINISHED'}
+    bpy.context.view_layer.update()
+    positions=[tuple(o.location) for o in generated()]
+    identities=[o.as_pointer() for o in generated()]
+    s.rig_rotation_variation=math.radians(3)
+    assert bpy.ops.lichtfeld.create_rig()=={'FINISHED'}
+    bpy.context.view_layer.update()
+    assert [tuple(o.location) for o in generated()]==positions
+    assert [o.as_pointer() for o in generated()]==identities
+    assert len([o for o in s.camera_collection.objects if o.type=='EMPTY'])==1
+    for camera in generated():
+        rotation=camera.constraints.get(ext.rig_edit.ROTATION)
+        assert rotation.target==s.rig_aim
+        actual=camera.matrix_world.to_quaternion()
+        rotation.mute=True;bpy.context.view_layer.update()
+        base=camera.matrix_world.to_quaternion()
+        rotation.mute=False;bpy.context.view_layer.update()
+        angle=base.rotation_difference(actual).angle
+        assert 0 < min(angle,2*math.pi-angle) <= s.rig_rotation_variation+1e-5
+        ext.capture_settings.camera_pose(camera,bpy.context.evaluated_depsgraph_get())
+    assert bpy.ops.lichtfeld.live_rig()=={'FINISHED'}
+    s.live_radius=6;s.live_phase=1.1;s.live_aim=(.4,-.3,.2)
+    bpy.context.view_layer.update()
+    live=[o.matrix_world.copy() for o in generated()]
+    assert bpy.ops.lichtfeld.live_rig()=={'FINISHED'}
+    bpy.context.view_layer.update()
+    assert all(max(abs(a-b) for x,y in zip(o.matrix_world,m) for a,b in zip(x,y))<1e-4 for o,m in zip(generated(),live))
+    assert bpy.ops.lichtfeld.create_rig()=={'FINISHED'}
+    bpy.context.view_layer.update()
+    assert all(max(abs(a-b) for x,y in zip(o.matrix_world,m) for a,b in zip(x,y))<1e-4 for o,m in zip(generated(),live)),mode
+    s.rig_rotation_variation=0
+    assert bpy.ops.lichtfeld.read_rig()=={'FINISHED'}
+    assert abs(s.rig_rotation_variation-math.radians(3))<1e-6
+print('ROTATION_BOUND_NATIVE_TRACK_LIVE_FINISH_REAPPLY_PASS',flush=True)
+
+# Updating the existing owner is still cancellable before its commit boundary.
+s.views=4;s.rig_rings=1
+for applied,wanted in ((0,.04),(.04,0),(.04,.07)):
+    s.rig_rotation_variation=applied
+    assert bpy.ops.lichtfeld.create_rig()=={'FINISHED'}
+    bpy.context.view_layer.update()
+    baseline=[(o,o.data,o.matrix_world.copy(),[c.name for c in o.constraints]) for o in generated()]
+    s.rig_rotation_variation=wanted
+    for cut in range(300):
+        owner=SimpleNamespace(collection=None,rig_backup=[],committed=False,report=lambda *args:None)
+        work=ext.LF_OT_rig.generate(owner,bpy.context)
+        try:
+            for _ in range(cut):next(work)
+        except StopIteration:break
+        if owner.committed:
+            for _ in work:pass
+            break
+        work.close()
+        for _ in ext.LF_OT_rig.cleanup(owner):pass
+        bpy.context.view_layer.update()
+        for camera,data,matrix,order in baseline:
+            assert camera.data==data and [c.name for c in camera.constraints]==order
+            assert max(abs(a-b) for x,y in zip(camera.matrix_world,matrix) for a,b in zip(x,y))<1e-5,(applied,wanted,cut)
+    else:raise AssertionError('Rotation rig never committed')
+s.rig_rotation_variation=0
+assert bpy.ops.lichtfeld.create_rig()=={'FINISHED'}
+assert all(o.constraints.get(ext.rig_edit.ROTATION) is None for o in generated())
+assert 'rig_rotation_variation' not in ext.rig_edit.decode_recipe(ext.rig_recipe(s))
+print('ROTATION_CANCEL_ALL_PRECOMMIT_CUTS_ZERO_REMOVAL_PASS',flush=True)
+# The canonical auto-fit reserves angular margin, including portrait and long lenses.
+s.rig_auto_fit=True;s.rig_position_variation=0;s.rig_lens=50;s.rig_rotation_variation=.04
+scene=bpy.context.scene
+scene.render.resolution_x=600;scene.render.resolution_y=1200
+assert bpy.ops.lichtfeld.create_rig()=={'FINISHED'}
+bpy.context.view_layer.update()
+from bpy_extras.object_utils import world_to_camera_view
+for camera in generated():
+    for corner in source.bound_box:
+        p=world_to_camera_view(scene,camera,source.matrix_world @ Vector(corner))
+        assert 0 <= p.x <= 1 and 0 <= p.y <= 1 and p.z>0,(p,camera.name)
+s.rig_lens=500;s.rig_rotation_variation=.2
+try:
+    bpy.ops.lichtfeld.create_rig()
+except RuntimeError as error:
+    assert 'half field of view' in str(error)
+else:raise AssertionError('Accepted rotation outside the optical field of view')
+print('ROTATION_AUTOFIT_PORTRAIT_MARGIN_LONG_LENS_FAILURE_PASS',flush=True)

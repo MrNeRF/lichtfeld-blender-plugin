@@ -6,26 +6,32 @@ import math
 import unittest
 import numpy as np
 sys.path.insert(0,str(Path(__file__).resolve().parents[2]/'lichtfeld_training'))
-from rig_geometry import directions, sample_path, guide_path, position_offset
+from rig_geometry import directions, sample_path, guide_path, seeded_offset
 from geometry_maps import convert
 
 
 class GeometryTests(unittest.TestCase):
     def test_position_variation_is_bounded_stable_and_independent(self):
+        self.assertTrue(np.allclose(seeded_offset(3,42,.5),
+                         (0.4057713892178399, -0.20126827061603134, -0.004931187225363089),
+                         rtol=0, atol=1e-15))
+        angular = [seeded_offset(i,42,.05,stream=1) for i in range(100)]
+        self.assertTrue(all(math.dist((0,0,0),p) <= .05 for p in angular))
+        self.assertNotEqual(angular, [seeded_offset(i,42,.05) for i in range(100)])
         import random
         before = random.getstate()
-        pattern = [position_offset(i, 42, .5) for i in range(100)]
+        pattern = [seeded_offset(i, 42, .5) for i in range(100)]
         self.assertEqual(before, random.getstate())
-        self.assertEqual(pattern, [position_offset(i, 42, .5) for i in range(100)])
+        self.assertEqual(pattern, [seeded_offset(i, 42, .5) for i in range(100)])
         self.assertTrue(all(math.dist((0,0,0),p) <= .5 for p in pattern))
-        self.assertNotEqual(pattern, [position_offset(i, 43, .5) for i in range(100)])
+        self.assertNotEqual(pattern, [seeded_offset(i, 43, .5) for i in range(100)])
         for i,p in enumerate(pattern):
-            self.assertEqual(position_offset(i,42,0), (0,0,0))
-            self.assertTrue(np.allclose(position_offset(i,42,1), np.array(p)*2))
-            self.assertTrue(np.allclose(position_offset(i,42,.5,math.pi/2), (-p[1],p[0],p[2])))
+            self.assertEqual(seeded_offset(i,42,0), (0,0,0))
+            self.assertTrue(np.allclose(seeded_offset(i,42,1), np.array(p)*2))
+            self.assertTrue(np.allclose(seeded_offset(i,42,.5,math.pi/2), (-p[1],p[0],p[2])))
         for amplitude in (-1,float('nan'),float('inf')):
             with self.subTest(amplitude=amplitude),self.assertRaises(ValueError):
-                position_offset(0,42,amplitude)
+                seeded_offset(0,42,amplitude)
 
     def test_unique_every_count_including_old_overlap_counts(self):
         for mode in ('SPHERE','HEMISPHERE','RINGS'):

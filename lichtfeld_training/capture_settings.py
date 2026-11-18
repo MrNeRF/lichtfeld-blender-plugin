@@ -170,7 +170,10 @@ def fitting_factor(scene, settings, graph):
         limits = ((1 - abs(p[0][2])) / p[0][0], (1 - abs(p[1][2])) / p[1][1])
         if min(limits) <= 0:
             raise ValueError('Automatic framing needs the optical axis inside the capture frame; reduce camera shift')
-        return 1.05 / math.sin(math.atan(min(limits)))
+        half_angle = math.atan(min(limits)) - settings.rig_rotation_variation
+        if half_angle <= 0:
+            raise ValueError('Rotation jitter exceeds the capture half field of view; reduce jitter or use a wider lens')
+        return 1.05 / math.sin(half_angle)
     finally:
         if camera is not None:
             bpy.data.objects.remove(camera)

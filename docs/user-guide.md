@@ -178,8 +178,15 @@ orbit controls. Finishing live editing and applying again retains the pattern.
 The usual target controls continue to aim the cameras. These are static offsets,
 not animation; captured images and calibration use the resulting camera poses.
 Variation does not guarantee better training, coverage or clearance from geometry.
-Path and mesh rigs do not expose this control; rotational and per-camera aim
-variation are not included.
+
+**Rotation jitter** adds a bounded angular offset after target aiming, including
+roll. It defaults to zero and is measured in degrees. The same Seed selects an
+independent angular pattern, so enabling rotation does not reshuffle positions.
+Automatic framing increases distance to reserve the requested angular margin;
+if that angle exceeds the lens's half field of view, reduce it or widen the lens.
+Manual distance, moved aim targets and position jitter still require checking
+coverage with **Check framing**. Live aiming retains the angular offsets.
+Path and mesh rigs do not expose these controls. Per-camera aim variation is not included.
 
 Enable **Follow guide** and apply the rig to link generated cameras
 to the guide's movement, rotation and uniform scaling in Object Mode. This uses
