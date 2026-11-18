@@ -641,3 +641,140 @@ for applied,wanted in (('GUIDE','TARGET'),('TARGET','PATH'),('PATH','GUIDE')):
             assert max(abs(a-b) for x,y in zip(camera.matrix_world,matrix) for a,b in zip(x,y))<1e-5,(applied,wanted,cut)
     else:raise AssertionError('Facing transaction never committed')
 print('STATION_FACING_TRANSITIONS_CANCEL_EVERY_YIELD_PASS',flush=True)
+
+# Inspect evaluated perspective cameras, including native target tracking and
+# guide links, rather than checking only the sampler's output.
+s.rig_aim_mode='SOURCE';s.rig_aim_offset=(0,0,0);s.views=4
+s.rig_station_views=17;s.rig_phase=.25;s.rig_station_sweep=math.pi
+s.rig_station_min=-30;s.rig_station_max=60
+for linked in (False,True):
+    s.rig_path_link=linked
+    for facing in ('GUIDE','PATH','TARGET'):
+        s.rig_station_frame=facing
+        for coverage in ('GRID','ELEVATION','HEMISPHERE','SPHERE','BAND'):
+            s.rig_station_shape=coverage
+            s.rig_station_min=-30;s.rig_station_max=60
+            assert bpy.ops.lichtfeld.create_rig()=={'FINISHED'}
+            bpy.context.view_layer.update()
+            positions=[Vector(p) for p in ext.rig_path.positions(bpy.context,s.rig_curve,s.views) if p is not None]
+            samples=list(ext.rig_geometry.station_directions(17,coverage,.25,math.pi,-30,60,centered=facing!='GUIDE'))
+            per_station=len(samples)
+            def inspect_station_poses():
+                poses=[]
+                for i,camera in enumerate(generated()):
+                    pose=ext.capture_settings.camera_pose(camera,bpy.context.evaluated_depsgraph_get())
+                    station=i//per_station
+                    assert (pose.translation-positions[station]).length<1e-4
+                    forward=pose.to_3x3()@Vector((0,0,-1));poses.append(tuple(round(v,5) for v in forward))
+                    if facing=='GUIDE':
+                        local=s.rig_curve.matrix_world.to_quaternion().inverted()@forward
+                    elif coverage!='BAND':
+                        front=(ext.rig_path.tangent(positions,station,s.rig_curve.data.splines[0].use_cyclic_u,s.rig_path_reverse) if facing=='PATH' else s.rig_aim.matrix_world.translation-positions[station]).normalized()
+                        up=s.rig_curve.matrix_world.to_quaternion()@Vector((0,0,1)) if facing=='PATH' else Vector((0,0,1))
+                        left=up.cross(front).normalized();up=front.cross(left).normalized()
+                        local=Vector((forward.dot(front),forward.dot(left),forward.dot(up)))
+                    else:continue  # Legacy band is covered above, with guide/world yaw.
+                    assert (local-Vector(samples[i%per_station])).length<1e-4,(linked,facing,coverage,i,local,samples[i%per_station])
+                for station in range(4):
+                    assert len(set(poses[station*per_station:(station+1)*per_station]))==per_station
+            inspect_station_poses()
+            if facing=='TARGET':
+                s.rig_aim.location.z+=1.7;bpy.context.view_layer.update()
+                inspect_station_poses()
+            if linked and facing=='TARGET' and coverage!='BAND':
+                s.rig_curve.location.x+=.3;s.rig_curve.rotation_euler.z+=.2
+                bpy.context.view_layer.update()
+                positions=[Vector(p) for p in ext.rig_path.positions(bpy.context,s.rig_curve,s.views) if p is not None]
+                inspect_station_poses()
+            recipe=ext.rig_edit.decode_recipe(s.camera_collection['lichtfeld_rig_recipe'])
+            assert recipe.get('rig_station_shape','BAND')==coverage
+            assert ('rig_station_min' in recipe)==(coverage in {'GRID','ELEVATION'})
+            s.rig_station_shape='BAND' if coverage!='BAND' else 'SPHERE'
+            s.rig_station_min=-10;s.rig_station_max=10;s.rig_station_rows=3
+            assert bpy.ops.lichtfeld.read_rig()=={'FINISHED'}
+            assert s.rig_station_shape==coverage
+            assert s.rig_station_rows==2
+            assert (s.rig_station_min,s.rig_station_max)==((-30,60) if coverage in {'GRID','ELEVATION'} else (-45,45))
+            if coverage in {'SPHERE','HEMISPHERE'}:
+                before_recipe=ext.rig_recipe(s)
+                s.rig_station_sweep=1.2;s.rig_station_min=-20
+                assert ext.rig_recipe(s)==before_recipe
+                s.rig_station_sweep=math.pi
+print('STATION_SPHERICAL_NATIVE_FRAMES_LINK_TARGET_METADATA_PASS',flush=True)
+
+# Rejected elevation ranges leave applied objects and recipe untouched.
+s.rig_station_shape='ELEVATION';s.rig_station_min=40;s.rig_station_max=20
+before=(len(bpy.data.objects),len(bpy.data.cameras),s.camera_collection['lichtfeld_rig_recipe'])
+try:bpy.ops.lichtfeld.create_rig()
+except RuntimeError as error:assert 'Minimum elevation' in str(error)
+else:raise AssertionError('Accepted reversed station elevations')
+assert before==(len(bpy.data.objects),len(bpy.data.cameras),s.camera_collection['lichtfeld_rig_recipe'])
+s.views=4;s.rig_station_views=4;s.rig_station_min=-45;s.rig_station_max=45
+s.rig_station_frame='TARGET'
+for applied,wanted in (('BAND','SPHERE'),('SPHERE','ELEVATION'),('ELEVATION','GRID'),('GRID','HEMISPHERE'),('HEMISPHERE','BAND')):
+    s.rig_station_shape=applied
+    assert bpy.ops.lichtfeld.create_rig()=={'FINISHED'}
+    bpy.context.view_layer.update()
+    baseline=[(o,o.data,o.matrix_world.copy(),[c.name for c in o.constraints]) for o in generated()]
+    s.rig_station_shape=wanted
+    for cut in range(500):
+        owner=SimpleNamespace(collection=None,rig_backup=[],committed=False,report=lambda *args:None)
+        work=ext.LF_OT_rig.generate(owner,bpy.context)
+        try:
+            for _ in range(cut):next(work)
+        except StopIteration:break
+        if owner.committed:
+            for _ in work:pass
+            break
+        work.close()
+        for _ in ext.LF_OT_rig.cleanup(owner):pass
+        bpy.context.view_layer.update()
+        for camera,data,matrix,order in baseline:
+            assert camera.data==data and [c.name for c in camera.constraints]==order
+            assert max(abs(a-b) for x,y in zip(camera.matrix_world,matrix) for a,b in zip(x,y))<1e-5,(applied,wanted,cut)
+    else:raise AssertionError('Coverage transaction never committed')
+print('STATION_COVERAGE_INVALID_RANGE_CANCEL_EVERY_YIELD_PASS',flush=True)
+
+# Canonical panorama split: 8 azimuths at each of three elevations, full turn.
+# Measure the evaluated poses independently of the station sampler, including
+# exact quarter-turn Euler offsets under native tracking and a sloping route.
+s.rig_station_shape='GRID';s.rig_station_rows=3;s.rig_station_views=8
+s.rig_station_sweep=2*math.pi;s.rig_phase=0
+s.rig_station_min=-60;s.rig_station_max=60;s.rig_aim_mode='VIEWPORT'
+assert bpy.ops.lichtfeld.create_path_guide(shape='HELIX',radius=4,height=3,turns=.75)=={'FINISHED'}
+for facing in ('GUIDE','PATH','TARGET'):
+    s.rig_station_frame=facing
+    assert bpy.ops.lichtfeld.create_rig()=={'FINISHED'}
+    if facing=='TARGET':s.rig_aim.location.z+=4
+    bpy.context.view_layer.update()
+    positions=[Vector(p) for p in ext.rig_path.positions(bpy.context,s.rig_curve,s.views) if p is not None]
+    assert len(generated())==s.views*24
+    for index,camera in enumerate(generated()):
+        station=index//24;row=(index%24)//8;column=index%8
+        pose=ext.capture_settings.camera_pose(camera,bpy.context.evaluated_depsgraph_get())
+        forward=pose.to_3x3()@Vector((0,0,-1))
+        if facing=='GUIDE':
+            local=s.rig_curve.matrix_world.to_quaternion().inverted()@forward
+            up=s.rig_curve.matrix_world.to_quaternion()@Vector((0,0,1))
+        else:
+            front=(ext.rig_path.tangent(positions,station,False) if facing=='PATH' else s.rig_aim.matrix_world.translation-positions[station]).normalized()
+            up=s.rig_curve.matrix_world.to_quaternion()@Vector((0,0,1)) if facing=='PATH' else Vector((0,0,1))
+            left=up.cross(front).normalized();up=front.cross(left).normalized()
+            local=Vector((forward.dot(front),forward.dot(left),forward.dot(up)))
+        projected_up=(up-forward*forward.dot(up)).normalized()
+        assert (pose.to_3x3()@Vector((0,1,0))).dot(projected_up)>.99999,(facing,row,column)
+        assert abs(math.asin(max(-1,min(1,local.z)))-math.radians(-60+row*60))<1e-4
+        bearing=math.atan2(local.y,local.x)-column*math.pi/4
+        assert abs(math.atan2(math.sin(bearing),math.cos(bearing)))<1e-4,(facing,row,column)
+    s.rig_station_rows=1
+    assert bpy.ops.lichtfeld.read_rig()=={'FINISHED'}
+    assert s.rig_station_rows==3
+counts=(len(bpy.data.objects),len(bpy.data.cameras),len(bpy.data.collections))
+recipe=s.camera_collection['lichtfeld_rig_recipe']
+s.views=1000;s.rig_station_views=4;s.rig_station_rows=3
+try:bpy.ops.lichtfeld.create_rig()
+except RuntimeError as error:assert '10,000' in str(error)
+else:raise AssertionError('Grid rows bypassed the expanded capture count')
+assert counts==(len(bpy.data.objects),len(bpy.data.cameras),len(bpy.data.collections))
+assert s.camera_collection['lichtfeld_rig_recipe']==recipe
+print('STATION_ORDERED_FULL_TURN_THREE_ROWS_INCLINED_FRAMES_COUNT_GUARD_PASS',flush=True)

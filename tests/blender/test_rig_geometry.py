@@ -6,11 +6,51 @@ import math
 import unittest
 import numpy as np
 sys.path.insert(0,str(Path(__file__).resolve().parents[2]/'lichtfeld_training'))
-from rig_geometry import directions, sample_path, guide_path, seeded_offset
+from rig_geometry import directions, sample_path, guide_path, seeded_offset, station_directions
 from geometry_maps import convert
 
 
 class GeometryTests(unittest.TestCase):
+    def test_ordered_station_rows_have_matching_azimuths(self):
+        for rows in (1,2,3,7):
+            for sweep in (math.pi,2*math.pi):
+                points=list(station_directions(8,'GRID',.2,sweep,-60,60,rows=rows))
+                self.assertEqual(len(points),8*rows)
+                self.assertEqual(len(set(points)),len(points))
+                for row in range(rows):
+                    group=points[row*8:(row+1)*8]
+                    self.assertTrue(all(abs(p[2]-group[0][2])<1e-12 for p in group))
+                    self.assertTrue(np.allclose([math.atan2(p[1],p[0]) for p in group],
+                                                [math.atan2(p[1],p[0]) for p in points[:8]]))
+                self.assertTrue(all(abs(p[2])<1 for p in points))
+        with self.assertRaisesRegex(ValueError,'Elevation rows'):
+            list(station_directions(8,'GRID',0,2*math.pi,-90,90))
+
+    def test_station_coverage_domains_and_legacy_output(self):
+        for count in (4, 8, 17, 1000):
+            for shape in ('BAND', 'ELEVATION', 'HEMISPHERE', 'SPHERE'):
+                points=list(station_directions(count,shape,0,math.pi,-30,60,centered=True))
+                self.assertEqual(len(set(points)),count)
+                self.assertTrue(all(abs(math.dist((0,0,0),p)-1)<1e-12 for p in points))
+                if shape=='HEMISPHERE':
+                    self.assertTrue(all(p[0]>0 for p in points))
+                if shape=='ELEVATION':
+                    self.assertTrue(all(-.5<p[2]<math.sin(math.pi/3) for p in points))
+                    self.assertTrue(all(abs(math.atan2(p[1],p[0]))<=math.pi/2 for p in points))
+                if shape=='SPHERE':
+                    self.assertTrue(any(p[2]<0 for p in points) and any(p[2]>0 for p in points))
+                    self.assertTrue(all(abs(p[2])<1 for p in points))
+            self.assertEqual(list(station_directions(count,'BAND',.3,math.pi,-30,60)),
+                             list(directions(count,'RINGS',0,0,1,.3,sweep=math.pi)))
+            self.assertEqual(list(station_directions(count,'ELEVATION',.3,2*math.pi,-90,90)),
+                             list(directions(count,'SPHERE',phase=.3)))
+        for mode in ('SPHERE','HEMISPHERE'):
+            self.assertEqual(list(directions(17,mode,phase=.3)),
+                             list(directions(17,mode,phase=.3,sweep=float(np.float32(2*math.pi)))))
+        for minimum,maximum in ((20,20),(45,-45),(float('nan'),45)):
+            with self.assertRaises(ValueError):
+                list(station_directions(8,'ELEVATION',0,math.pi,minimum,maximum))
+
     def test_position_variation_is_bounded_stable_and_independent(self):
         self.assertTrue(np.allclose(seeded_offset(3,42,.5),
                          (0.4057713892178399, -0.20126827061603134, -0.004931187225363089),

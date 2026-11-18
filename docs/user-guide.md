@@ -208,10 +208,10 @@ Choose **Facing** to orient the sectors:
 - **Toward target** centers each partial sector on the existing **Look at**
   target, with world +Z up. After Apply, moving the aim helper or its followed
   object updates all sector directions immediately, without extra helpers.
-  Every view retains the elevation toward the target, including rear views.
+  With Horizontal band, every view retains the elevation toward the target, including rear views.
 
 For path/target facing, **Yaw offset** rotates the sector from that reference.
-A full 360° turn starts in the facing direction plus this offset; partial sectors
+With Horizontal band or Panorama grid, a full 360° turn starts in the facing direction plus this offset; partial sectors
 include both end directions around it. With an even view count the sector
 center can fall between two views. **Sweep** describes optical axes, not
 image coverage. Guide/path frames must be non-mirrored, nondegenerate and free
@@ -227,7 +227,29 @@ These are separate perspective images, not a stitched or equirectangular panoram
 The sweep describes camera axes, not image coverage: lens, output aspect and
 obstacles still matter. Multiple views at one station add viewing directions but
 no translational baseline; the curve supplies the different station positions.
-These modes cover one band per station, not a full spherical set of directions.
+**Coverage** chooses the viewing directions at each station:
+
+- **Horizontal band** keeps the existing single-elevation sweep.
+- **Panorama grid** creates regular elevation rows with matching azimuths, like
+  dividing a panorama into perspective views. Choose **Views/row**, **Rows**,
+  elevation limits and **Sweep**. For example, 8 views × 3 rows gives 24 views per
+  station. A single row uses the midpoint elevation. Elevations stay within
+  −89.9° to +89.9° to avoid overlapping cameras at the exact poles.
+- **Vertical band (uniform)** distributes directions uniformly within elevation
+  limits and a horizontal Sweep; unlike the grid, it has no rows.
+- **Hemisphere (uniform)** distributes directions across the half sphere in front
+  of the chosen facing direction.
+- **Sphere (uniform)** distributes directions around the full sphere, above and below.
+
+For Panorama grid and the uniform vertical/spherical distributions, elevation and up are relative to the
+facing frame: guide axes, the path tangent, or the line toward the target. They
+are not necessarily the world horizon on a sloping path or an elevated target.
+For a panorama with common, level rows, use **Guide axes** and a level guide.
+**Along path** and **Toward target** deliberately tilt the whole grid to follow
+the path or aim direction, including its reference horizon.
+Horizontal band retains its existing guide/world-up yaw behavior. Increase
+**Views/station** (or views per row and rows for Panorama grid) and check framing for the desired overlap: a spherical direction
+distribution alone does not guarantee complete image coverage at every focal length.
 
 Enable **Follow guide** and apply the rig to link generated cameras
 to the guide's movement, rotation and uniform scaling in Object Mode. This uses

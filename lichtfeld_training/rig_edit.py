@@ -372,11 +372,11 @@ def decode_recipe(encoded):
     for name in ('views', 'rig_rings', 'rig_min', 'rig_max', 'rig_distance',
                  'rig_lens', 'rig_radius', 'rig_mesh_offset', 'rig_phase', 'rig_path_spacing',
                  'rig_position_variation', 'rig_rotation_variation', 'rig_variation_seed',
-                 'rig_station_views', 'rig_station_sweep'):
+                 'rig_station_views', 'rig_station_sweep', 'rig_station_min', 'rig_station_max', 'rig_station_rows'):
         if name not in values:continue
         value=values[name]
         if type(value) not in (int,float) or not math.isfinite(value):raise ValueError("Invalid rig number: "+name)
-        if name in {"views","rig_rings","rig_variation_seed","rig_station_views"} and type(value) is not int:raise ValueError("Invalid rig count or seed")
+        if name in {"views","rig_rings","rig_variation_seed","rig_station_views","rig_station_rows"} and type(value) is not int:raise ValueError("Invalid rig count or seed")
         # RNA owns both the bounds and their float32 representation. Metadata
         # must accept what the native controls write, without a second table.
         prop = properties[name]
@@ -386,6 +386,7 @@ def decode_recipe(encoded):
                         ("rig_orientation",{"TARGET","TANGENT","PANORAMA"}),
                         ('rig_path_sampling', {'COUNT', 'SPACING'}),
                         ('rig_station_frame', {'GUIDE', 'PATH', 'TARGET'}),
+                        ('rig_station_shape', {'BAND', 'GRID', 'ELEVATION', 'HEMISPHERE', 'SPHERE'}),
                         ("rig_mesh_distribution",{"SURFACE","FACES"}),
                         ("rig_mesh_orientation",{"INWARD","OUTWARD","TARGET"}),
                         ("aim_mode",{"SOURCE","OBJECT","CURSOR","POSITION","VIEWPORT"})):
