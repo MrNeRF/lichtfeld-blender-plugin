@@ -1167,3 +1167,25 @@ assert 'The selected camera sets are empty. Add a set with cameras.' in empty['e
 assert bpy.ops.lichtfeld.capture_collection_entry(use_edited=True) == {'FINISHED'}
 assert checked()['camera_count'] == 8
 print('FRAMING_ALL_EXCLUDED_AND_EMPTY_CAPTURE_SET_RECOVERY_PASS', flush=True)
+
+# Cross a removal batch boundary while retaining data used outside the rig.
+s.views = 48
+assert bpy.ops.lichtfeld.create_rig() == {'FINISHED'}
+rig = s.camera_collection
+cameras = sorted((obj for obj in rig.objects if obj.type == 'CAMERA'),
+                 key=lambda obj: obj['lichtfeld_camera_index'])
+shared_data, retained_data = (cameras[index].data for index in (0, 1))
+retained_data.use_fake_user = True
+custom_camera = bpy.data.objects.new('Camera using old rig data', shared_data)
+bpy.context.scene.collection.objects.link(custom_camera)
+cameras[2][ext.preflight.CAMERA_EXCLUDED] = True
+before = (len(bpy.data.objects), len(bpy.data.cameras), len(bpy.data.collections))
+s.rig_lens += 1
+assert bpy.ops.lichtfeld.create_rig() == {'FINISHED'}
+assert all(obj.data.lens == s.rig_lens and obj.name in rig.objects for obj in cameras)
+assert cameras[2][ext.preflight.CAMERA_EXCLUDED]
+assert custom_camera.data == shared_data
+assert retained_data.use_fake_user
+assert (len(bpy.data.objects), len(bpy.data.cameras), len(bpy.data.collections)) == (
+    before[0], before[1] + 2, before[2])
+print('BATCHED_RIG_CLEANUP_PRESERVES_SHARED_AND_RETAINED_CAMERA_DATA_PASS', flush=True)
