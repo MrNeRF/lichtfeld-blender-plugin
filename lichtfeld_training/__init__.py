@@ -2307,6 +2307,8 @@ def draw_capture_cameras(box, context, settings, ready, rig_changed, wrapped):
     capture_sets = preflight.camera_collections(settings)
     collection_count = len(capture_sets)
     include_edited = managed and rig not in capture_sets
+    empty_sets = ready.get('framing_camera_count') == 0 and not ready.get('camera_selection_error')
+    show_recovery = include_edited and (not collection_count or empty_sets)
     title = f'Capture sets ({collection_count})' if settings.capture_collections else 'Combine camera sets'
     capture_list = draw_disclosure(box, 'capture_collection_details', title)
     if capture_list is not None:
@@ -2320,11 +2322,11 @@ def draw_capture_cameras(box, context, settings, ready, rig_changed, wrapped):
         add_collection = capture_list.row()
         add_collection.enabled = all(entry.collection is not None for entry in settings.capture_collections)
         add_collection.operator('lichtfeld.capture_collection_entry', text='Add collection', icon='ADD')
-        if include_edited and collection_count:
+        if include_edited and not show_recovery:
             capture_list.operator('lichtfeld.capture_collection_entry', text='Include edited rig').use_edited = True
     if not collection_count and settings.capture_collections and capture_list is None and not include_edited:
         box.prop(settings.capture_collections[0], 'collection', text='Capture set')
-    if include_edited and not collection_count:
+    if show_recovery:
         box.operator('lichtfeld.capture_collection_entry', text='Include edited rig').use_edited = True
     if settings.capture_collections and collection_count:
         box.label(text='Checking cameras…' if ready.get('checking') else f"{len(ready['cameras']):,} capture cameras",
@@ -2628,7 +2630,8 @@ def draw_training(self, context):
         box.enabled = not settings.operation_busy
         draw_capture_cameras(box, context, settings, ready, pending, wrapped)
         framing = box.row()
-        framing.enabled = ready.get('checking') or bool(ready['cameras'])
+        framing.enabled = (not ready.get('camera_selection_error')
+                           and bool(ready.get('framing_camera_count', ready.get('checking') or ready['cameras'])))
         framing.operator('lichtfeld.capture_framing', text='Check framing')
     box = draw_setup_section(layout, settings, 'output', 'Render and output')
     if box is not None:

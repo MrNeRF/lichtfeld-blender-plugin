@@ -80,7 +80,13 @@ CAMERA_EXCLUDED = 'lichtfeld_capture_excluded'
 
 
 def camera_objects(scene, settings, *, include_excluded=False):
+ cameras,_=yield from camera_members(scene,settings,include_excluded=include_excluded)
+ return (yield from validated_camera_objects(cameras))
+
+
+def camera_members(scene,settings,*,include_excluded):
  cameras=set()
+ excluded=set()
  rows=getattr(settings,'capture_collections',())
  collections=camera_collections(settings)
  if rows and not collections:
@@ -91,9 +97,13 @@ def camera_objects(scene, settings, *, include_excluded=False):
   raise ValueError('Choose capture collections linked to this scene.')
  for collection in collections:
   for obj in object_steps(collection.all_objects):
-   if obj is not None and obj.type=='CAMERA' and (include_excluded or not obj.get(CAMERA_EXCLUDED)):
-    cameras.add(obj)
+   if obj is not None and obj.type=='CAMERA':
+    (excluded if not include_excluded and obj.get(CAMERA_EXCLUDED) else cameras).add(obj)
    yield
+ return cameras,len(cameras)+len(excluded)
+
+
+def validated_camera_objects(cameras):
  if len({camera.name for camera in cameras}) != len(cameras):
   raise ValueError('Capture cameras must have unique names across the included collections.')
  for camera in cameras:
@@ -171,8 +181,11 @@ def camera_checks(context, *, single_render=False, poses=False, inspect=None):
  """Canonical camera enumeration and evaluated-pose validation, on the UI thread."""
  s=context.scene.lichtfeld_training
  issues={};frames=[];selection_error=''
+ available=0
  graph=context.evaluated_depsgraph_get()
- try:cameras=yield from camera_objects(context.scene,s,include_excluded=single_render)
+ try:
+  members,available=yield from camera_members(context.scene,s,include_excluded=single_render)
+  cameras=yield from validated_camera_objects(members)
  except ValueError as error:
   cameras=[];selection_error=str(error)
  count=len(cameras);generated=sum(bool(obj.get('lichtfeld_generated')) for obj in cameras)
@@ -188,7 +201,7 @@ def camera_checks(context, *, single_render=False, poses=False, inspect=None):
   yield (index+1,len(cameras)) if poses else None
  return {'cameras':[obj.name for obj in cameras],'camera_count':count,
          'generated_cameras':generated,'camera_issues':issues,'poses':frames,
-         'camera_selection_error':selection_error}
+         'camera_selection_error':selection_error,'framing_camera_count':available}
 
 
 def collect(context,capture_only=False,*,single_render=False):
@@ -222,7 +235,10 @@ def collect(context,capture_only=False,*,single_render=False):
  if s.camera_collection and s.camera_collection.get('lichtfeld_generated'):
   from . import rig_edit
   reference_changed=yield from rig_edit.reference_changed(s.rig_reference,s.camera_collection.lichtfeld_rig_reference)
- if not camera_error:
+ if not single_render and not camera_error and not camera_count and camera_collections(s):
+  errors.append('All cameras are excluded. Use Check framing to include them.' if checks['framing_camera_count']
+                else 'The selected camera sets are empty. Add a set with cameras.')
+ elif not camera_error:
   try:capture_settings.validate_view_count(len(cameras),single_render=single_render)
   except ValueError as error:errors.append(str(error))
  if s.scope=='SCENE':
@@ -243,7 +259,7 @@ def collect(context,capture_only=False,*,single_render=False):
  if s.refine_start>=s.refine_end:errors.append('Refinement start must be before its end.')
  if s.growth_end>s.refine_end:errors.append('Growth must end before refinement ends.')
  if s.use_normal_loss and s.normal_start_fraction>=s.normal_end_fraction:errors.append('Normal supervision start must be before its end.')
- return {'sources':sources,'cameras':cameras,'camera_count':camera_count,'generated_cameras':generated_cameras,'camera_issues':camera_issues,'visibility':visibility,'visibility_sources':visibility_sources or sources,'capture_errors':capture_errors,'errors':capture_errors if capture_only else list(dict.fromkeys(errors)),
+ return {'sources':sources,'cameras':cameras,'camera_count':camera_count,'framing_camera_count':checks['framing_camera_count'],'camera_selection_error':camera_error,'generated_cameras':generated_cameras,'camera_issues':camera_issues,'visibility':visibility,'visibility_sources':visibility_sources or sources,'capture_errors':capture_errors,'errors':capture_errors if capture_only else list(dict.fromkeys(errors)),
          'signature':initial,'frame':context.scene.frame_current,'reference_changed':reference_changed,'format':capture_format,'render':render}
 
 def synchronous(context,prefs):

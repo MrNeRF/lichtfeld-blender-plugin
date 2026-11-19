@@ -1103,6 +1103,7 @@ assert ext.preflight.camera_setup_issue(s) == 'Choose a camera set.'
 assert bpy.ops.lichtfeld.capture_collection_entry(use_edited=True) == {'FINISHED'}
 assert [row.collection for row in s.capture_collections] == [s.camera_collection]
 assert checked()['camera_count'] == 8
+
 assert s.scope == 'SCENE' and bpy.ops.lichtfeld.capture_framing.poll()
 assert bpy.ops.lichtfeld.live_rig() == {'FINISHED'}
 assert bpy.ops.lichtfeld.capture_framing.poll()
@@ -1129,3 +1130,40 @@ s.capture_collections[0].collection = None
 assert bpy.ops.lichtfeld.create_rig() == {'FINISHED'}
 assert [row.collection for row in s.capture_collections] == [s.camera_collection]
 assert checked()['camera_count'] == 8
+
+# The last excluded camera must still be reachable in framing. Capture stays blocked.
+def capture_readiness():
+    work = ext.preflight.collect(bpy.context, capture_only=True)
+    while True:
+        try:
+            next(work)
+        except StopIteration as done:
+            return done.value
+
+
+rig = s.camera_collection
+for camera in rig.all_objects:
+    if camera.type == 'CAMERA':
+        camera[ext.preflight.CAMERA_EXCLUDED] = True
+excluded = capture_readiness()
+assert excluded['camera_count'] == 0 and excluded['framing_camera_count'] == 8
+assert 'All cameras are excluded. Use Check framing to include them.' in excluded['errors']
+source = bpy.context.scene
+assert bpy.ops.lichtfeld.capture_framing() == {'FINISHED'}
+assert ext.capture_preview.source_scene(bpy.context.scene) == source
+assert bpy.ops.lichtfeld.toggle_capture_camera() == {'FINISHED'}
+assert bpy.ops.lichtfeld.close_capture_framing() == {'FINISHED'}
+assert capture_readiness()['camera_count'] == 1
+
+# Deleting the objects without deleting their collection leaves an empty set.
+for camera in list(rig.all_objects):
+    if camera.type == 'CAMERA':
+        bpy.data.objects.remove(camera, do_unlink=True)
+assert bpy.ops.lichtfeld.create_rig(new_rig=True) == {'FINISHED'}
+assert ext.preflight.camera_collections(s) == (rig,)
+empty = capture_readiness()
+assert empty['camera_count'] == empty['framing_camera_count'] == 0
+assert 'The selected camera sets are empty. Add a set with cameras.' in empty['errors']
+assert bpy.ops.lichtfeld.capture_collection_entry(use_edited=True) == {'FINISHED'}
+assert checked()['camera_count'] == 8
+print('FRAMING_ALL_EXCLUDED_AND_EMPTY_CAPTURE_SET_RECOVERY_PASS', flush=True)
