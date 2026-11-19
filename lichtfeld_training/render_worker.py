@@ -16,6 +16,37 @@ from bridge_core import atomic_json, read_json, read_job_json, read_dataset_json
 from capture_observations import DepthCoverageError
 
 
+def render_test_image(root):
+    """Publish the renderer's own sample counts while the RGB test runs."""
+    import re
+    import time
+
+    samples = re.compile(r"(?:Sample |Rendering )(\d+)\s*/\s*(\d+)")
+    next_update = 0.0
+
+    def report(stats):
+        nonlocal next_update
+        match = samples.search(stats)
+        if not match:
+            return
+        sample, total = map(int, match.groups())
+        now = time.monotonic()
+        if sample == 0 or (sample < total and now < next_update):
+            return
+        next_update = now + .25
+        try:
+            atomic_json(root / 'capture-progress.json',
+                        {'done': 0, 'total': 1, 'sample': sample, 'samples': total})
+        except OSError:
+            pass  # Progress is optional; keep rendering the requested image.
+
+    bpy.app.handlers.render_stats.append(report)
+    try:
+        bpy.ops.render.render(write_still=True)
+    finally:
+        bpy.app.handlers.render_stats.remove(report)
+
+
 def intrinsics(scene, camera, width, height):
     """Recover pinhole intrinsics from Blender's actual projection matrix."""
     projection = camera.calc_matrix_camera(
@@ -308,11 +339,12 @@ def render_dataset(job_path, reuse_images=False):
             scene.render.filepath = str(root / TEST_IMAGE if single_render else output / relative)
             if geometry:
                 geometry.prepare(index)
-            if not reuse_images:
-                bpy.ops.render.render(write_still=True)
             if single_render:
+                render_test_image(root)
                 atomic_json(root / 'capture-progress.json', {'done': 1, 'total': 1})
                 return  # RGB only: never publish masks, seeds or a reusable dataset.
+            if not reuse_images:
+                bpy.ops.render.render(write_still=True)
             rgba = read_capture_rgba(output / relative, width, height) if geometry or isolated or reuse_images else None
             frame = {"file_path": relative, "transform_matrix": [list(row) for row in matrix],
                      "w": width, "h": height, **intrinsics(scene, evaluated, width, height)}

@@ -1,6 +1,9 @@
 # SPDX-FileCopyrightText: 2026 LichtFeld Studio Authors
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Capture framing in an isolated scene; source cameras/render settings stay intact."""
+from pathlib import Path
+import time
+
 import bpy
 from . import capture_settings, ui_runtime
 from .ui_text import draw_paragraph
@@ -500,6 +503,83 @@ class LF_OT_toggle_capture_camera(bpy.types.Operator):
         return {'FINISHED'}
 
 
+TEST_VIEWER = 'lichtfeld_test_viewer'
+
+
+def draw_test_progress(layout, settings):
+    if settings.test_render_cancel:
+        layout.label(text='Stopping test render…', icon='TIME')
+    elif settings.test_render_samples:
+        sample, total = settings.test_render_sample, settings.test_render_samples
+        layout.progress(type='BAR', factor=sample / total, text=f'{sample}/{total} samples')
+    else:
+        layout.label(text='Rendering test image…', icon='TIME')
+
+
+def draw_test_viewer_header(self, context):
+    if not context.window.screen.get(TEST_VIEWER):
+        return
+    settings = context.scene.lichtfeld_training
+    if settings.test_render_active:
+        draw_test_progress(self.layout, settings)
+        row = self.layout.row()
+        row.enabled = not settings.test_render_cancel
+        row.operator('lichtfeld.cancel_capture_test', text='Cancel')
+    elif settings.test_render_error:
+        self.layout.label(text=settings.test_render_error, icon='ERROR')
+
+
+def find_test_viewer(manager, source):
+    return next((window for window in manager.windows
+                 if window.scene == source and window.screen.get(TEST_VIEWER)), None)
+
+
+def redraw_test_viewer(source):
+    window = find_test_viewer(bpy.context.window_manager, source)
+    if window:
+        for area in window.screen.areas:
+            if area.type == 'IMAGE_EDITOR':
+                area.tag_redraw()
+
+
+def show_test_viewer(context, source, image=None):
+    window = find_test_viewer(context.window_manager, source)
+    if window is None:
+        before = {item.as_pointer() for item in context.window_manager.windows}
+        bpy.ops.wm.window_new_main('EXEC_DEFAULT')
+        window = next((item for item in context.window_manager.windows if item.as_pointer() not in before), None)
+    if window is None:
+        raise RuntimeError('Blender could not open the Image Editor')
+    if source_scene(window.scene) == source:
+        restore_source(window, window.scene, source)
+    elif window.scene != source:
+        window.scene = source
+    window.screen[TEST_VIEWER] = True
+    area = max(window.screen.areas, key=lambda area: area.width * area.height)
+    area.type = 'IMAGE_EDITOR'
+    previous = area.spaces.active.image
+    area.spaces.active.image = image
+    if previous and previous != image and not previous.users and previous.get('lichtfeld_test_image'):
+        bpy.data.images.remove(previous)
+    area.tag_redraw()
+    if len(window.screen.areas) > 1:
+        with bpy.context.temp_override(window=window, area=area):
+            bpy.ops.screen.screen_full_area(use_hide_panels=False)
+        window.screen[TEST_VIEWER] = True
+
+
+def read_test_samples(root):
+    from .jobs import read_json
+    try:
+        data = read_json(root / 'capture-progress.json', {})
+        sample, total = data.get('sample'), data.get('samples')
+        if type(sample) is int and type(total) is int and 0 <= sample <= total and total > 0:
+            return sample, total
+    except (OSError, ValueError, AttributeError):
+        pass
+    return None
+
+
 def draw(layout, context, source, *, width=None):
     from . import draw_capture_format, draw_capture_overrides
     s = source.lichtfeld_training
@@ -534,7 +614,7 @@ def draw(layout, context, source, *, width=None):
     draw_capture_overrides(box, s, wrapped)
     box.operator('lichtfeld.capture_framing', text='Apply preview settings')
     if s.test_render_active:
-        layout.label(text='Rendering test image…')
+        draw_test_progress(layout, s)
     elif s.test_render_error:
         wrapped(layout, s.test_render_error)
     row = layout.row(align=True)
@@ -561,6 +641,7 @@ def test_image_steps(context, *, source=None, window=None, area=None, framing=Fa
     settings = source.lichtfeld_training
     launch = None
     finish = None
+    viewer_opened = False
     work = preflight.collect(context, capture_only=True, single_render=True)
     try:
         # A UI save clears Main's dirty flag through Blender's notifier loop.
@@ -603,7 +684,29 @@ def test_image_steps(context, *, source=None, window=None, area=None, framing=Fa
                 ui_runtime.report_notice('WARNING', 'Could not restore framing: ' + str(error))
             finally:
                 settings.operation_busy = True
+        if (not bpy.app.background and not settings.test_render_cancel and
+                any(item == window for item in bpy.context.window_manager.windows) and
+                any(item == area for item in window.screen.areas)):
+            try:
+                with bpy.context.temp_override(window=window, area=area):
+                    show_test_viewer(bpy.context, source)
+                viewer_opened = True
+            except RuntimeError as error:
+                ui_runtime.report_notice('WARNING', str(error))
+        root = Path(job['root'])
+        update = None
+        next_update = 0.0
         while child.poll() is None and not settings.test_render_cancel:
+            if update is not None and update.done():
+                value = update.result()
+                if value and value != (settings.test_render_sample, settings.test_render_samples):
+                    settings.test_render_sample, settings.test_render_samples = value
+                    if viewer_opened:
+                        redraw_test_viewer(source)
+                update = None
+            if update is None and time.monotonic() >= next_update:
+                next_update = time.monotonic() + .25
+                update = ui_runtime.submit(lambda: read_test_samples(root))
             yield ui_runtime.DEFER
         finish = ui_runtime.submit(lambda: finish_capture_test(launch))
         while not finish.done():
@@ -613,13 +716,13 @@ def test_image_steps(context, *, source=None, window=None, area=None, framing=Fa
             return
         if state.get('state') != 'completed':
             raise RuntimeError(state.get('error', 'Test render failed. See render.log in ' + job['root']))
-        from pathlib import Path
-        path = str(Path(job['root']) / state['image'])
+        path = str(root / state['image'])
         previous = settings.test_render_image
         settings.test_render_image = path
         if (not bpy.app.background and any(item == window for item in bpy.context.window_manager.windows)
                 and (window.scene == source or source_scene(window.scene) == source)
-                and any(item == area for item in window.screen.areas)):
+                and any(item == area for item in window.screen.areas)
+                and (not viewer_opened or find_test_viewer(bpy.context.window_manager, source))):
             with bpy.context.temp_override(window=window, area=area):
                 bpy.ops.lichtfeld.show_test_image('EXEC_DEFAULT')
         if previous and previous != path:
@@ -642,6 +745,9 @@ def test_image_steps(context, *, source=None, window=None, area=None, framing=Fa
             settings.operation_busy = False
             settings.test_render_active = False
             settings.test_render_cancel = False
+            settings.test_render_sample = settings.test_render_samples = 0
+            if viewer_opened:
+                redraw_test_viewer(source)
         except ReferenceError:
             pass
 
@@ -684,6 +790,7 @@ class LF_OT_render_capture_test(bpy.types.Operator):
         source.lichtfeld_training.test_render_active = True
         source.lichtfeld_training.test_render_cancel = False
         source.lichtfeld_training.test_render_error = ''
+        source.lichtfeld_training.test_render_sample = source.lichtfeld_training.test_render_samples = 0
         def failed(error):
             source.lichtfeld_training.test_render_error = str(error)
             ui_runtime.report_notice('ERROR', error)
@@ -720,6 +827,7 @@ class LF_OT_cancel_capture_test(bpy.types.Operator):
     def execute(self, context):
         source = source_scene(context.scene) or context.scene
         source.lichtfeld_training.test_render_cancel = True
+        redraw_test_viewer(source)
         return {'FINISHED'}
 
 
@@ -738,37 +846,13 @@ class LF_OT_show_test_image(bpy.types.Operator):
         try:
             source = source_scene(context.scene) or context.scene
             path = source.lichtfeld_training.test_render_image
-            image = next((item for item in bpy.data.images if item.get('lichtfeld_test_image') and item.users <= 1), None)
+            image = next((item for item in bpy.data.images
+                          if item.get('lichtfeld_test_image') and item.filepath == path), None)
             if image is None:
-                image = bpy.data.images.load(path, check_existing=True)
+                image = bpy.data.images.load(path, check_existing=False)
                 image['lichtfeld_test_image'] = True
-            elif image.filepath != path:
-                image.filepath = path
-                image.reload()
             image.use_view_as_render = False
-            window = next((item for item in context.window_manager.windows if item.screen.get('lichtfeld_test_viewer')), None)
-            if window != context.window:
-                if window is not None:
-                    with bpy.context.temp_override(window=window):
-                        bpy.ops.wm.window_close()
-                before = {window.as_pointer() for window in context.window_manager.windows}
-                # Area-duplicate windows inherit their parent's scene. A main
-                # window keeps the image viewer independent from framing.
-                bpy.ops.wm.window_new_main('EXEC_DEFAULT')
-                window = next((window for window in context.window_manager.windows if window.as_pointer() not in before), None)
-            if window is None:
-                raise RuntimeError('Blender could not open the Image Editor')
-            framing_source = source_scene(window.scene)
-            if framing_source is not None:
-                restore_source(window, window.scene, framing_source)
-            window.screen['lichtfeld_test_viewer'] = True
-            area = max(window.screen.areas, key=lambda area: area.width * area.height)
-            area.type = 'IMAGE_EDITOR'
-            area.spaces.active.image = image
-            if len(window.screen.areas) > 1:
-                with bpy.context.temp_override(window=window, area=area):
-                    bpy.ops.screen.screen_full_area(use_hide_panels=False)
-                window.screen['lichtfeld_test_viewer'] = True
+            show_test_viewer(context, source, image)
             return {'FINISHED'}
         except (OSError, RuntimeError, KeyError) as error:
             self.report({'ERROR'}, str(error))

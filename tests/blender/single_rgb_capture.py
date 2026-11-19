@@ -211,6 +211,8 @@ assert not s.test_render_active
 for restore in (ext.history_changed, ext.loaded):
     s.test_render_active = True
     s.test_render_cancel = True
+    s.test_render_sample, s.test_render_samples = 2, 8
     restore(None)
     assert not s.test_render_active and not s.test_render_cancel
+    assert not s.test_render_sample and not s.test_render_samples
 print('SINGLE_RGB_CAPTURE_OK', flush=True)
