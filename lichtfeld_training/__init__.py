@@ -2725,7 +2725,7 @@ def history_changed(_):
         scene.lichtfeld_training.test_render_cancel = False
         source = capture_preview.source_scene(scene)
         if source:
-            capture_preview.camera_changed(source.lichtfeld_training, None)
+            capture_preview.camera_changed(source.lichtfeld_training, None, refresh_only=True)
 
 
 @persistent

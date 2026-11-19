@@ -84,6 +84,11 @@ before = (s.job_directory, s.previous_job, s.dataset_job_directory, s.result_obj
 # Exercise the real framing action, including explicit save and framing restore.
 assert bpy.ops.lichtfeld.capture_framing()=={'FINISHED'}
 assert ext.capture_preview.source_scene(bpy.context.scene)==scene
+if '--multi-rig' in sys.argv:
+    displayed = bpy.context.scene[ext.capture_preview.ORIGINAL_CAMERA]
+    assert displayed.name == capture_name
+    assert bpy.ops.lichtfeld.toggle_capture_camera() == {'FINISHED'}
+    assert displayed.get(ext.preflight.CAMERA_EXCLUDED)
 bpy.context.scene.frame_set(77)  # Framing's timeline is not the source frame.
 assert ext.capture_preview.LF_OT_render_capture_test.poll(bpy.context)
 assert bpy.ops.lichtfeld.render_capture_test()=={'FINISHED'}

@@ -46,6 +46,14 @@ with tempfile.TemporaryDirectory() as directory:
   assert bpy.ops.lichtfeld.capture_collection_entry(use_edited=True)=={'CANCELLED'}
   expected_cameras.update(obj.name for obj in s.camera_collection.objects if obj.type=='CAMERA')
   assert len(expected_cameras)==8
+  for _ in ext.capture_preview.open_steps(bpy.context.scene,bpy.context.window,None):pass
+  preview=bpy.context.scene
+  excluded=preview[ext.capture_preview.ORIGINAL_CAMERA]
+  assert bpy.ops.lichtfeld.toggle_capture_camera()=={'FINISHED'}
+  while ext.capture_preview.camera_pending(preview):ext.ui_runtime.tick()
+  assert preview['capture_excluded_count']==1
+  assert bpy.ops.lichtfeld.close_capture_framing()=={'FINISHED'}
+  expected_cameras.remove(excluded.name)
  bpy.ops.wm.save_as_mainfile(filepath=str(area/'source.blend'))
  destination=area/'exports';destination.mkdir()
  result=bpy.ops.lichtfeld.export_dataset('EXEC_DEFAULT',directory=str(destination))
