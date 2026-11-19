@@ -23,6 +23,7 @@ parser.add_argument("backend")
 parser.add_argument("--installed", action="store_true")
 parser.add_argument("--jobs", default="")
 parser.add_argument("--geometry", action="store_true")
+parser.add_argument("--eval", action="store_true", help="Enable evaluation for this smoke test")
 parser.add_argument("--stop-capture", action="store_true")
 parser.add_argument("--resolution", type=int, default=64)
 parser.add_argument("--strategy", default="mrnf", choices=["mrnf","mcmc","igs+"])
@@ -67,6 +68,8 @@ settings.resolution = options.resolution
 settings.samples = 1
 settings.engine = "BLENDER_EEVEE"
 settings.iterations = options.steps
+if options.eval:
+    settings.enable_eval = True
 settings.eval_interval = max(4, options.steps // 4)
 settings.max_points = options.points
 settings.preview_points = 1000
@@ -120,7 +123,11 @@ while time.monotonic() < deadline:
         if not visible or settings.importing:
             time.sleep(0.02)
             continue
-        assert state["result"]["score"] is not None, state
+        assert (state["result"]["score"] is not None) == options.eval, state
+        assert state["result"]["kind"] == ("best" if options.eval else "last"), state
+        assert (job / "output/project.licht").is_file(), state
+        if not options.eval:
+            assert state["result"]["iteration"] == options.steps, state
         manifest = extension.read_json(job / "dataset/manifest.json")
         captured = extension.read_json(job / "dataset" / manifest.get("transforms_file","transforms.json"))
         runtime = extension.read_json(job / 'runtime.json')

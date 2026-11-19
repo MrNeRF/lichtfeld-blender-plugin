@@ -30,6 +30,8 @@ saved_step = extension.read_json(root / 'runtime.json')['iteration']
 expected_total = max(original_job['iterations'], saved_step + 1000)
 settings.iterations = saved_step + 50000
 settings.eval_interval = 7  # Unrelated scene settings must not change a continuation.
+saved_evaluation = original_job.get('enable_eval', True)
+settings.enable_eval = not saved_evaluation
 settings.full_preview = not original_job.get('full_preview', True)
 ready_deadline=time.monotonic()+10
 while not extension.allowed(bpy.context,'continue') and time.monotonic()<ready_deadline:
@@ -45,9 +47,13 @@ assert root.parent == area / 'continued-jobs'
 continued_job = extension.read_json(root / 'job.json')
 assert continued_job['iterations'] == expected_total
 assert continued_job['eval_interval'] == original_job['eval_interval']
+assert continued_job.get('enable_eval', True) == saved_evaluation
 assert continued_job['full_preview'] == original_job.get('full_preview', True)
 inherited = extension.read_json(root / "best.json")
-assert inherited["sha256"] == original_best["sha256"]
+if saved_evaluation:
+    assert inherited["sha256"] == original_best["sha256"]
+else:
+    assert inherited is None
 deadline = time.monotonic() + 180
 
 
@@ -78,5 +84,9 @@ state, _ = until(lambda state, runtime: state.get("state") == "stopped")
 assert state.get("result"), state
 assert (root / "output/project.licht").is_file()
 assert next(obj for obj in bpy.context.scene.objects if obj.get("lichtfeld_job_id") == root.name) == original_result
-assert state["result"]["score"]["psnr"] >= original_best["score"]["psnr"]
+if saved_evaluation:
+    assert state["result"]["score"]["psnr"] >= original_best["score"]["psnr"]
+else:
+    assert state["result"]["kind"] == "last" and state["result"]["score"] is None
+    assert state["result"]["iteration"] > saved_step
 print("RESUME_AND_STOP_VERIFIED", state, flush=True)
