@@ -13,6 +13,7 @@ from mathutils import Vector
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from bridge_core import atomic_json, read_json, read_job_json, read_dataset_json, digest, artifact_path
+from capture_observations import DepthCoverageError
 
 
 def intrinsics(scene, camera, width, height):
@@ -351,7 +352,10 @@ def render_dataset(job_path, reuse_images=False):
                 finally:
                     bpy.data.images.remove(mask)
             frames.append(frame)
-            atomic_json(root / "capture-frames.json", {"job_id": job["id"], "frames": frames})
+            if not reuse_images and index + 1 == len(cameras):
+                # Recovery only consumes complete calibration. Publish it before
+                # the final progress marker makes this job eligible for recovery.
+                atomic_json(root / "capture-frames.json", {"job_id": job["id"], "frames": frames})
             atomic_json(root / "capture-progress.json", {"done": index + 1, "total": len(cameras)})
         loop_finished = True
     finally:
@@ -399,13 +403,23 @@ def render_dataset(job_path, reuse_images=False):
 
 if __name__ == "__main__":
     job_path = Path(sys.argv[sys.argv.index("--") + 1])
+    reuse_images = "--finalize-capture" in sys.argv
     try:
-        render_dataset(job_path, reuse_images="--finalize-capture" in sys.argv)
+        render_dataset(job_path, reuse_images=reuse_images)
     except Exception as error:
         try:
             failure_root = Path(read_job_json(job_path)['root'])
             report = read_json(failure_root/'capture-render.json', {})
+            if isinstance(error, DepthCoverageError):
+                report['retry_finalization'] = False
             atomic_json(failure_root/'capture-render.json', {**report, 'state':'failed', 'error':str(error)})
         except Exception:
             pass  # Preserve the actual render exception if diagnostics cannot be saved.
         raise
+    finally:
+        if not reuse_images:
+            from jobs import release_source
+            try:
+                release_source(read_job_json(job_path))
+            except (KeyError, OSError, ValueError):
+                pass  # The supervisor still owns cleanup if job metadata is unavailable.

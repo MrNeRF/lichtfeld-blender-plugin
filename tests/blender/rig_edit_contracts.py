@@ -1014,14 +1014,19 @@ assert sum(obj.type == 'CAMERA' for obj in second_rig.objects) == 10
 assert {obj.as_pointer() for obj in first_rig.objects} == first_objects
 print('ADDITIONAL_RIG_PRESERVES_ORIGINAL_AND_EDITS_INDEPENDENTLY_PASS', flush=True)
 
+assert [entry.collection for entry in s.capture_collections] == [first_rig]
+s.capture_collections.clear()
 assert bpy.ops.lichtfeld.capture_collection_entry() == {'FINISHED'}
 assert s.capture_collections[0].collection == second_rig
+assert checked()['camera_count'] == 10
+s.capture_collections[0].collection = None
 try:
     checked()
 except ValueError as error:
-    assert 'empty entries' in str(error)
+    assert 'Choose a collection in Capture sets' in str(error)
 else:
-    raise AssertionError('Incomplete capture collection did not block the check')
+    raise AssertionError('An entirely empty capture list fell back to the edited rig')
+s.capture_collections[0].collection = second_rig
 s.capture_collections[1].collection = first_rig
 s.camera_collection = first_rig
 assert bpy.ops.lichtfeld.read_rig() == {'FINISHED'}
@@ -1059,3 +1064,22 @@ with tempfile.TemporaryDirectory() as directory:
     assert [entry.collection.name for entry in s.capture_collections] == [capture_name]
     assert checked()['camera_count'] == 10
 print('MULTI_RIG_CAPTURE_NAME_LOOKUP_AND_SAVE_REOPEN_PASS', flush=True)
+
+# Create from the same settings without silently adding repeated views.
+bpy.ops.scene.new(type='NEW')
+bpy.ops.mesh.primitive_cube_add()
+s = bpy.context.scene.lichtfeld_training
+s.scope = 'SCENE'
+s.views = 8
+assert bpy.ops.lichtfeld.create_rig() == {'FINISHED'}
+original_capture = tuple(ext.preflight.camera_collections(s))
+reports = []
+owner = SimpleNamespace(new_rig=True, collection=None, committed=False,
+                        report=lambda level, message: reports.append((level, message)))
+for _ in ext.LF_OT_rig.generate(owner, bpy.context):
+    pass
+assert owner.committed
+assert tuple(ext.preflight.camera_collections(s)) == original_capture
+assert s.camera_collection not in original_capture
+assert reports[0][0] == {'WARNING'} and reports[0][1].startswith('8 new camera poses repeat'), reports
+print('UNCHANGED_RIG_WARNED_WITHOUT_ADDING_DUPLICATE_VIEWS_PASS', flush=True)

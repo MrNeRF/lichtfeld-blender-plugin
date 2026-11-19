@@ -29,7 +29,7 @@ def fixture(directory, views=4):
 
 class DatasetReuse(unittest.TestCase):
     def test_finalization_retries_only_complete_captures_and_honors_stop(self):
-        for case in ('recover', 'partial', 'cancel', 'retry_failed', 'missing_capture', 'first_ok', 'cancel_recovery'):
+        for case in ('recover', 'partial', 'cancel', 'retry_failed', 'missing_capture', 'first_ok', 'cancel_recovery', 'depth_coverage', 'corrupt_report'):
             with self.subTest(case=case), tempfile.TemporaryDirectory() as directory:
                 root = fixture(directory)
                 source = root/'source.blend'
@@ -52,6 +52,10 @@ class DatasetReuse(unittest.TestCase):
                     child.poll.return_value = child.returncode
                     child.wait.return_value = child.returncode
                     launches.append((arguments, child))
+                    if case == 'corrupt_report' and not recovery:
+                        (root/'capture-render.json').write_text('{invalid', encoding='utf-8')
+                    if case == 'depth_coverage':
+                        atomic_json(root/'capture-render.json', {'error': 'Insufficient depth correspondences', 'retry_finalization': False})
                     if case == 'cancel' or case == 'cancel_recovery' and recovery:
                         self.assertTrue(owner.acquire())
                         atomic_json(root/'command.json', owner.command('original', 'stop'))
@@ -64,15 +68,22 @@ class DatasetReuse(unittest.TestCase):
                     with patch.object(supervisor.subprocess, 'Popen', side_effect=launch), patch.object(supervisor.time, 'sleep'):
                         supervisor.supervise(root/'job.json')
                     state = jobs.read_json(root/'state.json')
-                    expected = 'completed' if case in {'recover', 'first_ok'} else 'stopped' if case in {'cancel', 'cancel_recovery'} else 'failed'
+                    expected = 'completed' if case in {'recover', 'first_ok', 'corrupt_report'} else 'stopped' if case in {'cancel', 'cancel_recovery'} else 'failed'
                     self.assertEqual(state['state'], expected, state)
-                    self.assertEqual(len(launches), 2 if case in {'recover', 'retry_failed', 'cancel_recovery'} else 1)
+                    if case == 'depth_coverage':
+                        self.assertEqual(state['error'], 'Insufficient depth correspondences')
+                    self.assertEqual(len(launches), 2 if case in {'recover', 'retry_failed', 'cancel_recovery', 'corrupt_report'} else 1)
                     if len(launches) == 2:
                         capture = Path(launches[1][0][launches[1][0].index('--python-exit-code')-1])
                         self.assertTrue(capture.samefile(root/'capture.blend'))
                         self.assertIn('--finalize-capture', launches[1][0])
                     self.assertFalse((root/'supervisor.lock').exists())
-                    self.assertEqual(before, {p.name: p.read_bytes() for p in (root/'dataset/images').iterdir()})
+                    dataset = root / 'dataset'
+                    if expected == 'completed':
+                        self.assertFalse(dataset.exists())
+                        dataset = Path(state['export_directory'])
+                        self.assertEqual(jobs.captured_dataset(root)[2], dataset)
+                    self.assertEqual(before, {p.name: p.read_bytes() for p in (dataset/'images').iterdir()})
                 finally:
                     owner.close()
 
@@ -101,7 +112,9 @@ class DatasetReuse(unittest.TestCase):
             self.assertEqual(data,first)
             self.assertEqual(manifest['views'],4)
             self.assertEqual((first/'images/view_000000.png').read_bytes(),b'image fixture')
-            fresh,_=jobs.restart_data(first,{},backend='TRUSTED',jobs_directory=Path(directory)/'jobs')
+            moved = first.rename(first.with_name('moved-dataset'))
+            fresh,_=jobs.restart_data(moved,{},backend='TRUSTED',jobs_directory=Path(directory)/'jobs')
+            self.assertEqual(Path(fresh['dataset_root']), moved.resolve())
             self.assertTrue(Path(fresh['root']).parent.samefile(Path(directory)/'jobs'))
             self.assertNotIn('capture_only',fresh)
             self.assertNotIn('export_parent',fresh)
@@ -191,6 +204,19 @@ class DatasetReuse(unittest.TestCase):
             second,_=jobs.restart_data(job["root"],{"iterations":8},backend="TRUSTED",jobs_directory=directory)
             self.assertEqual(second["dataset_root"],job["dataset_root"])
             self.assertNotEqual(second["root"],job["root"])
+
+    def test_normals_can_be_enabled_after_training_without_them(self):
+        with tempfile.TemporaryDirectory() as directory:
+            original = fixture(directory)
+            dataset = original / 'dataset'
+            normals = dataset / 'normals'
+            normals.mkdir()
+            for image in (dataset / 'images').glob('*.png'):
+                (normals / f'{image.stem}.tiff').write_bytes(b'map fixture')
+            options = {'use_normal_loss': False}
+            job, _ = jobs.restart_data(original, options, backend='TRUSTED', jobs_directory=directory)
+            atomic_json(Path(job['root']) / 'job.json', job)
+            self.assertEqual(jobs.captured_dataset(job['root'], {'use_normal_loss': True})[2], dataset.resolve())
 
     def test_missing_modified_or_escaping_capture_fails_without_new_job(self):
         with tempfile.TemporaryDirectory() as directory:

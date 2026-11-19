@@ -6,6 +6,7 @@ import os
 import hashlib
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -119,8 +120,14 @@ def supervise(job_path):
         atomic_json(root / "state.json", {"job_id": job["id"], "control_protocol": 1, "state": phase,
                                          "supervisor_pid": os.getpid(), "updated": time.time(), **values})
 
+    next_heartbeat = 0.0
+
     def heartbeat():
-        atomic_json(root / "heartbeat.json", {"updated": time.time(), "supervisor_pid": os.getpid()})
+        nonlocal next_heartbeat
+        now = time.monotonic()
+        if now >= next_heartbeat:
+            atomic_json(root / "heartbeat.json", {"updated": time.time(), "supervisor_pid": os.getpid()})
+            next_heartbeat = now + 1.0
 
     try:
         if not job.get("capture_only"):
@@ -140,9 +147,10 @@ def supervise(job_path):
             source = Path(job.get("capture_staging_file", job["source_file"]))
             if not source.is_file():
                 raise RuntimeError("The saved source .blend is no longer available")
-            if job.get("source_sha256") and digest(source) != job["source_sha256"]:
+            source_digest = digest(source)
+            if job.get("source_sha256") and source_digest != job["source_sha256"]:
                 raise ValueError("The immutable capture source was modified")
-            job["source_sha256"] = digest(source)
+            job["source_sha256"] = source_digest
             atomic_json(job_path, job)
             with (root / "render.log").open("wb") as log:
                 for recovering in (False, True):
@@ -173,9 +181,16 @@ def supervise(job_path):
                             break
                         progress = read_json(root / "capture-progress.json", {})
                         complete = bool(job.get('cameras')) and progress.get('done') == len(job['cameras'])
-                        if not single_render and not recovering and complete and (root / 'capture.blend').is_file():
+                        try:
+                            report = read_json(root / 'capture-render.json', {})
+                        except ValueError:
+                            report = {}
+                        if not isinstance(report, dict):
+                            report = {}
+                        if (not single_render and not recovering and complete and
+                                report.get('retry_finalization', True) and (root / 'capture.blend').is_file()):
                             continue  # The worker owns journal/image validation, not the supervisor.
-                        render_error = read_json(root / 'capture-render.json', {}).get('error')
+                        render_error = report.get('error')
                         if render_error:
                             raise RuntimeError(render_error)
                         if single_render:
@@ -211,7 +226,16 @@ def supervise(job_path):
             state("exporting dataset")
             destination = export_captured_dataset(job, heartbeat=heartbeat,
                 cancelled=lambda: stop_requested(root, job["id"]))
-            state("completed", export_directory=str(destination), message="Dataset exported. No training started.")
+            message = "Dataset exported. No training started."
+            try:
+                # Commit the new dataset location before releasing the owned capture copy.
+                atomic_json(job_path, {**job, "dataset_root": str(destination)})
+                source_dataset = root / 'dataset'
+                if source_dataset.is_dir() and not source_dataset.is_symlink():
+                    shutil.rmtree(source_dataset)
+            except OSError:
+                message += " The temporary capture copy could not be fully removed."
+            state("completed", export_directory=str(destination), message=message)
             return
         state("starting")
         environment_check = check_environment(job["backend"], str(root.parent),

@@ -12,10 +12,10 @@ import subprocess
 import uuid
 if __package__:
     from .bridge_core import atomic_json, read_json, read_job_json, read_dataset_json, verify_artifact, preview_sh_limit, SCHEMA
-    from .capture_settings import validate_view_count
+    from .capture_settings import TEST_IMAGE, validate_view_count
 else:
     from bridge_core import atomic_json, read_json, read_job_json, read_dataset_json, verify_artifact, preview_sh_limit, SCHEMA
-    from capture_settings import validate_view_count
+    from capture_settings import TEST_IMAGE, validate_view_count
 
 
 def verify_backend(path):
@@ -158,6 +158,33 @@ def read_job(path):
     return job
 
 
+def discard_superseded_test_image(image_path):
+    """Remove a completed, owned test job after its image has been replaced."""
+    image = Path(image_path)
+    if image.name == TEST_IMAGE:
+        discard_test_job(image.parent, 'completed')
+
+
+def discard_test_job(root, terminal_state):
+    """Remove only an owned terminal test job with a known file inventory."""
+    if root.is_symlink():
+        return
+    try:
+        job = read_job(root / "job.json")
+        state = read_json(root / "state.json", {})
+        if (job.get("purpose") == "test_render" and job["id"] == root.name
+                and Path(job.get("root", "")) == root
+                and state.get("job_id") == job["id"] and state.get("state") == terminal_state):
+            managed = {TEST_IMAGE, "job.json", "state.json", "runtime.json", "heartbeat.json", "command.json",
+                       "controller.json", "controller.lock", "supervisor.lock", "supervisor.log", "render.log",
+                       "supervisor-console.log", "capture-render.json", "capture-progress.json"}
+            if all(entry.name in managed and entry.is_file() and not entry.is_symlink()
+                   for entry in root.iterdir()):
+                shutil.rmtree(root)
+    except (ValueError, OSError):
+        pass  # Retain files if their ownership or cleanup cannot be confirmed.
+
+
 def load_job(path):
     path = Path(path).resolve()
     read_job(path)
@@ -186,6 +213,7 @@ def check_environment(backend, directory, source="", require_backend=True, *, ba
             raise ValueError("LichtFeld Studio changed during verification. Check the installation again.")
     else:
         version = "Dataset capture folder is writable"
+    stage = "jobs"
     try:
         root=Path(directory)
         root.mkdir(mode=0o700,parents=True,exist_ok=True)
@@ -193,13 +221,17 @@ def check_environment(backend, directory, source="", require_backend=True, *, ba
         result = {"ok":True,"backend":True,"folder":True,"message":version,"directory":str(root),
                   "backend_version":version,"backend_identity":identity}
         if source:
+            stage = "source"
             path = Path(source)
             info = path.stat()
             with tempfile.TemporaryFile(dir=path.parent) as probe:
                 probe.write(b"capture")
             result["source_identity"] = [info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns]
     except (OSError, ValueError) as error:
-        return {"ok":False,"backend":True,"folder":False,"message":str(error),
+        message = ("Choose a writable training jobs folder." if stage == "jobs" else
+                   "Save the scene in a folder where Blender can write capture files.")
+        return {"ok":False,"backend":True,"folder":False,"message":message,
+                "folder_issue":stage,"folder_details":str(error),
                 "backend_version":version,"backend_identity":identity}
     return result
 
@@ -292,16 +324,21 @@ def captured_dataset(directory, options=None):
         previous = previous.parent
     job = read_job(previous / "job.json")
     origin = job
+    origin_directory = previous
     visited = set()
     for _ in range(64):
-        candidate = Path(origin.get("dataset_root") or Path(origin.get("root", str(previous))) / "dataset").resolve()
+        if origin.get("capture_only") and origin.get("dataset_root") == origin.get("root"):
+            candidate = origin_directory
+        else:
+            candidate = Path(origin.get("dataset_root") or Path(origin.get("root", str(origin_directory))) / "dataset").resolve()
         if (candidate / "manifest.json").is_file():
             break
         parent = origin.get("parent_job")
         if not parent or parent in visited:
             raise ValueError("The saved dataset is missing. Choose its original job folder.")
         visited.add(parent)
-        origin = read_job(Path(parent) / "job.json")
+        origin_directory = Path(parent).resolve()
+        origin = read_job(origin_directory / "job.json")
     else:
         raise ValueError("The dataset ancestry is too deep")
     manifest = read_dataset_json(candidate / "manifest.json", {})
@@ -328,9 +365,9 @@ def captured_dataset(directory, options=None):
         raise ValueError("Whole-scene captures have no foreground mask. Choose Automatic or None.")
     for enabled, folder, extension in (("use_depth_loss", "depths", ".tiff"),
                                         ("use_normal_loss", "normals", ".tiff")):
-        if options.get(enabled) and not job.get(enabled):
-            raise ValueError("This dataset has no " + folder + ". Capture those maps first.")
         if options.get(enabled):
+            if not (candidate / folder).is_dir():
+                raise ValueError("This dataset has no " + folder + ". Capture those maps first.")
             # Capture uses the image basename for each supervision map.
             for frame in frames:
                 name = Path(frame["file_path"]).stem + extension

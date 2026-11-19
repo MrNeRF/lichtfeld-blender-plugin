@@ -29,10 +29,22 @@ s.use_ppisp=True
 assert not s.use_exposure_correction
 s.use_ppisp=False
 assert not ext.LF_OT_start.poll(bpy.context)
+assert s.quality=='CUSTOM' and s.resolution==1024
+s.quality='HIGH'
+assert ext.capture_settings.format_for(bpy.context.scene,s)['width']==1536
+s.capture_aspect='WIDE'
+s.quality='HIGH'
+format_wide=ext.capture_settings.format_for(bpy.context.scene,s)
+assert (format_wide['width'],format_wide['height'])==(1536,864)
+s.capture_aspect='SQUARE'
 s.quality='BALANCED'
 assert (s.views,s.iterations)==(96,7000)
+assert ext.capture_settings.format_for(bpy.context.scene,s)['width']==1024
 s.views=8
-assert s.quality=='CUSTOM'
+assert s.quality=='CUSTOM' and s.get('quality_preset')=='BALANCED'
+s.views=96
+assert s.quality=='BALANCED'
+s.views=8
 assert bpy.ops.lichtfeld.create_rig()=={'FINISHED'}
 first=s.camera_collection
 assert sum(o.type=="CAMERA" for o in first.objects)==8

@@ -41,6 +41,10 @@ class PackageContracts(unittest.TestCase):
                 self.assertEqual(set(archive.namelist()), packager.RUNTIME_FILES | set(packager.DOCUMENT_FILES))
                 self.assertIn(b'GNU GENERAL PUBLIC LICENSE', archive.read('LICENSE'))
                 self.assertIn(b'Warpgate', archive.read('CREDITS.md'))
+                readme = archive.read('README.md')
+                for logo in ('assets/lichtfeld-logo-white.png', 'assets/lichtfeld-logo-black.png'):
+                    self.assertIn(f'"{logo}"'.encode(), readme)
+                    self.assertIn(logo, archive.namelist())
                 self.assertTrue(all(not name.startswith('/') and '..' not in Path(name).parts for name in archive.namelist()))
 
     def test_archive_is_reproducible_across_source_mtimes(self):

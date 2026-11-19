@@ -3,6 +3,7 @@
 """Bounded Blender-side readiness; filesystem/process checks stay on workers."""
 import time
 import json
+import re
 from pathlib import Path
 import bpy
 from . import jobs,ui_runtime,training_options,capture_settings,capture_preview,scene_render
@@ -13,6 +14,7 @@ _pending={}
 _work=None
 _next=0
 _save_generation=0
+_next_window=0
 
 def jobs_folder(prefs):
  return bpy.path.abspath(prefs.jobs_directory) if prefs.jobs_directory else bpy.utils.user_resource('DATAFILES',path='lichtfeld/jobs',create=False)
@@ -56,30 +58,37 @@ def camera_collections(settings):
  return (collection,) if collection is not None else ()
 
 
+def capture_name_error(obj, label):
+ if bpy.data.objects.get(obj.name) != obj:
+  return f'{label} name is ambiguous in this file: {obj.name}. Rename the {label.lower()} or make it local with a unique name.'
+ return None
+
+
 def camera_objects(scene, settings):
  cameras=set()
  rows=getattr(settings,'capture_collections',())
- if any(row.collection is None for row in rows):
-  raise ValueError('Choose a collection for each capture entry, or remove the empty entries.')
  collections=camera_collections(settings)
- if rows:
-  members=set(scene.collection.children_recursive)
-  members.add(scene.collection)
-  if any(collection not in members for collection in collections):
-   raise ValueError('Choose capture collections linked to this scene.')
+ if rows and not collections:
+  raise ValueError('Choose a collection in Capture sets.')
+ members=set(scene.collection.children_recursive)
+ members.add(scene.collection)
+ if any(collection not in members for collection in collections):
+  raise ValueError('Choose capture collections linked to this scene.')
  for collection in collections:
   for obj in object_steps(collection.all_objects):
    if obj is not None and obj.type=='CAMERA':
     cameras.add(obj)
    yield
- if rows and len({camera.name for camera in cameras}) != len(cameras):
+ if len({camera.name for camera in cameras}) != len(cameras):
   raise ValueError('Capture cameras must have unique names across the included collections.')
- if rows:
-  for camera in cameras:
-   if bpy.data.objects.get(camera.name) != camera:
-    raise ValueError(f'Camera name is ambiguous in this file: {camera.name}. Rename the camera or make the linked camera local with a unique name.')
-   yield
- return sorted(cameras,key=lambda obj:(obj.name,obj.library.filepath if obj.library else ''))
+ for camera in cameras:
+  if error := capture_name_error(camera, 'Camera'):
+   raise ValueError(error)
+  yield
+ def sort_key(obj):
+  name = tuple(int(part) if index % 2 else part for index, part in enumerate(re.split(r'([0-9]+)', obj.name)))
+  return name, obj.name, obj.library.filepath if obj.library else ''
+ return sorted(cameras,key=sort_key)
 
 
 def capture_helpers(settings):
@@ -104,12 +113,17 @@ def signature(context):
   tuple(sorted(obj.as_pointer() for obj in selection_objects(context))) if s.scope=="SELECTION" else (),
   s.rig_reference.mode,s.rig_reference.collection.as_pointer() if s.rig_reference.collection else 0,len(s.rig_reference.objects))
 
+def cache_key(context):
+ return context.scene.as_pointer(),context.view_layer.as_pointer()
+
 def invalidate(scene=None):
  global _work,_next
  pointer=scene.as_pointer() if scene else None
  if pointer is None:_cache.clear()
- else:_cache.pop(pointer,None)
- if _work and (pointer is None or _work[0]==pointer):
+ else:
+  for key in tuple(_cache):
+   if key[0]==pointer:_cache.pop(key)
+ if _work and (pointer is None or _work[0][0]==pointer):
   _work[1].close();_work=None
  _next=0
 
@@ -179,6 +193,8 @@ def collect(context,capture_only=False,*,single_render=False):
  except (ValueError,KeyError) as error:errors.append(str(error))
  for obj in object_steps(capture_objects(context)):
   if is_surface(obj, helpers):
+   if error := capture_name_error(obj, 'Source object'):
+    errors.append(error)
    sources.append(obj.name);visibility[obj.name]=is_hidden(obj,context.view_layer,members=members)
   yield
  if not sources:errors.append('Choose at least one surface object.')
@@ -226,7 +242,7 @@ def synchronous(context,prefs):
 def cached(context,prefs,capture_only=False,*,capture=None):
  # A cooperative launch already collected a fresh snapshot. Busy-state polling
  # may invalidate the display cache while that collection is in progress.
- result=capture if capture is not None else _cache.get(context.scene.as_pointer())
+ result=capture if capture is not None else _cache.get(cache_key(context))
  if not result or result['signature']!=signature(context):
   return {'errors':['Checking source and cameras…'],'sources':[],'cameras':[], 'checking':True,'environment':environment(prefs,capture_only=capture_only)}
  errors=list(result.get('capture_errors',result['errors']) if capture_only else result['errors'])
@@ -236,7 +252,7 @@ def cached(context,prefs,capture_only=False,*,capture=None):
 
 def camera_status(context):
  # Read the canonical readiness snapshot; drawing must not launch another scan.
- result=_cache.get(context.scene.as_pointer())
+ result=_cache.get(cache_key(context))
  return result if result and result['signature']==signature(context) else None
 
 
@@ -253,6 +269,28 @@ def issues(result,require_saved=True):
  errors.extend(save_issues(require_saved))
  return errors
 
+def suspend():
+ global _work,_next
+ if _work:
+  _work[1].close()
+  _work=None
+ _next=0
+
+
+def tick_windows(context, prefs, windows):
+ global _next_window
+ if not windows:
+  suspend()
+  return
+ window=next((item for item in windows
+              if _work and (item.scene.as_pointer(),item.view_layer.as_pointer())==_work[0]),None)
+ if window is None:
+  window=next((item for item in windows if item.as_pointer()==_next_window),windows[0])
+ with context.temp_override(window=window):
+  advance=tick(context,prefs)
+ if advance:
+  _next_window=windows[(windows.index(window)+1)%len(windows)].as_pointer()
+
 def tick(context,prefs):
  from . import rig_analysis
  if rig_analysis.is_running():return
@@ -261,15 +299,16 @@ def tick(context,prefs):
  if capture_preview.is_preview(context.scene):return
  s=context.scene.lichtfeld_training
  if s.running or s.operation_busy or s.attached_session or s.dataset_mode=="REUSE":
-  invalidate(context.scene)
-  return
+  if _work and _work[0]==cache_key(context):invalidate(context.scene)
+  return True
  scene_render.tick(context.scene)
  environment(prefs,capture_only=s.dataset_mode=="EXPORT")
- if _work and _work[0]!=context.scene.as_pointer():
+ key=cache_key(context)
+ if _work and _work[0]!=key:
   _work[1].close();_work=None;_next=0
  if _work is None:
   if time.monotonic()<_next:return
-  _work=(context.scene.as_pointer(),collect(context))
+  _work=(key,collect(context))
  deadline=time.perf_counter()+.002
  while _work and time.perf_counter()<deadline:
   pointer,work=_work
@@ -282,7 +321,8 @@ def tick(context,prefs):
     for screen in bpy.data.screens:
      for area in screen.areas:
       if area.type=='VIEW_3D':area.tag_redraw()
-  except (ReferenceError,RuntimeError):_work=None;_next=0
+   return True
+  except (ReferenceError,RuntimeError):_work=None;_next=0;return True
 
 def saved():
  global _save_generation,_work,_next

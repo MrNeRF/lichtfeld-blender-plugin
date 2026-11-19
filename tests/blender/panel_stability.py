@@ -159,6 +159,7 @@ assert 'lichtfeld.create_rig' not in dict(layout.operations)
 assert 'iterations' not in dict(layout.fields) and 'scope' not in dict(layout.fields)
 bpy.context.window_manager.lichtfeld_panels.setup_content = bpy.context.window_manager.lichtfeld_panels.setup_cameras = bpy.context.window_manager.lichtfeld_panels.setup_output = bpy.context.window_manager.lichtfeld_panels.setup_training = True
 # Rig actions live in the expanded section, never in its disclosure header.
+bpy.context.window_manager.lichtfeld_panels.rig_generator = True
 for loaded in (False, True):
     s.rig_parameter_source=s.camera_collection if loaded else None
     layout=Layout()
@@ -201,7 +202,7 @@ pre.clear()
 with patch.object(pre, "bpy", fake_bpy), patch.object(pre, "environment"), patch.object(pre.scene_render, 'tick'), patch.object(pre, "collect", side_effect=collect):
     for _ in range(20):
         pre._next = 0
-        pre.tick(SimpleNamespace(scene=fake_scene), None)
+        pre.tick(SimpleNamespace(scene=fake_scene, view_layer=SimpleNamespace(as_pointer=lambda: 456)), None)
 assert area.tag_redraw.call_count == 1, area.tag_redraw.call_count
 print("UNCHANGED_VALIDATION_NO_REDRAW_PASS")
 pre.clear()

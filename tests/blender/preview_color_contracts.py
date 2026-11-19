@@ -34,7 +34,7 @@ p=bpy.data.pointclouds.new('color test');p.type='GAUSSIAN_SPLAT';p.resize(2)
 for name,kind,prop,value in blender_fields(base):
  a=p.attributes.get(name) or p.attributes.new(name,kind,'POINT');a.data.foreach_set(prop,value)
 o=bpy.data.objects.new('color test splats',p);s.collection.objects.link(o)
-with tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parents[2]/"artifacts") as temp:
+with tempfile.TemporaryDirectory() as temp:
  def render(label):
   s.render.filepath=str(Path(temp)/(label+'.png'));bpy.ops.render.render(write_still=True)
   im=bpy.data.images.load(s.render.filepath,check_existing=False)
@@ -198,6 +198,22 @@ with patch.object(ext.ui_runtime,'peek',return_value=current),patch.object(ext.u
   assert reply=={'CANCELLED'} and commands.empty()
  finally:s.lichtfeld_training.attached_session=''
 print('COLOR_VIEW_CONTROL_OWNERSHIP_PASS',flush=True)
+preview_name = bpy.context.scene.name
+s.lichtfeld_training.operation_busy = True
+try:
+ colors.close_view(bpy.context)
+ assert bpy.context.scene == s and preview_name in bpy.data.scenes
+finally:
+ s.lichtfeld_training.operation_busy = False
+preview = bpy.data.scenes[preview_name]
+bpy.context.window.scene = preview
+s.background_set = preview
 colors.close_view(bpy.context);assert bpy.context.scene==s
+assert preview_name in bpy.data.scenes, 'Closing unlinked a preview used as the background scene'
+s.background_set = None
+bpy.context.window.scene = preview
+colors.close_view(bpy.context);assert bpy.context.scene==s
+assert preview_name not in bpy.data.scenes
+assert s.lichtfeld_training.result_object is not None
 print('ISOLATED_COLOR_SCENE_NAVIGATION_PASS',flush=True)
 ext.ui_runtime.clear()
