@@ -34,7 +34,7 @@ p=bpy.data.pointclouds.new('color test');p.type='GAUSSIAN_SPLAT';p.resize(2)
 for name,kind,prop,value in blender_fields(base):
  a=p.attributes.get(name) or p.attributes.new(name,kind,'POINT');a.data.foreach_set(prop,value)
 o=bpy.data.objects.new('color test splats',p);s.collection.objects.link(o)
-with tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parents[2]/"artifacts") as temp:
+with tempfile.TemporaryDirectory() as temp:
  def render(label):
   s.render.filepath=str(Path(temp)/(label+'.png'));bpy.ops.render.render(write_still=True)
   im=bpy.data.images.load(s.render.filepath,check_existing=False)
