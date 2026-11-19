@@ -16,11 +16,14 @@ ext = importlib.import_module(module)
 source = bpy.context.scene
 s = source.lichtfeld_training
 s.scope='SCENE';s.views=4;s.rig_distance=1.05
+original_engine = source.render.engine
 source.render.engine = 'CYCLES'
 source.cycles.device = 'GPU'
 source.render.use_border = True
 source.render.use_crop_to_border = True
 source.render.border_min_x = .2
+source.render.border_min_y = .25
+source.render.border_max_x = .9
 source.render.border_max_y = .8
 def display_settings(scene):
     render = scene.render
@@ -143,8 +146,9 @@ for _ in range(3):
     assert bpy.ops.lichtfeld.capture_framing()=={'FINISHED'}
     while ext.capture_preview.camera_pending(preview):ext.ui_runtime.tick()
     assert len(bpy.data.scenes)==counts[0]+1
-    assert display_settings(preview) == preview_display
     preview=bpy.context.scene
+    assert preview.as_pointer() == preview_id
+    assert display_settings(preview) == preview_display
     # Closing before the queued camera update starts cannot resurrect a preview.
     s.capture_preview_index=1
     assert ext.capture_preview.camera_pending(preview)
@@ -154,6 +158,7 @@ for _ in range(3):
     assert bpy.context.scene==source
     assert (len(bpy.data.scenes),len(bpy.data.objects),len(bpy.data.cameras))==counts
 source.cycles.device = 'CPU'
+source.render.engine = original_engine
 source.render.use_border = False
 source.render.use_crop_to_border = False
 # Invalid settings fail before creating any preview data, with the source restored.
