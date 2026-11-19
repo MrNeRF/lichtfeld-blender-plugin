@@ -52,11 +52,25 @@ class WorkflowTests(unittest.TestCase):
    jobs.release_source(job);self.assertFalse(staged.exists())
  def test_connection_index(self):
   with tempfile.TemporaryDirectory() as directory:
-   root=Path(directory)/'job';root.mkdir();(root/'job.json').write_text('{}')
-   job={'source_file':str(Path(directory)/'source.blend'),'scene':'Scene','root':str(root)}
+   root=Path(directory)/'job';root.mkdir()
+   source=Path(directory)/'source.blend';source.write_bytes(b'original')
+   manifest=root/'job.json'
+   job={'schema':jobs.SCHEMA,'id':'capture','source_file':str(source),'scene':'Scene','root':str(root),
+        'source_identity':jobs.source_identity(source.stat())}
+   jobs.atomic_json(manifest,job)
    index=Path(directory)/'connections';jobs.remember_job(index,job)
    self.assertEqual(jobs.remembered_job(index,job['source_file'],'Scene'),str(root))
    self.assertIsNone(jobs.remembered_job(index,job['source_file'],'Other Scene'))
+   replacement=source.with_suffix('.tmp');replacement.write_bytes(b'replaced')
+   replacement.replace(source)
+   self.assertIsNone(jobs.remembered_job(index,job['source_file'],'Scene'))
+   self.assertEqual(Path(jobs.load_job(str(manifest))),root.resolve())
+   # Legacy manifests without a verifiable source remain available for explicit loading.
+   job.pop('source_identity')
+   jobs.atomic_json(manifest,job)
+   self.assertIsNone(jobs.remembered_job(index,job['source_file'],'Scene'))
+   manifest.write_text('{')
+   self.assertIsNone(jobs.remembered_job(index,job['source_file'],'Scene'))
 
  def test_snapshot_identity_rejects_replaced_source(self):
   with tempfile.TemporaryDirectory() as directory:
