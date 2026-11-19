@@ -44,6 +44,28 @@ def camera_pending(scene):
     return scene.as_pointer() in _pending
 
 
+def clear_pending():
+    """Forget requests after the UI queue has been cancelled."""
+    _pending.clear()
+
+
+def restore_history_navigation(context):
+    """Use one visible, restored camera per source, preferring the active window."""
+    windows = sorted(context.window_manager.windows, key=lambda window: window != context.window)
+    restored = set()
+    for window in windows:
+        preview = window.scene
+        source = source_scene(preview)
+        if source is None or source in restored:
+            continue
+        restored.add(source)
+        settings = source.lichtfeld_training
+        index = preview.get('capture_camera_index')
+        if type(index) is int and 1 <= index <= capture_settings.MAX_VIEWS:
+            set_camera_index(settings, index)
+        camera_changed(settings, context, refresh_only=True)
+
+
 def is_preview(scene):
     try:
         return isinstance(scene, bpy.types.Scene) and (bool(scene.get('lichtfeld_capture_preview')) or SOURCE in scene)
@@ -92,10 +114,16 @@ def restore_window(window, area):
         pass
 
 
-def remove_camera(scene):
+def owned_camera(scene):
     camera = scene.camera
-    if not camera or not camera.get(CAMERA):
-        camera = next((obj for obj in scene.collection.objects if obj.type == 'CAMERA' and obj.get(CAMERA)), None)
+    if camera and camera.get(CAMERA):
+        return camera
+    return next((obj for obj in scene.collection.objects if obj.type == 'CAMERA' and obj.get(CAMERA)), None)
+
+
+def remove_camera(scene, camera=None):
+    if camera is None:
+        camera = owned_camera(scene)
     if camera:
         other_scenes = [item for item in camera.users_scene if item != scene]
         if other_scenes:
@@ -248,10 +276,13 @@ def camera_steps(source, preview, key, token):
             preview['capture_excluded_count'] = excluded
             return
         # No yield between camera allocation and commit/cleanup.
-        remove_camera(preview)
+        previous = owned_camera(preview)
         preview.collection.objects.link(camera)
+        # Keep an active camera throughout the swap so Blender stays in Camera view.
         preview.camera = camera
         camera = None
+        if previous is not None:
+            remove_camera(preview, previous)
         capture_settings.apply_format(preview, value)
         preview['capture_camera_name'] = original.name
         preview[ORIGINAL_CAMERA] = original
