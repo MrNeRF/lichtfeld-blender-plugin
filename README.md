@@ -1,13 +1,36 @@
-<picture>
+<div align="center"><picture>
   <source media="(prefers-color-scheme: dark)" srcset="lichtfeld_training/assets/lichtfeld-logo-white.png">
-  <img src="lichtfeld_training/assets/lichtfeld-logo-black.png" alt="LichtFeld Studio" height="36">
-</picture>
+  <img src="lichtfeld_training/assets/lichtfeld-logo-black.png" alt="LichtFeld Studio" height="60">
+</picture></div>
+
+<div align="center">
 
 # LichtFeld for Blender
 
-Browse your LichtFeld Portal assets and bring their splats into Blender, or create a camera rig, capture a calibrated dataset, and train a navigable Gaussian splat from your scene. Capture, training and Portal asset preparation use separate processes, so the LichtFeld Studio window can remain closed.
+**3D Gaussian Splatting in Blender, powered by [LichtFeld Studio](https://lichtfeld.io)**
+
+Train a Gaussian splat from your Blender scene, or bring your LichtFeld Portal splats into Blender. Create a camera rig, capture a calibrated dataset with Cycles or EEVEE, and follow training live in the viewport. Capture, training and Portal asset preparation use separate processes, so the LichtFeld Studio window can remain closed.
+
+[![Discord](https://img.shields.io/badge/Discord-Join%20Us-7289DA?logo=discord&logoColor=white)](https://discord.gg/TbxJST2BbC)
+[![Website](https://img.shields.io/badge/Website-LichtFeld%20Studio-blue)](https://lichtfeld.io)
+[![X](https://img.shields.io/badge/X-Follow-111111?logo=x&logoColor=white)](https://twitter.com/janusch_patas)
+[![YouTube](https://img.shields.io/badge/YouTube-Subscribe-FF0000?logo=youtube&logoColor=white)](https://www.youtube.com/@lichtfeldstudio)
+[![Papers](https://img.shields.io/badge/Papers-Awesome%203DGS-orange)](https://mrnerf.github.io/awesome-3D-gaussian-splatting/)
+
+[![GitHub Sponsors](https://img.shields.io/badge/GitHub%20Sponsors-Support-EA4AAA?logo=githubsponsors&logoColor=white)](https://github.com/sponsors/MrNeRF)
+[![PayPal](https://img.shields.io/badge/PayPal-Support-00457C?logo=paypal&logoColor=white)](https://paypal.me/MrNeRF)
+[![Donorbox](https://img.shields.io/badge/Donorbox-Support-27A9E1)](https://donorbox.org/lichtfeld-studio)
+
+[**Download**](https://github.com/MrNeRF/lichtfeld-blender-plugin/releases) •
+[**User Guide**](docs/user-guide.md) •
+[**LichtFeld Studio**](https://github.com/MrNeRF/LichtFeld-Studio) •
+[**Gaussian Splat Editor**](https://lichtfeld.io/gaussian-splat-editor/) •
+[**Portal**](https://portal.lichtfeld.io/) •
+[**Join Discord**](https://discord.gg/TbxJST2BbC)
 
 **Version 0.1.0-beta.1 · Blender 5.3.x · GPL-3.0-or-later**
+
+</div>
 
 ## What you can do
 
