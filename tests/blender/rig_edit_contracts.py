@@ -1023,7 +1023,7 @@ s.capture_collections[0].collection = None
 try:
     checked()
 except ValueError as error:
-    assert 'Choose a collection in Capture sets' in str(error)
+    assert 'Choose a camera set in Cameras' in str(error)
 else:
     raise AssertionError('An entirely empty capture list fell back to the edited rig')
 s.capture_collections[0].collection = second_rig
@@ -1083,3 +1083,22 @@ assert tuple(ext.preflight.camera_collections(s)) == original_capture
 assert s.camera_collection not in original_capture
 assert reports[0][0] == {'WARNING'} and reports[0][1].startswith('8 new camera poses repeat'), reports
 print('UNCHANGED_RIG_WARNED_WITHOUT_ADDING_DUPLICATE_VIEWS_PASS', flush=True)
+
+# Deleting the last included collection leaves the edit target available for
+# explicit recovery, without altering what the scene capture will render.
+removed = s.capture_collections[0].collection
+assert removed != s.camera_collection
+bpy.data.collections.remove(removed, do_unlink=True)
+assert not ext.preflight.camera_collections(s)
+assert not bpy.ops.lichtfeld.capture_framing.poll()
+assert ext.preflight.camera_setup_issue(s) == 'Choose a camera set in Cameras.'
+assert bpy.ops.lichtfeld.live_rig() == {'FINISHED'}
+assert ext.preflight.camera_setup_issue(s) == 'Finish live editing to continue.'
+assert not bpy.ops.lichtfeld.start_training.poll()
+assert not bpy.ops.lichtfeld.export_dataset.poll()
+assert bpy.ops.lichtfeld.live_rig() == {'FINISHED'}
+assert ext.preflight.camera_setup_issue(s) == 'Choose a camera set in Cameras.'
+assert bpy.ops.lichtfeld.capture_collection_entry(use_edited=True) == {'FINISHED'}
+assert checked()['camera_count'] == 8
+assert s.scope == 'SCENE' and bpy.ops.lichtfeld.capture_framing.poll()
+print('DELETED_CAPTURE_SET_RECOVERS_WITHOUT_CHANGING_CONTENT_PASS', flush=True)

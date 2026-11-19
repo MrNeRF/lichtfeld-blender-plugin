@@ -659,9 +659,9 @@ def register():
     bpy.types.WindowManager.lichtfeld_portal = PointerProperty(type=LF_PortalState, options={"SKIP_SAVE"})
     bpy.types.WindowManager.lichtfeld_workspace = EnumProperty(name="LichtFeld workspace",
         description="Choose Portal assets or the scene capture and training workflow",
-        items=(("PORTAL", "Portal", "Browse and import your Portal assets", "ASSET_MANAGER", 0),
-               ("TRAINING", "Capture / Train", "Prepare cameras and datasets, train or view a trainer", "CAMERA_DATA", 1)),
-        default="PORTAL", options={"SKIP_SAVE"})
+        items=(("TRAINING", "Capture / Train", "Prepare cameras and datasets, train or view a trainer", "CAMERA_DATA", 1),
+               ("PORTAL", "Portal", "Browse and import your Portal assets", "ASSET_MANAGER", 0)),
+        default="TRAINING", options={"SKIP_SAVE"})
     bpy.types.TOPBAR_MT_file_import.append(import_menu)
     if not bpy.app.background:
         bpy.app.timers.register(tick, first_interval=0.2, persistent=True)

@@ -368,8 +368,11 @@ class LF_OT_capture_framing(bpy.types.Operator):
             return False
         source = source_scene(context.scene) or context.scene
         s = source.lichtfeld_training
-        from .preflight import camera_collections
-        return bool(camera_collections(s)) and not s.running and not s.operation_busy and not s.job_directory
+        from .preflight import camera_setup_issue
+        if issue := camera_setup_issue(s):
+            cls.poll_message_set(issue)
+            return False
+        return not s.running and not s.operation_busy and not s.job_directory
 
     def execute(self, context):
         source = source_scene(context.scene) or context.scene

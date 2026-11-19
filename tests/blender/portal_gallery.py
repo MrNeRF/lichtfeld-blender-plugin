@@ -21,7 +21,7 @@ brand = portal._icons["lichtfeld"]
 portal.clear_thumbnails()
 assert portal._icons["lichtfeld"] is brand
 browser = bpy.context.window_manager.lichtfeld_portal
-assert bpy.context.window_manager.lichtfeld_workspace == "PORTAL"
+assert bpy.context.window_manager.lichtfeld_workspace == "TRAINING"
 bpy.context.window_manager.lichtfeld_workspace = "TRAINING"
 bpy.context.window_manager.lichtfeld_workspace = "PORTAL"
 settings = bpy.context.scene.lichtfeld_training
@@ -36,7 +36,7 @@ assert bpy.context.window_manager.lichtfeld_workspace == "PORTAL"
 settings.job_directory = ""
 bpy.context.window_manager.property_unset("lichtfeld_workspace")
 portal.select_workspace(bpy.context)
-assert bpy.context.window_manager.lichtfeld_workspace == "PORTAL"
+assert bpy.context.window_manager.lichtfeld_workspace == "TRAINING"
 with TemporaryDirectory() as directory:
     filename = str(IOPath(directory) / "workspace.blend")
     bpy.context.scene.lichtfeld_training.camera_collection = bpy.data.collections.new("Saved capture")

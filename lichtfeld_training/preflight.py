@@ -58,6 +58,15 @@ def camera_collections(settings):
  return (collection,) if collection is not None else ()
 
 
+def camera_setup_issue(settings):
+ from .rig_edit import live_root
+ if live_root(settings):
+  return 'Finish live editing to continue.'
+ if not camera_collections(settings):
+  return 'Choose a camera set in Cameras.'
+ return ''
+
+
 def capture_name_error(obj, label):
  if bpy.data.objects.get(obj.name) != obj:
   return f'{label} name is ambiguous in this file: {obj.name}. Rename the {label.lower()} or make it local with a unique name.'
@@ -69,7 +78,7 @@ def camera_objects(scene, settings):
  rows=getattr(settings,'capture_collections',())
  collections=camera_collections(settings)
  if rows and not collections:
-  raise ValueError('Choose a collection in Capture sets.')
+  raise ValueError('Choose a camera set in Cameras.')
  members=set(scene.collection.children_recursive)
  members.add(scene.collection)
  if any(collection not in members for collection in collections):
@@ -201,14 +210,15 @@ def collect(context,capture_only=False,*,single_render=False):
  checks=yield from camera_checks(context,single_render=single_render)
  cameras=checks['cameras'];camera_count=checks['camera_count']
  generated_cameras=checks['generated_cameras'];camera_issues=checks['camera_issues']
- if checks['camera_selection_error']:errors.append(checks['camera_selection_error'])
+ if camera_error := checks['camera_selection_error']:errors.append(camera_error)
  errors.extend(camera_issues)
  reference_changed=False
  if s.camera_collection and s.camera_collection.get('lichtfeld_generated'):
   from . import rig_edit
   reference_changed=yield from rig_edit.reference_changed(s.rig_reference,s.camera_collection.lichtfeld_rig_reference)
- try:capture_settings.validate_view_count(len(cameras),single_render=single_render)
- except ValueError as error:errors.append(str(error))
+ if not camera_error:
+  try:capture_settings.validate_view_count(len(cameras),single_render=single_render)
+  except ValueError as error:errors.append(str(error))
  if s.scope=='SCENE':
   for obj in object_steps(context.scene.objects):
    if not obj.get('lichtfeld_result') and (obj.type in {'MESH','CURVE','SURFACE','FONT','META','VOLUME','POINTCLOUD'} or obj.type=='EMPTY' and obj.instance_type=='COLLECTION'):
