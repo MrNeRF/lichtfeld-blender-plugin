@@ -108,8 +108,6 @@ def apply_format(scene, value):
     scene.render.resolution_percentage = 100
     scene.render.pixel_aspect_x = value['pixel_aspect_x']
     scene.render.pixel_aspect_y = value['pixel_aspect_y']
-    scene.render.use_border = False
-    scene.render.use_crop_to_border = False
 
 
 def apply_camera(data, value):

@@ -28,6 +28,9 @@ with tempfile.TemporaryDirectory() as directory:
  s.dataset_mode='EXPORT'
  s.scope='SCENE';s.views=4;s.resolution=32;s.samples=4;s.engine='BLENDER_EEVEE';s.use_depth_loss=False;s.use_normal_loss=False
  ext.capture_settings.apply_format(bpy.context.scene, ext.capture_settings.preset_format(s))
+ render=bpy.context.scene.render
+ render.use_border=True;render.use_crop_to_border=True
+ render.border_min_x=.25;render.border_min_y=.25;render.border_max_x=.75;render.border_max_y=.75
  s.refine_start=.9;s.refine_end=.1 # Irrelevant training settings must not block export.
  bpy.ops.lichtfeld.create_rig()
  expected_cameras={obj.name for obj in s.camera_collection.objects if obj.type=='CAMERA'}
@@ -57,6 +60,14 @@ with tempfile.TemporaryDirectory() as directory:
  assert set(metadata['cameras'])==expected_cameras
  first_output=Path(state['export_directory'])
  assert not (root/'dataset').exists()
+ image_paths=list((first_output/'images').glob('*.png'))
+ assert len(image_paths)==len(expected_cameras)
+ frame=metadata['capture_format']
+ for image_path in image_paths:
+  image=bpy.data.images.load(str(image_path),check_existing=False)
+  try: assert tuple(image.size)==(frame['width'],frame['height']), tuple(image.size)
+  finally: bpy.data.images.remove(image)
+ assert render.use_border and render.use_crop_to_border
  assert ext.jobs.captured_dataset(root)[2]==first_output
  # Reconstruct an interrupted capture from the exported data for the recovery case.
  shutil.copytree(first_output, root/'dataset',ignore=shutil.ignore_patterns('job.json'))

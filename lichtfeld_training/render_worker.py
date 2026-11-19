@@ -270,6 +270,9 @@ def render_dataset(job_path, reuse_images=False):
     elif not requested_render:
         scene.eevee.taa_render_samples = job["samples"]
     apply_format(scene, capture_format)
+    # Calibrated images and RGB test renders use the full camera frame.
+    scene.render.use_border = False
+    scene.render.use_crop_to_border = False
     scene.render.use_motion_blur = False
     scene.render.image_settings.file_format = "PNG"
     isolated = job["scope"] != "SCENE"
