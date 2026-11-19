@@ -16,6 +16,7 @@ GROUPS = {
                    'mip_filter', 'enable_sparsity'),
 }
 FIELDS = tuple(name for group in GROUPS.values() for name in group)
+SCHEDULE_FIELDS = {'refine_start': 'start_refine', 'refine_end': 'stop_refine', 'growth_end': 'grow_until_iter'}
 PROBABILITIES = {'lambda_dssim','grow_fraction','opacity_decay','scale_decay'}
 LABELS = {
     'means_lr': 'Position LR', 'means_lr_end': 'Final position LR',

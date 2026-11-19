@@ -382,7 +382,7 @@ class TrainingBridge:
                 self.retain_best(write_splat(self.root, self.capture(), self.iteration, "last"))
             self.publish("failed" if self.error else "finalizing")
         except Exception as error:
-            self.error = str(error)
+            self.error = self.error or str(error)
             self.publish("failed")
         finally:
             self.writer.shutdown(wait=True)

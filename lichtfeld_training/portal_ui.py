@@ -610,7 +610,11 @@ class LF_PT_portal(bpy.types.Panel):
 
     def draw_header_preset(self, context):
         self.layout.operator("lichtfeld.setup", text="", icon="PREFERENCES")
-        self.layout.operator('wm.url_open', text='', icon='QUESTION').url = 'https://github.com/MrNeRF/lichtfeld-blender-plugin/blob/main/docs/user-guide.md'
+        guide = Path(__file__).with_name('docs') / 'user-guide.md'
+        if guide.is_file():
+            self.layout.operator('wm.path_open', text='', icon='QUESTION').filepath = str(guide)
+        else:
+            self.layout.operator('wm.url_open', text='', icon='QUESTION').url = 'https://github.com/MrNeRF/lichtfeld-blender-plugin/blob/main/docs/user-guide.md'
 
     def draw(self, context):
         tabs = self.layout.row()
@@ -630,7 +634,7 @@ class LF_PT_portal(bpy.types.Panel):
         account_controls(self.layout)
         snapshot = state()
         account = snapshot.get("account")
-        if account and account.signed_in:
+        if bpy.app.online_access and account and account.signed_in:
             row = self.layout.row()
             row.operator_context = "INVOKE_DEFAULT"
             row.operator("lichtfeld.portal_gallery", text="Browse gallery…")

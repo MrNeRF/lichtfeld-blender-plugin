@@ -92,10 +92,17 @@ class LargeJobs(unittest.TestCase):
                 return {'fixture':'complete'}
             def launch(*args): state['launches']+=1
             def schedule(generator,failure): state['work']=generator
+            wait = object()
+            probes = []
+            def readiness(*args, **kwargs):
+                probes.append(None)
+                return {'checking': len(probes) == 1, 'environment': {}}
             namespace={'bpy':types.SimpleNamespace(app=types.SimpleNamespace(background=False)),
                 'time':types.SimpleNamespace(perf_counter=clock),
-                'preflight':types.SimpleNamespace(collect=collect,signature=signature),
-                'ui_runtime':types.SimpleNamespace(schedule=schedule),
+                'preferences':lambda _: None,
+                'scene_render':types.SimpleNamespace(tick=lambda _: None),
+                'preflight':types.SimpleNamespace(collect=collect,signature=signature,cached=readiness,issues=lambda _: []),
+                'ui_runtime':types.SimpleNamespace(schedule=schedule,WAIT=wait),
                 'LF_OT_start':types.SimpleNamespace(launch=launch),'LF_OT_export_dataset':type('Export',(),{})}
             exec(compile(ast.Module(body=[method],type_ignores=[]),'<capture execute>','exec'),namespace)
             self.assertEqual(namespace['execute'](object(),context),{'FINISHED'})
@@ -103,7 +110,10 @@ class LargeJobs(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError,'capture setup changed'): list(state['work'])
                 self.assertEqual(state['launches'],0)
             else:
-                list(state['work'])
+                for step in state['work']:
+                    if step is wait:
+                        self.assertEqual(state['launches'],0)
+                self.assertEqual(len(probes),2)
                 self.assertEqual(state['launches'],1)
             self.assertLess(state['reads'],10)
             self.assertFalse(settings.operation_busy)

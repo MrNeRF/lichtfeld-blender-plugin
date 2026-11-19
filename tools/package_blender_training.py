@@ -103,6 +103,8 @@ def package(output, *, repository=None):
         if path.is_symlink() or not path.resolve().is_relative_to(repository):
             raise ValueError(f"Package source must stay inside the repository: {name}")
         data = path.read_bytes()
+        if name == "README.md":
+            data = data.replace(b'"lichtfeld_training/assets/', b'"assets/')
         if not data:
             raise ValueError(f"Package source is empty: {name}")
         if path.suffix == ".py":

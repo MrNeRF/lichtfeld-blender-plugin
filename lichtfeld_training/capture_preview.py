@@ -441,7 +441,7 @@ def draw(layout, context, source, *, width=None):
     from .rig_edit import render_busy
     box.enabled = not (render_busy(context) or s.operation_busy or s.running or s.job_directory)
     box.prop(context.window_manager.lichtfeld_panels, 'framing_camera', text='Camera number')
-    box.label(text=f"{context.scene.get('capture_camera_count', 0)} cameras, sorted by name")
+    box.label(text=f"{context.scene.get('capture_camera_count', 0)} cameras, in name order")
     draw_capture_format(box, source, s, wrapped)
     draw_capture_overrides(box, s, wrapped)
     box.operator('lichtfeld.capture_framing', text='Apply preview settings')
@@ -527,12 +527,23 @@ def test_image_steps(context, *, source=None, window=None, area=None, framing=Fa
             raise RuntimeError(state.get('error', 'Test render failed. See render.log in ' + job['root']))
         from pathlib import Path
         path = str(Path(job['root']) / state['image'])
+        previous = settings.test_render_image
         settings.test_render_image = path
         if (not bpy.app.background and any(item == window for item in bpy.context.window_manager.windows)
                 and (window.scene == source or source_scene(window.scene) == source)
                 and any(item == area for item in window.screen.areas)):
             with bpy.context.temp_override(window=window, area=area):
                 bpy.ops.lichtfeld.show_test_image('EXEC_DEFAULT')
+        if previous and previous != path:
+            from .jobs import discard_superseded_test_image
+            old_path = Path(bpy.path.abspath(previous))
+            in_use = any(item != source and item.lichtfeld_training.test_render_image == previous
+                         for item in bpy.data.scenes)
+            in_use = in_use or any(image.users and image.filepath and
+                                   Path(bpy.path.abspath(image.filepath, library=image.library)) == old_path
+                                   for image in bpy.data.images)
+            if not in_use:
+                ui_runtime.submit(lambda: discard_superseded_test_image(old_path))
     except ReferenceError:
         return  # Source removal is cancellation, not a StructRNA error notice.
     finally:

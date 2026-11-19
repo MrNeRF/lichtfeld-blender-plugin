@@ -304,7 +304,7 @@ def live_controls():
                     work = extension.preflight.collect(bpy.context)
                     while len(work.gi_frame.f_locals.get('cameras', ())) < 2:
                         next(work)
-                    extension.preflight._work = (bpy.context.scene.as_pointer(), work)
+                    extension.preflight._work = (extension.preflight.cache_key(bpy.context), work)
                     with bpy.context.temp_override(area=area): bpy.ops.ed.undo()
                     assert extension.preflight._work is None
                 elif step == 8:

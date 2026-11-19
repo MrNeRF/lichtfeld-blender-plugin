@@ -403,7 +403,7 @@ def tick():
     return 0.02
 
 
-def reset_for_new_training(scene, on_ready=None):
+def reset_for_new_training(scene):
     """Detach the old run before setup; deleted old previews cannot reappear."""
     settings = scene.lichtfeld_training
     previous = peek(scene)
@@ -439,9 +439,8 @@ def reset_for_new_training(scene, on_ready=None):
                 from .visibility import forget
                 forget(scene, job)
             settings.operation_busy = False
-            settings.status = "Ready for new training"
-            if on_ready:
-                on_ready()
+            if not settings.job_directory:
+                settings.status = "Ready for new training"
         finally:
             settings.operation_busy = False
     schedule(prepare(), lambda error: report_failure(None, error))

@@ -3,8 +3,8 @@
 """Pure workflow rules shared by controls and tests."""
 PRESETS = {
  'DRAFT': (2000,500,48,512,16,250000),
- 'BALANCED': (7000,1000,96,768,32,500000),
- 'HIGH': (30000,2000,144,1024,64,1000000),
+ 'BALANCED': (7000,1000,96,1024,32,500000),
+ 'HIGH': (30000,2000,144,1536,64,1000000),
 }
 PRESET_FIELDS=('iterations','eval_interval','views','resolution','samples','max_points')
 CAPTURE_PHASES={'preparing','preparing capture','preparing source snapshot','rendering','exporting dataset','finalizing capture'}

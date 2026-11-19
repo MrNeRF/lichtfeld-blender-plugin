@@ -120,9 +120,10 @@ assert ext.scene_render.snapshot(scene) == before
 assert source.read_bytes() == source_bytes
 assert scene.cycles.max_bounces == 3
 assert not (job/'training.json').exists()
-manifest = ext.read_json(job/'dataset/manifest.json')
+dataset = Path(state['export_directory'])
+manifest = ext.read_json(dataset/'manifest.json')
 assert manifest['capture_format'] == {'width':128,'height':80,'pixel_aspect_x':1.,'pixel_aspect_y':scene.render.pixel_aspect_y}
-image = bpy.data.images.load(str(job/'dataset/images/view_000000.png'), check_existing=False)
+image = bpy.data.images.load(str(dataset/'images/view_000000.png'), check_existing=False)
 try:
     image.colorspace_settings.name = 'Non-Color'
     pixels = np.empty(len(image.pixels), np.float32)

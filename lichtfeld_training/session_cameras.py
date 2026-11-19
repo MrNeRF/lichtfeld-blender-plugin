@@ -36,11 +36,21 @@ def remove_steps(scene):
 
 
 def visibility_steps(scene):
- for collection in scene.collection.children:
-  if collection.get('lichtfeld_session_cameras'):
-   for obj in collection.objects:
-    obj.hide_viewport=not scene.lichtfeld_training.show_session_cameras
-    yield
+ hidden = not scene.lichtfeld_training.show_session_cameras
+ for collection in list(scene.collection.children):
+  try:
+   if not collection.get('lichtfeld_session_cameras'):
+    continue
+   objects = list(collection.objects)
+  except ReferenceError:
+   continue
+  for obj in objects:
+   try:
+    if obj.get('lichtfeld_session_camera') and collection.objects.get(obj.name) == obj:
+     obj.hide_viewport = hidden
+   except ReferenceError:
+    pass
+   yield
 
 
 def install_steps(scene,geometry,revision):

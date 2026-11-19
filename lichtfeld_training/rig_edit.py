@@ -100,9 +100,16 @@ def reference_bounds_steps(sources, graph):
     return low, high
 
 
+RIG_OBJECT_KEYS = {
+    'target': 'lichtfeld_rig_target',
+    'curve': 'lichtfeld_rig_curve',
+    'mesh': 'lichtfeld_placement_mesh',
+}
+
+
 def remember_objects(collection, settings):
-    for key, value in (('lichtfeld_placement_mesh', settings.rig_mesh),
-                       ('lichtfeld_rig_curve', settings.rig_curve), ('lichtfeld_rig_target', settings.rig_target)):
+    for name, key in RIG_OBJECT_KEYS.items():
+        value = getattr(settings, f'rig_{name}')
         if value:
             collection[key] = value
         elif key in collection:
@@ -421,6 +428,27 @@ def decode_recipe(encoded):
         raise ValueError('Invalid path link mode')
     return values
 
+def recipe_matches(collection, settings):
+    from . import rig_recipe
+
+    stored = collection.get('lichtfeld_rig_recipe')
+    current = rig_recipe(settings)
+    for name, key in RIG_OBJECT_KEYS.items():
+        if key in collection and collection.get(key) != getattr(settings, f'rig_{name}'):
+            return False
+    if stored == current:
+        return True
+    try:
+        applied = decode_recipe(stored)
+    except (TypeError, ValueError):
+        return False
+    for name, key in RIG_OBJECT_KEYS.items():
+        if key in collection and name in applied:
+            obj = collection.get(key)
+            applied[name] = obj.name_full if obj is not None else ''
+    return json.dumps(applied, sort_keys=True) == current
+
+
 # Native controller properties are the live state: Blender owns gestures, Undo,
 # dependency-graph evaluation and persistence. There is no timer or second history.
 LIVE = 'lichtfeld_live_rig'
@@ -572,7 +600,7 @@ def edit_live(owner, context):
     collection = settings.camera_collection
     root = live_root(settings)
     if not root:
-        if collection.get('lichtfeld_rig_recipe') != rig_recipe(settings):
+        if not recipe_matches(collection, settings):
             raise ValueError('Apply or revert pending rig parameters before editing live')
         context.view_layer.update()
         cameras, target, recipe, radius, center = yield from _live_members(settings, context.evaluated_depsgraph_get())

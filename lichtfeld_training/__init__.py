@@ -82,7 +82,8 @@ def preferences(context=None):
 
 def python_binary():
     prefix = Path(sys.prefix)
-    for candidate in (prefix / "bin/python.exe", prefix / "bin/python3.13",
+    version = f"{sys.version_info.major}.{sys.version_info.minor}"
+    for candidate in (prefix / "bin/python.exe", prefix / f"bin/python{version}",
                       prefix / "bin/python3", prefix / "python.exe"):
         if candidate.is_file():
             return str(candidate)
@@ -124,13 +125,14 @@ def cameras_for(settings):
 
 
 def quality_get(settings):
-    if settings.get('quality_custom'):
-        return 3
     try:
         value = capture_settings.format_for(settings.id_data, settings)
         values = {name: getattr(settings, name) for name in workflow.PRESET_FIELDS}
         values['resolution'] = max(value['width'], value['height'])
         name = workflow.preset_name(values)
+        selected = settings.get('quality_preset')
+        if selected is not None:
+            name = selected if name == selected else 'CUSTOM'
         return {'DRAFT': 0, 'BALANCED': 1, 'HIGH': 2, 'CUSTOM': 3}[name]
     except (ValueError, AttributeError):
         return 3
@@ -138,23 +140,14 @@ def quality_get(settings):
 
 def quality_set(settings, selected):
     if selected == 3:
-        settings['quality_custom'] = True
+        settings['quality_preset'] = ''
         return
-    settings["applying_preset"] = True
-    try:
-        preset = ('DRAFT', 'BALANCED', 'HIGH')[selected]
-        for name, value in zip(workflow.PRESET_FIELDS, workflow.PRESETS[preset]):
-            setattr(settings, name, value)
-        settings.capture_format = 'PRESET'
-        capture_settings.apply_format(settings.id_data, capture_settings.preset_format(settings))
-        settings['quality_custom'] = False
-    finally:
-        settings["applying_preset"] = False
-
-
-def custom_changed(settings, _context):
-    if not settings.get("applying_preset"):
-        settings.quality = "CUSTOM"
+    preset = ('DRAFT', 'BALANCED', 'HIGH')[selected]
+    for name, value in zip(workflow.PRESET_FIELDS, workflow.PRESETS[preset]):
+        setattr(settings, name, value)
+    settings.capture_format = 'PRESET'
+    capture_settings.apply_format(settings.id_data, capture_settings.preset_format(settings))
+    settings['quality_preset'] = preset
 
 
 
@@ -162,7 +155,8 @@ def strategy_changed(settings, context):
     profile = training_options.PROFILES[settings.strategy]
     for name in training_options.FIELDS:
         setattr(settings, name, profile[name])
-    custom_changed(settings, context)
+    for name, field in training_options.SCHEDULE_FIELDS.items():
+        setattr(settings, name, profile[field] / profile["iterations"])
 
 
 def rig_recipe(settings, applied=None):
@@ -215,7 +209,6 @@ def appearance_update(name):
                 settings.use_bilateral_grid = False
             else:
                 settings.use_exposure_correction = False
-        custom_changed(settings,context)
     return update
 
 
@@ -314,11 +307,11 @@ class LichtFeldSettings(bpy.types.PropertyGroup):
     camera_collection: PointerProperty(name="Capture cameras", type=bpy.types.Collection)
     capture_collections: CollectionProperty(type=LichtFeldCaptureCollection,
         description='Explicit camera collections for capture, independent of the rig being edited')
-    quality: EnumProperty(name="Quality", items=[
+    quality: EnumProperty(name="Preset", items=[
         ("DRAFT", "Draft", "Fast iteration to check coverage and appearance"),
         ("BALANCED", "Balanced", "More views and a larger model"),
         ("HIGH", "High", "More capture and training time"),
-        ("CUSTOM", "Custom", "Individually adjusted settings")], get=quality_get, set=quality_set)
+        ("CUSTOM", "Scene settings", "Keep the current render and training settings")], get=quality_get, set=quality_set)
     rig_mode: EnumProperty(name="Distribution", items=[
         ("HEMISPHERE", "Hemisphere / cap", "Equal-area coverage between elevation limits"),
         ("SPHERE", "Sphere", "Uniform coverage around the whole object"),
@@ -429,20 +422,20 @@ class LichtFeldSettings(bpy.types.PropertyGroup):
     cycles_device: EnumProperty(name="Cycles device", items=[("CPU","CPU","Render with the CPU"),
         ("GPU","GPU Compute","Use exactly the backend and devices enabled in Blender System Preferences")],
         get=scene_render.device_get, set=scene_render.device_set)
-    views: IntProperty(name="Rig camera count", default=48, min=4, max=1000, update=custom_changed)
-    resolution: IntProperty(name="Longest side", default=512, min=64, max=4096, update=custom_changed,
+    views: IntProperty(name="Rig camera count", default=48, min=4, max=1000)
+    resolution: IntProperty(name="Longest side", default=1024, min=64, max=4096,
                             description="Pixels on the longest side; the aspect ratio determines the other side")
     capture_format: EnumProperty(name="Image format", items=[
         ('PRESET', 'Aspect preset', 'Choose an aspect ratio and size; square pixels'),
         ('SCENE', 'From scene', 'Use scene width, height, percentage and pixel aspect; ignores render border'),
-        ('CUSTOM', 'Custom dimensions', 'Explicit output width and height; square pixels')], update=custom_changed)
+        ('CUSTOM', 'Custom dimensions', 'Explicit output width and height; square pixels')])
     capture_aspect: EnumProperty(name="Aspect ratio", items=[
         ('SQUARE', '1:1', ''), ('FOUR_THREE', '4:3', ''), ('THREE_TWO', '3:2', ''),
-        ('WIDE', '16:9', ''), ('CINEMA', '21:9', '')], update=custom_changed)
+        ('WIDE', '16:9', ''), ('CINEMA', '21:9', '')])
     capture_orientation: EnumProperty(name="Orientation", items=[
-        ('LANDSCAPE', 'Landscape', ''), ('PORTRAIT', 'Portrait', '')], update=custom_changed)
-    capture_width: IntProperty(name="Width", default=1920, min=64, max=4096, update=custom_changed)
-    capture_height: IntProperty(name="Height", default=1080, min=64, max=4096, update=custom_changed)
+        ('LANDSCAPE', 'Landscape', ''), ('PORTRAIT', 'Portrait', '')])
+    capture_width: IntProperty(name="Width", default=1920, min=64, max=4096)
+    capture_height: IntProperty(name="Height", default=1080, min=64, max=4096)
     override_optics: BoolProperty(name="Common lens and sensor", description="Override optics on all capture copies; camera positions and originals are kept")
     capture_lens: FloatProperty(name="Focal length (mm)", default=35, min=1, max=500)
     capture_sensor_width: FloatProperty(name="Sensor width (mm)", default=36, min=1, max=100)
@@ -459,11 +452,11 @@ class LichtFeldSettings(bpy.types.PropertyGroup):
         description="Camera number in name order; the framing view updates automatically",
         get=capture_preview.camera_index, set=capture_preview.set_camera_index,
         update=capture_preview.camera_changed)
-    samples: IntProperty(name="Render samples", min=1, max=2147483647, get=scene_render.sample_get, set=scene_render.sample_set, update=custom_changed)
-    iterations: IntProperty(name="Training steps", default=training_options.PROFILES['mrnf']['iterations'], min=4, max=1000000, update=custom_changed)
-    eval_interval: IntProperty(name="Evaluate every", default=training_options.PROFILES['mrnf']['eval_steps'][0], min=1, max=100000, update=custom_changed,
+    samples: IntProperty(name="Render samples", min=1, max=2147483647, get=scene_render.sample_get, set=scene_render.sample_set)
+    iterations: IntProperty(name="Training steps", default=training_options.PROFILES['mrnf']['iterations'], min=4, max=1000000)
+    eval_interval: IntProperty(name="Evaluate every", default=training_options.PROFILES['mrnf']['eval_steps'][0], min=1, max=100000,
                                description="Choose the best model using reserved views at this step interval")
-    max_points: IntProperty(name="Gaussian budget", default=training_options.PROFILES['mrnf']['max_cap'], min=1000, update=custom_changed)
+    max_points: IntProperty(name="Gaussian budget", default=training_options.PROFILES['mrnf']['max_cap'], min=1000)
     sh_degree: IntProperty(name="SH degree", default=training_options.PROFILES['mrnf']['sh_degree'], min=0, max=3)
     preview_mode: EnumProperty(name="Preview updates", items=[
         ("LIVE", "Live (adaptive)", "Frequent full-quality updates within a 5% capture-time budget"),
@@ -497,13 +490,13 @@ for _name in training_options.FIELDS:
     _default = training_options.PROFILES['mrnf'][_name]
     _label = training_options.LABELS.get(_name, _name.replace('_',' ').capitalize())
     if isinstance(_default, bool):
-        _property = BoolProperty(name=_label, default=_default, update=appearance_update(_name) if _name in {"use_exposure_correction","use_ppisp","use_bilateral_grid"} else custom_changed)
+        _property = BoolProperty(name=_label, default=_default, update=appearance_update(_name) if _name in {"use_exposure_correction","use_ppisp","use_bilateral_grid"} else None)
     elif isinstance(_default, int):
-        _property = IntProperty(name=_label, default=_default, min=1, update=custom_changed)
+        _property = IntProperty(name=_label, default=_default, min=1)
     else:
         _property = FloatProperty(name=_label, default=_default,
             min=-1 if _name in {'shs_lr','grow_fraction'} else 0,
-            max=1 if _name in training_options.PROBABILITIES else 1e20, precision=6, update=custom_changed)
+            max=1 if _name in training_options.PROBABILITIES else 1e20, precision=6)
     LichtFeldSettings.__annotations__[_name] = _property
 
 
@@ -735,11 +728,14 @@ class LF_OT_capture_collection(bpy.types.Operator):
     bl_options = {'UNDO', 'INTERNAL'}
 
     index: IntProperty(default=-1, options={'HIDDEN', 'SKIP_SAVE'})
+    use_edited: BoolProperty(options={'HIDDEN', 'SKIP_SAVE'})
 
     @classmethod
     def description(cls, context, properties):
         if properties.index >= 0:
             return 'Remove this entry from capture while keeping the collection in Blender'
+        if properties.use_edited:
+            return 'Include the rig you are editing alongside the current capture sets'
         return 'Add a collection to the list of cameras to capture'
 
     @classmethod
@@ -750,7 +746,15 @@ class LF_OT_capture_collection(bpy.types.Operator):
     def execute(self, context):
         settings = context.scene.lichtfeld_training
         rows = settings.capture_collections
-        if self.index < 0:
+        if self.use_edited:
+            rig = settings.camera_collection
+            if not rows or not rig or rig in preflight.camera_collections(settings):
+                return {'CANCELLED'}
+            empty = next((row for row in rows if row.collection is None), None)
+            (empty if empty is not None else rows.add()).collection = rig
+        elif self.index < 0:
+            if any(row.collection is None for row in rows):
+                return {'CANCELLED'}
             if not rows and settings.camera_collection:
                 rows.add().collection = settings.camera_collection
             rows.add()
@@ -772,9 +776,7 @@ class LF_OT_rig(_RigOperation, bpy.types.Operator):
     @classmethod
     def description(cls, context, properties):
         if properties.new_rig:
-            if context.scene.lichtfeld_training.capture_collections:
-                return "Create a rig with the current settings. Add it to Capture collections to capture its cameras"
-            return "Create a rig with the current settings and use it as the capture collection"
+            return "Create a separate rig from these settings. The capture sets stay as they are"
         return cls.bl_description
 
     @classmethod
@@ -800,6 +802,7 @@ class LF_OT_rig(_RigOperation, bpy.types.Operator):
         reference = settings.rig_reference
         create_separately = getattr(self, 'new_rig', False)
         previous = None if create_separately else settings.camera_collection
+        capture_sets = preflight.camera_collections(settings) if create_separately else ()
         legacy = previous and previous.get('lichtfeld_generated')
         if reference.mode == 'UNSET' and not legacy:
             sources = sources_for(context)
@@ -944,14 +947,33 @@ class LF_OT_rig(_RigOperation, bpy.types.Operator):
                 angles = Quaternion(vector.normalized(), vector.length).to_euler('XYZ') if vector.length else (0, 0, 0)
                 rig_edit.rotate_after_aim(obj, target, angles)
             yield
-        for _ in rig_edit.commit(self, settings, previous, collection, target, recipe):
-            yield
+        repeated = 0
+        if capture_sets:
+            existing = {obj for group in capture_sets for obj in group.all_objects if obj.type == "CAMERA"}
+            if existing:
+                context.view_layer.update()
+                evaluated = context.evaluated_depsgraph_get()
+                cameras = list(existing) + [obj for obj in collection.objects if obj.type == "CAMERA"]
+                poses = []
+                for camera in cameras:
+                    poses.append(camera.evaluated_get(evaluated).matrix_world.copy())
+                    yield
+                matches = yield from rig_geometry.repeated_poses(poses)
+                repeated = sum(first < len(existing) <= second for first, second in matches)
+        yield from rig_edit.commit(self, settings, previous, collection, target, recipe)
+        if capture_sets and not settings.capture_collections:
+            settings.capture_collections.add().collection = capture_sets[0]
         rig_edit.copy_reference(settings.camera_collection.lichtfeld_rig_reference, reference)
         if capture_sources:
             for _ in preflight.remember_sources(settings, capture_sources):
                 yield
         summary = f"{len(points)} stations × {len(station_directions)} = {total} cameras" if station_directions else f"{total} cameras"
-        self.report({"INFO"}, f"Applied {summary}. Review coverage before training.")
+        if repeated:
+            self.report({"WARNING"}, f"{repeated} new camera poses repeat capture views. Adjust the rig before adding it to Capture sets.")
+        elif capture_sets:
+            self.report({"INFO"}, f"Created {summary}. Add the rig to Capture sets when ready.")
+        else:
+            self.report({"INFO"}, f"Applied {summary}. Review coverage before training.")
 
     def cleanup(self):
         for _ in rig_edit.rollback(self):
@@ -1000,32 +1022,42 @@ class LF_OT_live_rig(_RigOperation, bpy.types.Operator):
         yield from rig_edit.rollback_live(self)
 
 
-def launch_supervisor(job):
+def prepare_supervisor(job):
     root = Path(job["root"])
     root.mkdir(mode=0o700, parents=True, exist_ok=True)
+    if job.get('purpose') == 'test_render':
+        pass
+    elif job.get('capture_only'):
+        jobs.check_export_destination(job)
+    else:
+        environment = jobs.check_environment(job.get("backend", ""), str(root.parent))
+        if not environment.get("ok"):
+            raise ValueError(environment.get("message", "Could not verify LichtFeld Studio"))
+        job["backend_version"] = environment.get("backend_version")
+        job["backend_identity"] = environment.get("backend_identity")
+    if not job.get("resume") and not job.get("reuse_dataset"):
+        jobs.freeze_source(job)
+    atomic_json(root / "job.json", job)
+    if not job.get("capture_only"):
+        jobs.prepare_optimizer(job)
+    atomic_json(root / "job.json", job)
+
+
+def spawn_supervisor(job):
+    root = Path(job["root"])
+    with (root / "supervisor-console.log").open("wb") as log:
+        return subprocess.Popen([python_binary(), str(_ROOT / "supervisor.py"), str(root / "job.json")],
+                         stdout=log, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
+                         **process_options(detach=True))
+
+
+def launch_supervisor(job):
+    root = Path(job["root"])
     try:
-        if job.get('purpose') == 'test_render':
-            pass
-        elif job.get('capture_only'):
-            jobs.check_export_destination(job)
-        else:
-            environment = jobs.check_environment(job.get("backend", ""), str(root.parent))
-            if not environment.get("ok"):
-                raise ValueError(environment.get("message", "Could not verify LichtFeld Studio"))
-            job["backend_version"] = environment.get("backend_version")
-            job["backend_identity"] = environment.get("backend_identity")
-        if not job.get("resume") and not job.get("reuse_dataset"):
-            jobs.freeze_source(job)
-        atomic_json(root / "job.json", job)
-        if not job.get("capture_only"):
-            jobs.prepare_optimizer(job)
-        atomic_json(root / "job.json", job)
+        prepare_supervisor(job)
         if job.get("connection_directory") and job.get('purpose') != 'test_render':
             jobs.remember_job(job["connection_directory"], job)
-        with (root / "supervisor-console.log").open("wb") as log:
-            return subprocess.Popen([python_binary(), str(_ROOT / "supervisor.py"), str(root / "job.json")],
-                             stdout=log, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
-                             **process_options(detach=True))
+        return spawn_supervisor(job)
     except Exception as error:
         jobs.release_source(job)
         try:
@@ -1033,7 +1065,6 @@ def launch_supervisor(job):
         except OSError:
             pass
         raise
-
 
 def start_capture_test(job):
     """Worker-only launch; the UI polls the detached supervisor without waiting."""
@@ -1067,9 +1098,12 @@ def finish_capture_test(launch):
                 atomic_json(controller.root / 'command.json', controller.command(job_id, 'stop'))
                 next_stop = time.monotonic() + 5
             time.sleep(.2)
-        return read_json(controller.root / 'state.json', {})
+        state = read_json(controller.root / 'state.json', {})
     finally:
         controller.close()
+    if state.get('state') == 'stopped':
+        jobs.discard_test_job(controller.root, 'stopped')
+    return state
 
 
 def allowed(context, action):
@@ -1135,17 +1169,24 @@ class LF_OT_read_rig(bpy.types.Operator):
     bl_label = "Load selected rig"
     bl_description = "Replace the current rig controls with the selected rig's saved settings without moving cameras"
     bl_options = {"REGISTER", "UNDO"}
+    @classmethod
+    def poll(cls, context):
+        settings = context.scene.lichtfeld_training
+        collection = settings.camera_collection
+        return bool(collection and collection.get('lichtfeld_generated') and not settings.running
+                    and not settings.operation_busy and not rig_edit.live_root(settings)
+                    and not rig_edit.render_busy(context))
+
     def execute(self, context):
         s = context.scene.lichtfeld_training
         collection = s.camera_collection
-        if not collection or not collection.get("lichtfeld_generated") or s.running or s.operation_busy:
+        if not self.poll(context):
             return {"CANCELLED"}
         encoded = collection.get("lichtfeld_rig_recipe", "")
         try:
             values = rig_edit.decode_recipe(encoded)
             objects = {}
-            for name, key in (('target', 'lichtfeld_rig_target'), ('curve', 'lichtfeld_rig_curve'),
-                              ('mesh', 'lichtfeld_placement_mesh')):
+            for name, key in rig_edit.RIG_OBJECT_KEYS.items():
                 obj = collection.get(key) if key in collection else bpy.data.objects.get(values.get(name, ''))
                 if obj is not None and (not isinstance(obj, bpy.types.Object) or
                                         name == 'curve' and obj.type != 'CURVE' or
@@ -1264,8 +1305,7 @@ def capture_job(context, capture):
     sources = capture["sources"]
     cameras = capture["cameras"]
     render_settings = scene_render.snapshot(context.scene)
-    directory = (Path(bpy.path.abspath(prefs.jobs_directory)) if prefs.jobs_directory else
-                 Path(bpy.utils.user_resource("DATAFILES", path="lichtfeld/jobs", create=False)))
+    directory = Path(preflight.jobs_folder(prefs))
     job_id = uuid.uuid4().hex
     root = directory / job_id
     job = {"schema": SCHEMA, "id": job_id, "root": str(root),
@@ -1323,6 +1363,10 @@ class LF_OT_start(bpy.types.Operator):
             if bpy.app.background:
                 cameras_for(context.scene.lichtfeld_training)
                 sources_for(context)
+                return True
+            # Search/keymap launches validate cooperatively in execute even
+            # when the hidden sidebar has not requested a readiness scan.
+            if not capture_setup_visible(context):
                 return True
             errors = preflight.issues(preflight.cached(context, preferences(context)))
             if errors:
@@ -1405,9 +1449,22 @@ class LF_OT_start(bpy.types.Operator):
                     except StopIteration as stop:
                         if context.scene != scene or preflight.signature(context) != initial:
                             raise ValueError("The capture setup changed. Save the scene and start again.")
-                        LF_OT_start.launch(context, stop.value, export_directory)
-                        return
+                        capture = stop.value
+                        break
                     yield
+                while not bpy.app.background:
+                    scene_render.tick(scene)
+                    readiness = preflight.cached(context, preferences(context),
+                                                 capture_only=capture_only, capture=capture)
+                    if not readiness['checking'] and not readiness['environment'].get('checking'):
+                        errors = preflight.issues(readiness)
+                        if errors:
+                            raise ValueError(errors[0])
+                        break
+                    yield ui_runtime.WAIT
+                    if context.scene != scene or preflight.signature(context) != initial:
+                        raise ValueError("The capture setup changed. Save the scene and start again.")
+                LF_OT_start.launch(context, capture, export_directory)
             finally:
                 work.close()
                 try:
@@ -1451,7 +1508,7 @@ class LF_OT_export_dataset(bpy.types.Operator):
         if not bpy.data.filepath or bpy.data.is_dirty:
             cls.poll_message_set("Save the .blend before exporting its exact saved revision")
             return False
-        if bpy.app.background:
+        if bpy.app.background or not capture_setup_visible(context):
             return True
         errors = preflight.issues(preflight.cached(context, preferences(context), capture_only=True))
         if errors:
@@ -1677,17 +1734,22 @@ class LF_OT_restart(bpy.types.Operator):
             return {"CANCELLED"}
         s.operation_busy = True
         def work():
-            job, previous = jobs.restart_data(directory, options, backend=backend, jobs_directory=jobs_directory, connection_directory=connection)
-            launch_supervisor(job)
+            job, _ = jobs.restart_data(directory, options, backend=backend, jobs_directory=jobs_directory, connection_directory=connection)
+            prepare_supervisor(job)
             return job
         def done(job):
-            def activate():
-                scene["lichtfeld_expected_job"] = job["id"]
-                s.job_directory = job["root"]
-                s.operation_busy = False
-                s.running = True
-                ui_runtime.reconnect(scene)
-            ui_runtime.reset_for_new_training(scene, activate)
+            if not s.operation_busy:
+                return
+            # Start and attach in this callback. The cooperative scene cleanup
+            # cannot leave a running supervisor without a job bound to Blender.
+            spawn_supervisor(job)
+            ui_runtime.reset_for_new_training(scene)
+            scene["lichtfeld_expected_job"] = job["id"]
+            s.job_directory = job["root"]
+            s.running = True
+            if connection:
+                ui_runtime.submit(lambda: jobs.remember_job(connection, job),
+                                  failure=lambda error: ui_runtime.report_notice("WARNING", error))
         def failed(error):
             s.operation_busy = False
             s.dataset_summary = str(error)
@@ -1883,7 +1945,8 @@ class LF_OT_reconnect(bpy.types.Operator):
     bl_description = "Restart this connection without starting or stopping the trainer"
 
     def execute(self, context):
-        ui_runtime.reconnect(context.scene)
+        scene = preview_scene.source_scene(context.scene) or context.scene
+        ui_runtime.reconnect(scene)
         return {"FINISHED"}
 
 
@@ -2199,15 +2262,15 @@ def draw_rig_actions(layout, settings, pending, *, edit=False):
     if managed and settings.rig_parameter_source != rig:
         row.operator('lichtfeld.read_rig', text='Load selected rig', icon='IMPORT')
     elif not rig or edit or managed and (pending or settings.rig_mode == 'PATH'):
-        row.operator('lichtfeld.create_rig', text='Apply rig changes' if managed else 'Create camera rig')
+        row.operator('lichtfeld.create_rig', text='Apply to current rig' if managed and edit else 'Apply rig changes' if managed else 'Create camera rig')
         if managed and pending:
             row.operator('lichtfeld.read_rig', text='Revert', icon='LOOP_BACK')
     if managed and not pending and settings.rig_parameter_source == rig and settings.rig_mode in {'SPHERE', 'HEMISPHERE', 'RINGS'}:
         row.operator('lichtfeld.live_rig', text='Edit live')
     if preflight.camera_collections(settings):
         layout.operator('lichtfeld.capture_framing', text='Check framing')
-    if managed:
-        layout.operator('lichtfeld.create_rig', text='Create another rig').new_rig = True
+    if managed and edit:
+        layout.operator('lichtfeld.create_rig', text='Create new rig').new_rig = True
 
 
 def draw_capture_cameras(box, context, settings, ready, rig_changed, wrapped):
@@ -2233,9 +2296,9 @@ def draw_capture_cameras(box, context, settings, ready, rig_changed, wrapped):
         box.operator('lichtfeld.capture_framing', text='Check framing', icon='VIEW_CAMERA')
         box.operator('lichtfeld.live_rig', text='Finish live editing', icon='CHECKMARK')
         return
-    box.prop(settings, 'camera_collection', text='Rig to edit' if settings.capture_collections else 'Collection')
+    box.prop(settings, 'camera_collection', text='Edit rig' if settings.capture_collections else 'Camera set')
     collection_count = len(preflight.camera_collections(settings))
-    title = f'Capture collections ({collection_count})' if settings.capture_collections else 'Capture collections'
+    title = f'Capture sets ({collection_count})' if settings.capture_collections else 'Combine camera sets'
     capture_list = draw_disclosure(box, 'capture_collection_details', title)
     if capture_list is not None:
         for index, entry in enumerate(settings.capture_collections):
@@ -2245,7 +2308,11 @@ def draw_capture_cameras(box, context, settings, ready, rig_changed, wrapped):
             row.operator('lichtfeld.capture_collection_entry', text='', icon='REMOVE').index = index
         if not settings.capture_collections:
             capture_list.label(text='Using the selected collection')
-        capture_list.operator('lichtfeld.capture_collection_entry', text='Add collection', icon='ADD')
+        add_collection = capture_list.row()
+        add_collection.enabled = all(entry.collection is not None for entry in settings.capture_collections)
+        add_collection.operator('lichtfeld.capture_collection_entry', text='Add collection', icon='ADD')
+        if managed and rig not in preflight.camera_collections(settings):
+            capture_list.operator('lichtfeld.capture_collection_entry', text='Include edited rig').use_edited = True
     if settings.capture_collections:
         box.label(text='Checking cameras…' if ready.get('checking') else f"{len(ready['cameras']):,} capture cameras",
                   icon='BLANK1')
@@ -2262,7 +2329,7 @@ def draw_capture_cameras(box, context, settings, ready, rig_changed, wrapped):
         unloaded = managed and settings.rig_parameter_source != rig
         if managed and not unloaded:
             draw_capture_reference(box, rig)
-        title = 'New rig settings' if unloaded else 'Rig settings' if managed else 'Create a rig'
+        title = 'Rig settings' if managed else 'Create a rig'
         content = draw_disclosure(box, 'rig_generator', title)
         if content is None:
             draw_rig_actions(box, settings, rig_changed)
@@ -2271,7 +2338,7 @@ def draw_capture_cameras(box, context, settings, ready, rig_changed, wrapped):
     else:
         box.label(text='Updating setup…' if settings.operation_busy else 'Create a camera rig')
     reference = settings.rig_reference
-    box.prop(reference, 'mode', text='Center')
+    box.prop(reference, 'mode', text='Rig center')
     if reference.mode == 'COLLECTION':
         box.prop(reference, 'collection', text='')
     elif reference.mode == 'OBJECTS':
@@ -2367,6 +2434,8 @@ def draw_capture_cameras(box, context, settings, ready, rig_changed, wrapped):
             if settings.rig_position_variation or settings.rig_rotation_variation:
                 box.prop(settings, 'rig_variation_seed', text='Seed')
         box = outer
+    if managed:
+        wrapped(box, 'Create a separate rig from these settings. Add it to Capture sets when ready.')
     draw_rig_actions(box, settings, rig_changed, edit=True)
 
 
@@ -2452,7 +2521,8 @@ def draw_training(self, context):
             current = ui_runtime.peek(color_source)
             from . import job_panel
             job_panel.draw(layout, context, color_source.lichtfeld_training, current.status if current else {},
-                           current.reader.error if current else "", wrapped, color_view=True, status_error=current.reader.status_error if current else False)
+                           current.reader.error if current else "", wrapped, color_view=True, status_error=current.reader.status_error if current else False,
+                           reader_stopped=bool(current and current.reader.stop.is_set()))
         else:
             preview_scene.draw_orphaned(layout, context, wrapped)
         return
@@ -2463,7 +2533,8 @@ def draw_training(self, context):
     if settings.attached_session or settings.job_directory:
         from . import job_panel
         job_panel.draw(layout, context, settings, status, current.reader.error if current else "", wrapped,
-                       status_error=current.reader.status_error if current else False)
+                       status_error=current.reader.status_error if current else False,
+                       reader_stopped=bool(current and current.reader.stop.is_set()))
         return
     if settings.detail:
         wrapped(layout, settings.detail)
@@ -2499,7 +2570,10 @@ def draw_training(self, context):
     setup.use_property_decorate = False
     setup.prop(settings, "dataset_mode", text="Task")
     if settings.dataset_mode != 'REUSE':
-        setup.prop(settings, 'quality', text='Quality')
+        setup.prop(settings, 'quality', text='Preset')
+        preset = settings.get('quality_preset')
+        if preset and settings.quality == 'CUSTOM':
+            setup.label(text=f'{preset.title()} · modified')
     if settings.previous_job:
         back = setup.row()
         back.operator('lichtfeld.previous_job', text='Back to previous job', icon='BACK')
@@ -2526,7 +2600,7 @@ def draw_training(self, context):
     ready = preflight.cached(context, prefs, capture_only=capture_only)
     errors = preflight.issues(ready)
     rig = settings.camera_collection
-    pending = rig and rig.get('lichtfeld_generated') and (rig.get('lichtfeld_rig_recipe') != rig_recipe(settings) or ready.get('reference_changed', False))
+    pending = rig and rig.get('lichtfeld_generated') and (not rig_edit.recipe_matches(rig, settings) or ready.get('reference_changed', False))
     box = draw_setup_section(layout, settings, 'content', 'Capture')
     if box is not None:
         draw_capture_sources(box, context, settings)
@@ -2546,14 +2620,15 @@ def draw_training(self, context):
     backend_required = draw_backend_requirement(start, prefs, installation, wrapped)
     if not backend_required:
         draw_capture_actions(start, settings, ready, errors, capture_only, wrapped)
+        if ready['environment'].get('folder_issue') == 'jobs':
+            start.operator('lichtfeld.setup', text='Choose jobs folder…')
     camera_issues = ready.get('camera_issues')
     if preflight.camera_collections(settings):
         row = start.row()
         row.operator_context = 'INVOKE_DEFAULT'
         count = len(camera_issues or {})
-        row.operator('lichtfeld.camera_report', text='Check cameras…')
-        if count:
-            start.label(text=f"{count:,} camera {'issue' if count == 1 else 'issues'}", icon='ERROR')
+        label = f"Review {count:,} camera {'issue' if count == 1 else 'issues'}…" if count else 'Check camera poses…'
+        row.operator('lichtfeld.camera_report', text=label, icon='ERROR' if count else 'NONE')
         report = rig_analysis.last_result(context)
         if report is None:
             start.label(text='Poses not checked yet', icon='BLANK1')
@@ -2571,14 +2646,37 @@ def draw_training(self, context):
     box = draw_disclosure(checks, 'validation_details', 'Capture checks', nested=False) if checks is not None else None
     if box is not None:
         for error in other_errors[:5]:wrapped(box, error)
+        if ready['environment'].get('folder_details'):
+            wrapped(box, ready['environment']['folder_details'])
         if len(other_errors) > 5:
             wrapped(box, f'{len(other_errors)-5:,} more issues; resolve the listed issues first.')
     draw_job_navigation(layout, settings)
 
 
+def capture_setup_visible(context, *, screen=None):
+    if context.window_manager.lichtfeld_workspace != 'TRAINING':
+        return False
+    screen = screen or context.screen
+    return screen is not None and any(
+        area.spaces.active.show_region_ui and any(
+            region.type == 'UI' and region.active_panel_category == 'LichtFeld'
+            for region in area.regions
+        )
+        for area in screen.areas if area.type == 'VIEW_3D'
+    )
+
+
 def poll_jobs():
-    if bpy.context.scene and not preview_scene.source_scene(bpy.context.scene):
-        preflight.tick(bpy.context, preferences())
+    context = bpy.context
+    if bpy.app.background:
+        if context.scene and not preview_scene.source_scene(context.scene):
+            preflight.tick(context, preferences())
+    else:
+        windows = [window for window in context.window_manager.windows
+                   if not capture_preview.is_preview(window.scene)
+                   and not preview_scene.is_preview(window.scene)
+                   and capture_setup_visible(context, screen=window.screen)]
+        preflight.tick_windows(context, preferences(), windows)
     return ui_runtime.tick()
 
 

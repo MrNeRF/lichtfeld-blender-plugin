@@ -135,14 +135,15 @@ if not bpy.app.background:
 loaded = bpy.data.images.load(str(image))
 assert tuple(loaded.size) == (96, 64)
 bpy.data.images.remove(loaded)
-cancel_job = dict(config, id=uuid.uuid4().hex, root=str(output/'cancel'))
+cancel_id = uuid.uuid4().hex
+cancel_root = output / cancel_id
+cancel_job = dict(config, id=cancel_id, root=str(cancel_root))
 launch = Future()
 launch.set_result(ext.start_capture_test(cancel_job))
 stopped = ext.finish_capture_test(launch)
 assert stopped['state'] == 'stopped', stopped
-assert not (output/'cancel/test-render.png').exists()
+assert not cancel_root.exists()
 assert not Path(cancel_job['capture_staging_file']).exists()
-assert not (output/'cancel/supervisor.lock').exists()
 with bpy.context.temp_override(window=framing_window):
     assert bpy.ops.lichtfeld.close_capture_framing()=={'FINISHED'}
 assert not any(ext.capture_preview.is_preview(item) for item in bpy.data.scenes)
@@ -163,6 +164,13 @@ with patch.object(ext.capture_preview,'open_steps',side_effect=ValueError('Frami
 assert not errors,errors
 assert s.test_render_image != previous_image
 assert ext.read_json(Path(s.test_render_image).parent/'state.json')['state']=='completed'
+deadline = time.monotonic() + 5
+previous_folder = Path(previous_image).parent
+while previous_folder.exists() and time.monotonic() < deadline:
+    ext.ui_runtime.tick()
+    time.sleep(.01)
+assert not previous_folder.exists(), list(previous_folder.iterdir()) if previous_folder.exists() else []
+
 # Cancellation during validation must not launch a renderer, and a genuine
 # source change must remain visible after the transient operator report fades.
 with bpy.context.temp_override(window=framing_window):

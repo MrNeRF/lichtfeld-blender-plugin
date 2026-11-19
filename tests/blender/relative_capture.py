@@ -34,6 +34,7 @@ try:
  result=subprocess.run([bpy.app.binary_path,'--background','--factory-startup','--disable-autoexec',job['capture_staging_file'],'--python-exit-code','1','--python',str(Path(ext.__file__).with_name('render_worker.py')),'--',str(root/'job.json')],capture_output=True,timeout=120)
  if result.returncode:raise AssertionError(result.stdout.decode(errors='replace')+result.stderr.decode(errors='replace'))
  assert (root/'dataset/transforms.json').is_file()
+ assert not Path(job['capture_staging_file']).exists(), 'Renderer left the source snapshot without a supervisor'
  bpy.ops.wm.open_mainfile(filepath=str(root/'capture.blend'))
  for lib in bpy.data.libraries:assert Path(bpy.path.abspath(lib.filepath)).is_file(),lib.filepath
  for image in bpy.data.images:
