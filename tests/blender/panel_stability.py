@@ -172,6 +172,38 @@ for loaded in (False, True):
     assert sum(name=='lichtfeld.read_rig' for name,row in layout.operations)==1
 print('CAPTURE_PLAN_APPLIED_REFERENCE_TASK_ACTIONS_AND_COLLAPSED_SECTIONS_PASS')
 
+# Record each action's local enabled state while the Capture sets disclosure is closed.
+class CameraActionLayout(Layout):
+    enabled = True
+
+    def row(self, **kwargs):
+        row = CameraActionLayout()
+        row.__dict__.update(self.__dict__)
+        return row
+
+    def operator(self, name, **kwargs):
+        self.action_states.append((name, kwargs.get('text'), self.enabled))
+        return super().operator(name, **kwargs)
+
+
+panels = bpy.context.window_manager.lichtfeld_panels
+panels.capture_collection_details = False
+set_collection = bpy.data.collections.new('Feedback capture set')
+bpy.context.scene.collection.children.link(set_collection)
+s.capture_collections.add().collection = set_collection
+for framing_count in (0, 4):
+    layout = CameraActionLayout()
+    layout.action_states = []
+    readiness = {'checking': False, 'cameras': [], 'framing_camera_count': framing_count, 'environment': {}}
+    with patch.object(ext.preflight, 'cached', return_value=readiness), patch.object(ext.preflight, 'issues', return_value=[]), patch.object(ext, 'preferences', return_value=None), patch.object(ext.preflight, 'environment', return_value={'backend': True, 'ok': True}):
+        ext.draw_training(SimpleNamespace(layout=layout), context)
+    assert ('lichtfeld.capture_framing', 'Check framing', bool(framing_count)) in layout.action_states
+    recovery = [('lichtfeld.capture_collection_entry', 'Include edited rig', True)] if not framing_count else []
+    assert [state for state in layout.action_states if state[1] == 'Include edited rig'] == recovery
+s.capture_collections.clear()
+bpy.data.collections.remove(set_collection)
+print('FRAMING_ACTION_AND_EMPTY_SET_RECOVERY_LAYOUT_PASS')
+
 # Distance feedback follows native scene units; aiming remains directly available.
 bpy.context.window_manager.lichtfeld_panels.rig_generator=True;bpy.context.window_manager.lichtfeld_panels.rig_details=False;s.rig_mode='SPHERE'
 s.camera_collection['lichtfeld_generated_radius']=3.25
