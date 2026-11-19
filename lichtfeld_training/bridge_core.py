@@ -141,9 +141,11 @@ def training_config(job):
 def training_command(job, hook):
     root = Path(job["root"])
     args = [job["backend"], "--headless", "-o", str(root / "output"),
-            "--config", str(root / "training.json"), "--eval", "--export", "ply",
+            "--config", str(root / "training.json"), "--export", "ply",
             "--test-every", str(job.get("test_every", 8)), "--centralize", "off",
             "--python-script", str(hook), "--no-download"]
+    if job.get("enable_eval", True):
+        args.append("--eval")
     if job.get("resume"):
         args += ["--resume", job["resume"]]
     else:

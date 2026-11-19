@@ -309,7 +309,9 @@ class TrainingBridge:
                     anchors = read_dataset_json(dataset/'depths/depth_anchors.json',{}).get('anchors',{})
                     active = sum(bool(item.get('depth',{}).get('valid')) for item in anchors.values())
                     manifest = read_dataset_json(dataset/'manifest.json',{})
-                    expected = manifest.get('views',0)-len(manifest.get('validation',[]))
+                    expected = manifest.get('views', 0)
+                    if self.eval_steps:
+                        expected -= len(manifest.get('validation', []))
                     if not active or active < expected:
                         raise RuntimeError('Depth supervision could not be anchored for all training views. Check resolution, coverage and depth variation, or disable depth supervision.')
                     self.supervision = f'Depth active: {active} anchored views'

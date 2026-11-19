@@ -1644,12 +1644,12 @@ def import_splat(scene, root, record, job=None):
 class LF_OT_import(bpy.types.Operator):
     bl_idname = "lichtfeld.import_result"
     bl_label = "Import best result"
-    bl_description = "Import the verified best candidate, keeping the result object stable"
+    bl_description = "Import the verified saved model, keeping the result object stable"
     bl_options = {"REGISTER", "UNDO"}
 
     def execute(self, context):
         if not allowed(context, "import_best"):
-            self.report({"ERROR"}, "Wait for a valid best candidate and the current import to finish")
+            self.report({"ERROR"}, "Wait for a saved model and for the current import to finish")
             return {"CANCELLED"}
         current = ui_runtime.binding(context.scene)
         if current:

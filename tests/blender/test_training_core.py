@@ -116,10 +116,17 @@ class TrainingCoreTest(unittest.TestCase):
         self.assertFalse(optimization["enable_eval"])
         self.assertEqual(optimization["eval_steps"], [])
         self.assertEqual(optimization["save_steps"], [40, 80, 120, 123])
+        job.update(root="job", backend="trainer")
+        for resume in (None, "checkpoint.licht"):
+            job["resume"] = resume
+            self.assertNotIn("--eval", core.training_command(job, "hook.py"))
         job["enable_eval"] = True
         optimization = core.training_config(job)["optimization"]
         self.assertTrue(optimization["enable_eval"])
         self.assertEqual(optimization["eval_steps"], optimization["save_steps"])
+        self.assertIn("--eval", core.training_command(job, "hook.py"))
+        del job["enable_eval"]
+        self.assertIn("--eval", core.training_command(job, "hook.py"))
 
     def test_hook_captures_exact_model_and_retains_earlier_best(self):
         class Tensor:
