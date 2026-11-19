@@ -16,6 +16,20 @@ ext = importlib.import_module(module)
 source = bpy.context.scene
 s = source.lichtfeld_training
 s.scope='SCENE';s.views=4;s.rig_distance=1.05
+original_engine = source.render.engine
+source.render.engine = 'CYCLES'
+source.cycles.device = 'GPU'
+source.render.use_border = True
+source.render.use_crop_to_border = True
+source.render.border_min_x = .2
+source.render.border_min_y = .25
+source.render.border_max_x = .9
+source.render.border_max_y = .8
+def display_settings(scene):
+    render = scene.render
+    return (render.engine, render.use_border, render.use_crop_to_border, render.border_min_x,
+            render.border_min_y, render.border_max_x, render.border_max_y, scene.cycles.device)
+source_display = display_settings(source)
 s.capture_aspect='WIDE';s.resolution=1024
 ext.capture_settings.apply_format(source, ext.capture_settings.preset_format(s))
 print('CHECK first wide rig',flush=True)
@@ -66,6 +80,9 @@ for _ in range(3):
     for _ in opening:pass
     preview=bpy.context.scene
     assert ext.capture_preview.source_scene(preview)==source
+    assert display_settings(preview) == display_settings(source) == source_display
+    preview.render.border_min_x = .35
+    preview_display = display_settings(preview)
     assert (preview.render.resolution_x,preview.render.resolution_y)==(576,1024)
     assert preview.camera.data.lens==40 and preview.camera.data!=data
     assert preview.camera.data.shift_x==s.capture_shift_x
@@ -83,6 +100,8 @@ for _ in range(3):
         while ext.capture_preview.camera_pending(preview):ext.ui_runtime.tick()
         assert copying.call_count==1,copying.call_count
     assert bpy.context.scene.as_pointer()==preview_id
+    assert display_settings(preview) == preview_display
+    assert display_settings(source) == source_display
     assert preview['capture_camera_name']==cameras[1].name
     assert np.max(np.abs(np.asarray(preview.camera.matrix_world)-poses[cameras[1].name]))<1e-6
     assert preview.camera.data.lens==40 and preview.camera.data.animation_data is None
@@ -128,6 +147,8 @@ for _ in range(3):
     while ext.capture_preview.camera_pending(preview):ext.ui_runtime.tick()
     assert len(bpy.data.scenes)==counts[0]+1
     preview=bpy.context.scene
+    assert preview.as_pointer() == preview_id
+    assert display_settings(preview) == preview_display
     # Closing before the queued camera update starts cannot resurrect a preview.
     s.capture_preview_index=1
     assert ext.capture_preview.camera_pending(preview)
@@ -136,6 +157,10 @@ for _ in range(3):
     ext.ui_runtime.tick()
     assert bpy.context.scene==source
     assert (len(bpy.data.scenes),len(bpy.data.objects),len(bpy.data.cameras))==counts
+source.cycles.device = 'CPU'
+source.render.engine = original_engine
+source.render.use_border = False
+source.render.use_crop_to_border = False
 # Invalid settings fail before creating any preview data, with the source restored.
 s.capture_clip_start=300
 try:

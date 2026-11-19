@@ -31,6 +31,10 @@ scene.cycles.use_denoising = False
 scene.render.resolution_x = 96
 scene.render.resolution_y = 64
 scene.render.resolution_percentage = 100
+scene.render.use_border = True
+scene.render.use_crop_to_border = True
+scene.render.border_min_x = scene.render.border_min_y = .25
+scene.render.border_max_x = scene.render.border_max_y = .75
 s.camera_collection = bpy.data.collections['Collection']
 s.scope = 'SELECTION'
 for _ in ext.preflight.remember_sources(s, [bpy.data.objects['Cube']]):
@@ -134,6 +138,7 @@ if not bpy.app.background:
     assert viewer.view_layer==capture_layer
 loaded = bpy.data.images.load(str(image))
 assert tuple(loaded.size) == (96, 64)
+assert scene.render.use_border and scene.render.use_crop_to_border
 bpy.data.images.remove(loaded)
 cancel_id = uuid.uuid4().hex
 cancel_root = output / cancel_id
