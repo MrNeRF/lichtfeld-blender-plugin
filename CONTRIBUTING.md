@@ -50,7 +50,7 @@ python -m unittest discover -s tests/blender -p "test_*.py"
 python -m unittest discover -s tests/packaging -p "test_*.py"
 ```
 
-GitHub Actions runs these contracts on Windows and Linux with Python 3.11 and 3.13. After they pass, the package job builds the installable source ZIP and uploads the `lichtfeld-training-extension` workflow artifact. Pushing a tag `v<version>` that matches the manifest version publishes that ZIP as a GitHub release; a pre-release suffix such as `0.1.0-beta.1` marks it as a pre-release. The ZIP is pure Python and serves every platform. GPU/Blender fixtures remain separate from these CPU-only checks.
+GitHub Actions runs these contracts on Windows and Linux with Python 3.11 and 3.13 for pull requests and the tip of `main`; a newer commit cancels the run of the one it replaces. After they pass, the package job builds the installable source ZIP and uploads the `lichtfeld-training-extension` workflow artifact. Pushing a tag `v<version>` on the tip of `main` that matches the manifest version publishes that ZIP as a GitHub release; a pre-release suffix such as `0.1.0-beta.1` marks it as a pre-release. The ZIP is pure Python and serves every platform. GPU/Blender fixtures remain separate from these CPU-only checks.
 
 For a real capture/training smoke test, supply a compatible backend and a separate scratch directory:
 
