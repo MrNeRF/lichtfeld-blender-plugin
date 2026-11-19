@@ -64,6 +64,6 @@ The fixture creates its own small scene and records the actual job path in the s
 blender --factory-startup --disable-autoexec --python-exit-code 1 --python tests/blender/training_rig_ui.py -- /path/to/scratch --installed --render-interleave
 ```
 
-Run it with an installed ZIP in the isolated profile described above. Add `--locked-render` to exercise post-commit cleanup with Lock Interface enabled. Omit `--render-interleave` for the ordinary 1,000-camera event-loop fixture. Some integration fixtures consume earlier fixture outputs; inspect their arguments/setup before running them.
+Run it with an installed ZIP in the isolated profile described above. Add `--locked-render` to exercise post-commit cleanup with Lock Interface enabled. Add `--shrink-rig` to test a reduction from 384 to 48 cameras during the render interleave. Omit `--render-interleave` for the ordinary 1,000-camera event-loop fixture. Some integration fixtures consume earlier fixture outputs; inspect their arguments/setup before running them.
 
 Keep all test-generated projects, images, logs, runtime environments and job folders in an explicitly selected scratch area. Never drive, stop or replace an existing user's Blender/Studio/trainer as part of a fixture. Targeted regression tests should check observable contracts and failure recovery, not UI text alone.

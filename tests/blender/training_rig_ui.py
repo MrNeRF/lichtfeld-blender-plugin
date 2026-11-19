@@ -107,11 +107,14 @@ def render_interleave():
     settings=scene.lichtfeld_training
     window=bpy.context.window
     other=bpy.data.scenes.new('Render interleave context')
-    settings.scope='SCENE';settings.views=48
+    shrinking = '--shrink-rig' in sys.argv
+    initial_count, final_count = (384, 48) if shrinking else (48, 1000)
+    settings.scope='SCENE';settings.views=initial_count
     owner=SimpleNamespace(collection=None,rig_backup=[],committed=False,report=lambda *args:None)
     for _ in extension.LF_OT_rig.generate(owner,bpy.context):pass
     rig=settings.camera_collection
-    original_ids=[o.as_pointer() for o in rig.objects if o.type=='CAMERA']
+    original_ids={o.as_pointer() for o in rig.objects if o.type=='CAMERA'
+                  and o['lichtfeld_camera_index'] < final_count}
     scene.camera=next(o for o in rig.objects if o.type=='CAMERA')
     scene.render.engine='CYCLES';scene.cycles.device='CPU';scene.cycles.samples=8192
     scene.cycles.use_adaptive_sampling=False;scene.cycles.use_denoising=False
@@ -135,7 +138,7 @@ def render_interleave():
             assert bpy.ops.render.render('INVOKE_DEFAULT')=={'RUNNING_MODAL'}
 
     def update():
-        settings.views=1000
+        settings.views=final_count
         with bpy.context.temp_override(window=window):
             assert bpy.ops.lichtfeld.create_rig()=={'RUNNING_MODAL'}
 
@@ -184,12 +187,12 @@ def render_interleave():
                     update();proof['phase']='build_postcommit'
             elif phase=='build_postcommit':
                 count=sum(o.type=='CAMERA' for o in rig.objects)
-                if count>48:
+                if count != initial_count:
                     assert settings.operation_busy,'Missed postcommit boundary'
                     render('postcommit',lock='--locked-render' in sys.argv)
             elif phase=='wait_finish' and not settings.operation_busy:
-                assert sum(o.type=='CAMERA' for o in rig.objects)==1000
-                assert set(original_ids)<={o.as_pointer() for o in rig.objects}
+                assert sum(o.type=='CAMERA' for o in rig.objects)==final_count
+                assert original_ids<={o.as_pointer() for o in rig.objects}
                 assert not any(c!=rig and c.name.startswith('LichtFeld Capture Cameras') for c in scene.collection.children)
                 finish(True)
                 return None

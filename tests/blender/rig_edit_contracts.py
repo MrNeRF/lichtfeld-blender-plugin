@@ -1195,7 +1195,8 @@ assert bpy.ops.lichtfeld.create_rig() == {'FINISHED'}
 cameras = sorted((obj for obj in rig.objects if obj.type == 'CAMERA'),
                  key=lambda obj: obj['lichtfeld_camera_index'])
 scene = bpy.context.scene
-active, linked, tracked, shared, pinned = cameras[35:40]
+active, linked, tracked, shared = cameras[35:39]
+pinned = cameras[65]
 scene.camera = active
 bpy.context.view_layer.objects.active = active
 active.select_set(True)
@@ -1214,6 +1215,7 @@ custom_camera.data = shared_data
 pinned_data = pinned.data
 pinned_data.use_fake_user = True
 retired_names = {obj.name for obj in cameras[31:]}
+data_count = len(bpy.data.cameras)
 s.views = 31
 assert bpy.ops.lichtfeld.create_rig() == {'FINISHED'}
 assert [obj for obj in cameras[:31] if obj.name in rig.objects] == cameras[:31]
@@ -1222,4 +1224,25 @@ assert len(external.objects) == 0
 assert scene.camera is None and other.camera is None and marker.camera is None
 assert bpy.context.view_layer.objects.active is None and constraint.target is None
 assert custom_camera.data == shared_data and pinned_data.use_fake_user
+assert len(bpy.data.cameras) == data_count - len(retired_names) + 2
 print('BATCHED_RIG_SHRINK_PRESERVES_SURVIVORS_AND_CLEARS_EXTERNAL_REFERENCES_PASS', flush=True)
+
+survivors = cameras[:31]
+old_data = survivors[0].data
+before = (len(bpy.data.objects), len(bpy.data.cameras), len(bpy.data.collections))
+s.rig_lens += 1
+owner = SimpleNamespace(collection=None, rig_backup=[], committed=False, report=lambda *args: None)
+work = ext.LF_OT_rig.generate(owner, bpy.context)
+while not owner.committed:
+    next(work)
+prepared = next(obj for obj in owner.collection.objects if obj.get('lichtfeld_camera_index') == 0)
+assert prepared.data == survivors[0].data
+bpy.data.objects.remove(prepared, do_unlink=True)
+assert old_data.users == 0
+bpy.data.cameras.remove(old_data)
+for _ in work:
+    pass
+assert owner.collection is None and s.camera_collection == rig
+assert all(obj.data.lens == s.rig_lens and obj.name in rig.objects for obj in survivors)
+assert (len(bpy.data.objects), len(bpy.data.cameras), len(bpy.data.collections)) == before
+print('BATCHED_RIG_CLEANUP_SKIPS_EXTERNALLY_REMOVED_STAGING_CAMERA_PASS', flush=True)
