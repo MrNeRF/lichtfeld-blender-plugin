@@ -51,3 +51,30 @@ jobs:
           name: lichtfeld-training-extension
           path: dist/lichtfeld_training-*.zip
           if-no-files-found: error
+
+  release:
+    name: Publish release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: package
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: lichtfeld-training-extension
+      - name: Publish tagged package
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          package="lichtfeld_training-${TAG#v}.zip"
+          if [[ ! -f "$package" ]]; then
+            echo "::error::Tag $TAG does not match the manifest version"
+            exit 1
+          fi
+          flags=()
+          if [[ "$TAG" == *-* ]]; then flags+=(--prerelease); fi
+          gh release create "$TAG" "$package" --repo "$GITHUB_REPOSITORY" \
+            --verify-tag --title "LichtFeld for Blender ${TAG#v}" --generate-notes "${flags[@]}"
