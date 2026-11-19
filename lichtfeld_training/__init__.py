@@ -286,6 +286,8 @@ class LichtFeldSettings(bpy.types.PropertyGroup):
     dataset_summary: StringProperty(default="Choose a saved job or reuse the current job", options={"SKIP_SAVE"})
     previous_job: StringProperty(subtype="DIR_PATH")
     operation_busy: BoolProperty(default=False, options={"SKIP_SAVE"})
+    test_render_sample: IntProperty(options={'SKIP_SAVE'})
+    test_render_samples: IntProperty(options={'SKIP_SAVE'})
     test_render_active: BoolProperty(description='A single-view RGB test is running', options={'SKIP_SAVE'})
     test_render_cancel: BoolProperty(description='Cancel the current single-view RGB test', options={'SKIP_SAVE'})
     test_render_image: StringProperty(description='Last successful single-view RGB image in this session', options={'SKIP_SAVE'})
@@ -2553,7 +2555,7 @@ def draw_training(self, context):
     if settings.detail:
         wrapped(layout, settings.detail)
     if settings.test_render_active:
-        layout.label(text='Rendering test image…')
+        capture_preview.draw_test_progress(layout, settings)
         layout.operator('lichtfeld.cancel_capture_test')
     elif settings.test_render_error:
         wrapped(layout, settings.test_render_error)
@@ -2723,6 +2725,7 @@ def history_changed(_):
         scene.lichtfeld_training.importing = False
         scene.lichtfeld_training.test_render_active = False
         scene.lichtfeld_training.test_render_cancel = False
+        scene.lichtfeld_training.test_render_sample = scene.lichtfeld_training.test_render_samples = 0
         source = capture_preview.source_scene(scene)
         if source:
             capture_preview.camera_changed(source.lichtfeld_training, None, refresh_only=True)
@@ -2756,6 +2759,7 @@ def unloading(_):
 @persistent
 def loaded(_):
     capture_preview.clear_camera_indices()
+    capture_preview.clear_test_viewers()
     preflight.clear()
     ui_runtime.clear()
     _imported.clear()
@@ -2765,6 +2769,7 @@ def loaded(_):
         settings = scene.lichtfeld_training
         settings.test_render_active = False
         settings.test_render_cancel = False
+        settings.test_render_sample = settings.test_render_samples = 0
         capture_preview.camera_changed(settings, None)
         if not source or settings.job_directory or settings.attached_session:
             continue
@@ -2794,6 +2799,7 @@ def register():
     bpy.types.Scene.lichtfeld_training = PointerProperty(type=LichtFeldSettings)
     bpy.types.Collection.lichtfeld_rig_reference = PointerProperty(type=LichtFeldRigReference)
     portal_ui.register()
+    bpy.types.IMAGE_HT_header.prepend(capture_preview.draw_test_viewer_header)
     bpy.app.handlers.undo_pre.append(history_changing)
     bpy.app.handlers.redo_pre.append(history_changing)
     bpy.app.handlers.undo_post.append(history_changed)
@@ -2805,6 +2811,8 @@ def register():
 
 
 def unregister():
+    capture_preview.clear_test_viewers()
+    bpy.types.IMAGE_HT_header.remove(capture_preview.draw_test_viewer_header)
     portal_ui.unregister()
     # Blender unregisters native modal handlers. Release their owned datablocks
     # first, while the RNA settings and operator types still exist.

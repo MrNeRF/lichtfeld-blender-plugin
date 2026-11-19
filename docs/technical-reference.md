@@ -26,7 +26,7 @@ The adapter accesses the training model only at callback safe boundaries. It han
 | `state.json`, `runtime.json` | Supervisor and training status |
 | `capture-render.json` | Frozen renderer/device request and capture progress |
 | `capture.blend` | Isolated project used by the render worker |
-| `capture-frames.json`, `capture-progress.json` | Capture calibration journal and completed-view progress |
+| `capture-frames.json`, `capture-progress.json` | Capture calibration journal and completed-view progress. A test render can also report optional `sample` and `samples` counts. |
 | `dataset/images/` | Captured RGB images |
 | `dataset/transforms.json` | Calibrated camera poses/intrinsics for ordinary capture |
 | `dataset/capture_transforms.json` | Original capture calibration when using COLMAP observations |
