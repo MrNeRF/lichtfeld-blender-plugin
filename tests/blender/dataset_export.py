@@ -35,8 +35,10 @@ with tempfile.TemporaryDirectory() as directory:
   first=s.camera_collection
   s.rig_phase=.3
   assert bpy.ops.lichtfeld.create_rig(new_rig=True)=={'FINISHED'}
-  s.capture_collections.add().collection=first
-  s.capture_collections.add().collection=s.camera_collection
+  assert [entry.collection for entry in s.capture_collections] == [first]
+  assert bpy.ops.lichtfeld.capture_collection_entry(use_edited=True)=={'FINISHED'}
+  assert [entry.collection for entry in s.capture_collections] == [first, s.camera_collection]
+  assert bpy.ops.lichtfeld.capture_collection_entry(use_edited=True)=={'CANCELLED'}
   expected_cameras.update(obj.name for obj in s.camera_collection.objects if obj.type=='CAMERA')
   assert len(expected_cameras)==8
  bpy.ops.wm.save_as_mainfile(filepath=str(area/'source.blend'))

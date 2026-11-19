@@ -735,11 +735,14 @@ class LF_OT_capture_collection(bpy.types.Operator):
     bl_options = {'UNDO', 'INTERNAL'}
 
     index: IntProperty(default=-1, options={'HIDDEN', 'SKIP_SAVE'})
+    use_edited: BoolProperty(options={'HIDDEN', 'SKIP_SAVE'})
 
     @classmethod
     def description(cls, context, properties):
         if properties.index >= 0:
             return 'Remove this entry from capture while keeping the collection in Blender'
+        if properties.use_edited:
+            return 'Include the rig you are editing alongside the current capture sets'
         return 'Add a collection to the list of cameras to capture'
 
     @classmethod
@@ -750,7 +753,12 @@ class LF_OT_capture_collection(bpy.types.Operator):
     def execute(self, context):
         settings = context.scene.lichtfeld_training
         rows = settings.capture_collections
-        if self.index < 0:
+        if self.use_edited:
+            rig = settings.camera_collection
+            if not rows or not rig or rig in preflight.camera_collections(settings):
+                return {'CANCELLED'}
+            rows.add().collection = rig
+        elif self.index < 0:
             if not rows and settings.camera_collection:
                 rows.add().collection = settings.camera_collection
             rows.add()
@@ -772,9 +780,7 @@ class LF_OT_rig(_RigOperation, bpy.types.Operator):
     @classmethod
     def description(cls, context, properties):
         if properties.new_rig:
-            if context.scene.lichtfeld_training.capture_collections:
-                return "Create a rig with the current settings. Add it to Capture collections to capture its cameras"
-            return "Create a rig with the current settings and use it as the capture collection"
+            return "Create a separate rig from these settings. The capture sets stay as they are"
         return cls.bl_description
 
     @classmethod
@@ -800,6 +806,7 @@ class LF_OT_rig(_RigOperation, bpy.types.Operator):
         reference = settings.rig_reference
         create_separately = getattr(self, 'new_rig', False)
         previous = None if create_separately else settings.camera_collection
+        capture_sets = preflight.camera_collections(settings) if create_separately else ()
         legacy = previous and previous.get('lichtfeld_generated')
         if reference.mode == 'UNSET' and not legacy:
             sources = sources_for(context)
@@ -944,14 +951,33 @@ class LF_OT_rig(_RigOperation, bpy.types.Operator):
                 angles = Quaternion(vector.normalized(), vector.length).to_euler('XYZ') if vector.length else (0, 0, 0)
                 rig_edit.rotate_after_aim(obj, target, angles)
             yield
-        for _ in rig_edit.commit(self, settings, previous, collection, target, recipe):
-            yield
+        repeated = 0
+        if capture_sets:
+            existing = {obj for group in capture_sets for obj in group.all_objects if obj.type == "CAMERA"}
+            if existing:
+                context.view_layer.update()
+                evaluated = context.evaluated_depsgraph_get()
+                cameras = list(existing) + [obj for obj in collection.objects if obj.type == "CAMERA"]
+                poses = []
+                for camera in cameras:
+                    poses.append(camera.evaluated_get(evaluated).matrix_world.copy())
+                    yield
+                matches = yield from rig_geometry.repeated_poses(poses)
+                repeated = sum(first < len(existing) <= second for first, second in matches)
+        yield from rig_edit.commit(self, settings, previous, collection, target, recipe)
+        if capture_sets and not settings.capture_collections:
+            settings.capture_collections.add().collection = capture_sets[0]
         rig_edit.copy_reference(settings.camera_collection.lichtfeld_rig_reference, reference)
         if capture_sources:
             for _ in preflight.remember_sources(settings, capture_sources):
                 yield
         summary = f"{len(points)} stations × {len(station_directions)} = {total} cameras" if station_directions else f"{total} cameras"
-        self.report({"INFO"}, f"Applied {summary}. Review coverage before training.")
+        if repeated:
+            self.report({"WARNING"}, f"{repeated} new camera poses repeat capture views. Adjust the rig before adding it to Capture sets.")
+        elif capture_sets:
+            self.report({"INFO"}, f"Created {summary}. Add the rig to Capture sets when ready.")
+        else:
+            self.report({"INFO"}, f"Applied {summary}. Review coverage before training.")
 
     def cleanup(self):
         for _ in rig_edit.rollback(self):
@@ -2206,15 +2232,15 @@ def draw_rig_actions(layout, settings, pending, *, edit=False):
     if managed and settings.rig_parameter_source != rig:
         row.operator('lichtfeld.read_rig', text='Load selected rig', icon='IMPORT')
     elif not rig or edit or managed and (pending or settings.rig_mode == 'PATH'):
-        row.operator('lichtfeld.create_rig', text='Apply rig changes' if managed else 'Create camera rig')
+        row.operator('lichtfeld.create_rig', text='Apply to current rig' if managed and edit else 'Apply rig changes' if managed else 'Create camera rig')
         if managed and pending:
             row.operator('lichtfeld.read_rig', text='Revert', icon='LOOP_BACK')
     if managed and not pending and settings.rig_parameter_source == rig and settings.rig_mode in {'SPHERE', 'HEMISPHERE', 'RINGS'}:
         row.operator('lichtfeld.live_rig', text='Edit live')
     if preflight.camera_collections(settings):
         layout.operator('lichtfeld.capture_framing', text='Check framing')
-    if managed:
-        layout.operator('lichtfeld.create_rig', text='Create another rig').new_rig = True
+    if managed and edit:
+        layout.operator('lichtfeld.create_rig', text='Create new rig').new_rig = True
 
 
 def draw_capture_cameras(box, context, settings, ready, rig_changed, wrapped):
@@ -2253,6 +2279,8 @@ def draw_capture_cameras(box, context, settings, ready, rig_changed, wrapped):
         if not settings.capture_collections:
             capture_list.label(text='Using the selected collection')
         capture_list.operator('lichtfeld.capture_collection_entry', text='Add collection', icon='ADD')
+        if managed and rig not in preflight.camera_collections(settings):
+            capture_list.operator('lichtfeld.capture_collection_entry', text='Include edited rig').use_edited = True
     if settings.capture_collections:
         box.label(text='Checking cameras…' if ready.get('checking') else f"{len(ready['cameras']):,} capture cameras",
                   icon='BLANK1')
@@ -2269,7 +2297,7 @@ def draw_capture_cameras(box, context, settings, ready, rig_changed, wrapped):
         unloaded = managed and settings.rig_parameter_source != rig
         if managed and not unloaded:
             draw_capture_reference(box, rig)
-        title = 'New rig settings' if unloaded else 'Rig settings' if managed else 'Create a rig'
+        title = 'Rig settings' if managed else 'Create a rig'
         content = draw_disclosure(box, 'rig_generator', title)
         if content is None:
             draw_rig_actions(box, settings, rig_changed)
@@ -2374,6 +2402,8 @@ def draw_capture_cameras(box, context, settings, ready, rig_changed, wrapped):
             if settings.rig_position_variation or settings.rig_rotation_variation:
                 box.prop(settings, 'rig_variation_seed', text='Seed')
         box = outer
+    if managed:
+        wrapped(box, 'Create a separate rig from these settings. Add it to Capture sets when ready.')
     draw_rig_actions(box, settings, rig_changed, edit=True)
 
 
