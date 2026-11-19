@@ -2,8 +2,14 @@ name: Extension contracts and package
 
 on:
   push:
+    branches: [main]
+    tags: ['v*']
   pull_request:
   workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -69,6 +75,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
         run: |
+          if [[ "$(gh api "repos/$GITHUB_REPOSITORY/commits/main" --jq .sha)" != "$GITHUB_SHA" ]]; then
+            echo "::error::$TAG is not the tip of main"
+            exit 1
+          fi
           package="lichtfeld_training-${TAG#v}.zip"
           if [[ ! -f "$package" ]]; then
             echo "::error::Tag $TAG does not match the manifest version"
