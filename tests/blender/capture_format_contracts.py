@@ -454,3 +454,42 @@ assert s.capture_preview_index==4 and preview['capture_camera_name']==ext.camera
 assert preview['capture_camera_count']==4
 assert bpy.ops.lichtfeld.close_capture_framing()=={'FINISHED'}
 print('FRAMING_BUSY_RIG_RESCAN_AND_QUEUED_DEPENDENCY_PASS',flush=True)
+
+# Exclusion follows the original camera, including in saved scenes and rig updates.
+s.capture_preview_index=1
+for _ in ext.capture_preview.open_steps(source,bpy.context.window,None):pass
+preview=bpy.context.scene
+original=preview[ext.capture_preview.ORIGINAL_CAMERA]
+key=ext.preflight.CAMERA_EXCLUDED
+assert bpy.ops.lichtfeld.toggle_capture_camera()=={'FINISHED'}
+assert original.get(key) and preview['capture_excluded_count']==1
+s.capture_preview_index=2
+while ext.capture_preview.camera_pending(preview):ext.ui_runtime.tick()
+assert preview[ext.capture_preview.ORIGINAL_CAMERA] != original
+s.capture_preview_index=1
+while ext.capture_preview.camera_pending(preview):ext.ui_runtime.tick()
+assert preview[ext.capture_preview.ORIGINAL_CAMERA] == original
+assert bpy.ops.lichtfeld.toggle_capture_camera()=={'FINISHED'}
+assert not original.get(key) and preview['capture_excluded_count']==0
+assert bpy.ops.lichtfeld.toggle_capture_camera()=={'FINISHED'}
+assert bpy.ops.lichtfeld.close_capture_framing()=={'FINISHED'}
+
+def checks(single=False):
+    work=ext.preflight.camera_checks(bpy.context,single_render=single)
+    while True:
+        try: next(work)
+        except StopIteration as done: return done.value
+
+assert original.name not in checks()['cameras']
+assert checks(single=True)['cameras']==[original.name]
+original.name='Capture 000 renamed'
+assert bpy.ops.lichtfeld.create_rig()=={'FINISHED'}
+assert original.get(key)
+with tempfile.TemporaryDirectory() as directory:
+    filename=str(Path(directory)/'excluded-camera.blend')
+    name=original.name
+    bpy.ops.wm.save_as_mainfile(filepath=filename)
+    bpy.ops.wm.open_mainfile(filepath=filename,use_scripts=False)
+    assert bpy.data.objects[name].get(key)
+    assert name not in checks()['cameras']
+print('FRAMING_EXCLUSION_NAVIGATION_SAVE_AND_RIG_UPDATE_PASS',flush=True)

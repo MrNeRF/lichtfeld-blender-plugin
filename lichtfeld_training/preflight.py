@@ -76,7 +76,10 @@ def capture_name_error(obj, label):
  return None
 
 
-def camera_objects(scene, settings):
+CAMERA_EXCLUDED = 'lichtfeld_capture_excluded'
+
+
+def camera_objects(scene, settings, *, include_excluded=False):
  cameras=set()
  rows=getattr(settings,'capture_collections',())
  collections=camera_collections(settings)
@@ -88,7 +91,7 @@ def camera_objects(scene, settings):
   raise ValueError('Choose capture collections linked to this scene.')
  for collection in collections:
   for obj in object_steps(collection.all_objects):
-   if obj is not None and obj.type=='CAMERA':
+   if obj is not None and obj.type=='CAMERA' and (include_excluded or not obj.get(CAMERA_EXCLUDED)):
     cameras.add(obj)
    yield
  if len({camera.name for camera in cameras}) != len(cameras):
@@ -169,7 +172,7 @@ def camera_checks(context, *, single_render=False, poses=False, inspect=None):
  s=context.scene.lichtfeld_training
  issues={};frames=[];selection_error=''
  graph=context.evaluated_depsgraph_get()
- try:cameras=yield from camera_objects(context.scene,s)
+ try:cameras=yield from camera_objects(context.scene,s,include_excluded=single_render)
  except ValueError as error:
   cameras=[];selection_error=str(error)
  count=len(cameras);generated=sum(bool(obj.get('lichtfeld_generated')) for obj in cameras)
