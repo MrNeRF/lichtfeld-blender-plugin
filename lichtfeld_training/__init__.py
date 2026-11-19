@@ -2759,6 +2759,7 @@ def unloading(_):
 @persistent
 def loaded(_):
     capture_preview.clear_camera_indices()
+    capture_preview.clear_test_viewers()
     preflight.clear()
     ui_runtime.clear()
     _imported.clear()
@@ -2810,6 +2811,7 @@ def register():
 
 
 def unregister():
+    capture_preview.clear_test_viewers()
     bpy.types.IMAGE_HT_header.remove(capture_preview.draw_test_viewer_header)
     portal_ui.unregister()
     # Blender unregisters native modal handlers. Release their owned datablocks

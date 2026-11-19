@@ -503,7 +503,11 @@ class LF_OT_toggle_capture_camera(bpy.types.Operator):
         return {'FINISHED'}
 
 
-TEST_VIEWER = 'lichtfeld_test_viewer'
+_test_viewer_owners = {}
+
+
+def clear_test_viewers():
+    _test_viewer_owners.clear()
 
 
 def draw_test_progress(layout, settings):
@@ -518,9 +522,10 @@ def draw_test_progress(layout, settings):
 
 
 def draw_test_viewer_header(self, context):
-    if not context.window.screen.get(TEST_VIEWER):
+    source = test_viewer_source(context)
+    if source is None:
         return
-    settings = context.scene.lichtfeld_training
+    settings = source.lichtfeld_training
     if settings.test_render_active:
         draw_test_progress(self.layout, settings)
         row = self.layout.row()
@@ -532,7 +537,14 @@ def draw_test_viewer_header(self, context):
 
 def find_test_viewer(manager, source):
     return next((window for window in manager.windows
-                 if window.scene == source and window.screen.get(TEST_VIEWER)), None)
+                 if _test_viewer_owners.get(window.screen.session_uid) == source.session_uid), None)
+
+
+def test_viewer_source(context):
+    owner = _test_viewer_owners.get(context.window.screen.session_uid) if context.window else None
+    if owner is not None:
+        return next((scene for scene in bpy.data.scenes if scene.session_uid == owner), None)
+    return None
 
 
 def redraw_test_viewer(source):
@@ -544,6 +556,9 @@ def redraw_test_viewer(source):
 
 
 def show_test_viewer(context, source, image=None):
+    screens = {screen.session_uid for screen in bpy.data.screens}
+    for uid in _test_viewer_owners.keys() - screens:
+        del _test_viewer_owners[uid]
     window = find_test_viewer(context.window_manager, source)
     if window is None:
         before = {item.as_pointer() for item in context.window_manager.windows}
@@ -555,7 +570,7 @@ def show_test_viewer(context, source, image=None):
         restore_source(window, window.scene, source)
     elif window.scene != source:
         window.scene = source
-    window.screen[TEST_VIEWER] = True
+    _test_viewer_owners[window.screen.session_uid] = source.session_uid
     area = max(window.screen.areas, key=lambda area: area.width * area.height)
     area.type = 'IMAGE_EDITOR'
     area.spaces.active.image = image
@@ -563,7 +578,7 @@ def show_test_viewer(context, source, image=None):
     if len(window.screen.areas) > 1:
         with bpy.context.temp_override(window=window, area=area):
             bpy.ops.screen.screen_full_area(use_hide_panels=False)
-        window.screen[TEST_VIEWER] = True
+        _test_viewer_owners[window.screen.session_uid] = source.session_uid
 
 
 def test_image_path(image):
@@ -857,11 +872,11 @@ class LF_OT_cancel_capture_test(bpy.types.Operator):
 
     @classmethod
     def poll(cls, context):
-        source = source_scene(context.scene) or context.scene
+        source = test_viewer_source(context) or source_scene(context.scene) or context.scene
         return source is not None and source.lichtfeld_training.test_render_active
 
     def execute(self, context):
-        source = source_scene(context.scene) or context.scene
+        source = test_viewer_source(context) or source_scene(context.scene) or context.scene
         source.lichtfeld_training.test_render_cancel = True
         redraw_test_viewer(source)
         return {'FINISHED'}
