@@ -366,9 +366,13 @@ def commit(owner, settings, previous, staging, target, recipe):
     if consumed:
         bpy.data.batch_remove(ids=consumed)
         yield
-    for obj in old[len(new):]:
-        unused[obj.data.as_pointer()] = obj.data
-        bpy.data.objects.remove(obj, do_unlink=True)
+    surplus = old[len(new):]
+    for start in range(0, len(surplus), batch_size):
+        batch = surplus[start:start + batch_size]
+        for obj in batch:
+            data = obj.data
+            unused[data.as_pointer()] = data
+        bpy.data.batch_remove(ids=batch)
         yield
     data_blocks = list(unused.values())
     for start in range(0, len(data_blocks), batch_size):

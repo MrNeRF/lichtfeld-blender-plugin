@@ -1189,3 +1189,37 @@ assert retained_data.use_fake_user
 assert (len(bpy.data.objects), len(bpy.data.cameras), len(bpy.data.collections)) == (
     before[0], before[1] + 2, before[2])
 print('BATCHED_RIG_CLEANUP_PRESERVES_SHARED_AND_RETAINED_CAMERA_DATA_PASS', flush=True)
+
+s.views = 80
+assert bpy.ops.lichtfeld.create_rig() == {'FINISHED'}
+cameras = sorted((obj for obj in rig.objects if obj.type == 'CAMERA'),
+                 key=lambda obj: obj['lichtfeld_camera_index'])
+scene = bpy.context.scene
+active, linked, tracked, shared, pinned = cameras[35:40]
+scene.camera = active
+bpy.context.view_layer.objects.active = active
+active.select_set(True)
+marker = scene.timeline_markers.new('Retiring camera', frame=1)
+marker.camera = active
+external = bpy.data.collections.new('External camera users')
+scene.collection.children.link(external)
+external.objects.link(linked)
+other = bpy.data.scenes.new('Other capture scene')
+other.collection.children.link(external)
+other.camera = linked
+constraint = custom_camera.constraints.new('TRACK_TO')
+constraint.target = tracked
+shared_data = shared.data
+custom_camera.data = shared_data
+pinned_data = pinned.data
+pinned_data.use_fake_user = True
+retired_names = {obj.name for obj in cameras[31:]}
+s.views = 31
+assert bpy.ops.lichtfeld.create_rig() == {'FINISHED'}
+assert [obj for obj in cameras[:31] if obj.name in rig.objects] == cameras[:31]
+assert not retired_names.intersection(bpy.data.objects.keys())
+assert len(external.objects) == 0
+assert scene.camera is None and other.camera is None and marker.camera is None
+assert bpy.context.view_layer.objects.active is None and constraint.target is None
+assert custom_camera.data == shared_data and pinned_data.use_fake_user
+print('BATCHED_RIG_SHRINK_PRESERVES_SURVIVORS_AND_CLEARS_EXTERNAL_REFERENCES_PASS', flush=True)
