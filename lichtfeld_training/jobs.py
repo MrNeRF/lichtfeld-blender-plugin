@@ -226,7 +226,7 @@ def check_environment(backend, directory, source="", require_backend=True, *, ba
             info = path.stat()
             with tempfile.TemporaryFile(dir=path.parent) as probe:
                 probe.write(b"capture")
-            result["source_identity"] = [info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns]
+            result["source_identity"] = source_identity(info)
     except (OSError, ValueError) as error:
         message = ("Choose a writable training jobs folder." if stage == "jobs" else
                    "Save the scene in a folder where Blender can write capture files.")
@@ -258,6 +258,10 @@ def private_snapshot_file(path):
     finally:kernel.LocalFree(descriptor)
 
 
+def source_identity(info):
+    return [info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns]
+
+
 def freeze_source(job):
     source=Path(job['source_file'])
     staged=source.with_name('.lichtfeld-capture-'+job['id']+'.blend')
@@ -273,7 +277,7 @@ def freeze_source(job):
             raise
         with src,os.fdopen(fd,"wb") as dst:
             before=os.fstat(src.fileno())
-            identity = [before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns]
+            identity = source_identity(before)
             if job.get("source_identity") and identity != job["source_identity"]:
                 raise ValueError("The saved scene changed after validation. Save and start again.")
             for block in iter(lambda:src.read(4*1024*1024),b''):
@@ -282,6 +286,7 @@ def freeze_source(job):
             if (before.st_size,before.st_mtime_ns)!=(after.st_size,after.st_mtime_ns):
                 raise ValueError("The saved source changed while preparing capture")
         job["capture_staging_file"]=str(staged)
+        job["source_identity"]=identity
         job["source_sha256"]=digest.hexdigest()
         return job
     except Exception:
@@ -299,17 +304,38 @@ def release_source(job):
     except OSError:pass
 
 
+def connection_key(source,scene):
+    return hashlib.sha256((os.path.normcase(os.path.abspath(source))+'\0'+scene).encode()).hexdigest()
+
+
+def matches_source_identity(source,identity):
+    try:
+        return identity == source_identity(Path(source).stat())
+    except OSError:
+        return False
+
+
 def remember_job(directory,job):
-    key=hashlib.sha256((os.path.normcase(os.path.abspath(job['source_file']))+'\0'+job['scene']).encode()).hexdigest()
+    if not matches_source_identity(job['source_file'],job.get('source_identity')):
+        return
+    key=connection_key(job['source_file'],job['scene'])
     atomic_json(Path(directory)/(key+'.json'),{'job_root':job['root'],'source_file':job['source_file'],'scene':job['scene']})
 
 
 def remembered_job(directory,source,scene):
-    key=hashlib.sha256((os.path.normcase(os.path.abspath(source))+'\0'+scene).encode()).hexdigest()
-    record=read_json(Path(directory)/(key+'.json'),{})
-    root=record.get('job_root')
-    if root and (Path(root)/'job.json').is_file():return root
-    return None
+    key=connection_key(source,scene)
+    try:
+        record=read_json(Path(directory)/(key+'.json'),{})
+        root=record.get('job_root') if isinstance(record,dict) else None
+        if not isinstance(root,str) or not root:
+            return None
+        job=read_job(Path(root)/'job.json')
+        if (job.get('source_file') and job.get('scene') == scene
+                and connection_key(job['source_file'],scene) == key
+                and matches_source_identity(source,job.get('source_identity'))):
+            return root
+    except (OSError,ValueError):
+        return None
 
 
 def captured_dataset(directory, options=None):
@@ -404,7 +430,7 @@ def restart_data(directory, options, *, backend, jobs_directory, connection_dire
         errors.append("Normal supervision start must precede its end")
     if errors:
         raise ValueError(" ".join(errors))
-    for key in ("resume", "resume_iteration", "capture_staging_file", "source_identity", "source_sha256", "optimizer_overrides", "capture_only", "export_parent"):
+    for key in ("resume", "resume_iteration", "capture_staging_file", "source_sha256", "optimizer_overrides", "capture_only", "export_parent"):
         job.pop(key, None)
     identifier = uuid.uuid4().hex
     root = Path(jobs_directory).resolve() / identifier

@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2026 LichtFeld Studio Authors
 # SPDX-License-Identifier: GPL-3.0-or-later
 from pathlib import Path
-import sys,importlib
+import sys,importlib,time
 import bpy
 ROOT=Path(__file__).resolve().parents[2]
 sys.path.insert(0,str(ROOT))
@@ -116,6 +116,46 @@ with tempfile.TemporaryDirectory() as directory:
    else:raise AssertionError('An incompatible backend was accepted')
    check.assert_called_once_with('changed-backend',str(root.parent))
    freeze.assert_not_called();spawn.assert_not_called()
+with tempfile.TemporaryDirectory() as directory:
+ root=Path(directory)
+ clean=root/'clean.blend';target=root/'capture.blend'
+ prefs=ext.preferences(bpy.context)
+ prefs.jobs_directory=str(root/'jobs')
+ connections=ext.preflight.connection_folder(prefs)
+ bpy.context.scene.lichtfeld_training.job_directory=''
+ bpy.ops.wm.save_as_mainfile(filepath=str(clean))
+ bpy.context.scene.frame_set(2)
+ bpy.ops.wm.save_as_mainfile(filepath=str(target))
+ job_root=root/'job';job_root.mkdir()
+ manifest=job_root/'job.json'
+ job={'schema':ext.jobs.SCHEMA,'id':'saved-capture','root':str(job_root),'source_file':str(target),
+      'scene':bpy.context.scene.name,'source_identity':ext.jobs.source_identity(target.stat())}
+ ext.jobs.atomic_json(manifest,job)
+ ext.jobs.remember_job(connections,job)
+ def settle_recovery():
+  deadline=time.monotonic()+5
+  while ext.ui_runtime._tasks and time.monotonic()<deadline:
+   ext.ui_runtime.tick()
+   time.sleep(.01)
+  assert not ext.ui_runtime._tasks, 'Job recovery worker did not finish'
+ bpy.ops.wm.open_mainfile(filepath=str(target),use_scripts=False)
+ settle_recovery()
+ assert bpy.context.scene.lichtfeld_training.job_directory==str(job_root)
+ bpy.ops.wm.open_mainfile(filepath=str(clean),use_scripts=False)
+ settle_recovery()
+ assert not bpy.context.scene.lichtfeld_training.job_directory
+ bpy.ops.wm.save_as_mainfile(filepath=str(target))
+ bpy.ops.wm.open_mainfile(filepath=str(target),use_scripts=False)
+ settle_recovery()
+ assert not bpy.context.scene.lichtfeld_training.job_directory
+ assert bpy.ops.lichtfeld.load_job(filepath=str(manifest))=={'FINISHED'}
+ settle_recovery()
+ assert bpy.context.scene.lichtfeld_training.job_directory==str(job_root)
+ bpy.ops.wm.save_mainfile()
+ bpy.ops.wm.open_mainfile(filepath=str(target),use_scripts=False)
+ settle_recovery()
+ assert bpy.context.scene.lichtfeld_training.job_directory==str(job_root)
+ print('REPLACED_BLEND_SKIPS_AUTOMATIC_JOB_RECOVERY_PASS',flush=True)
 bpy.ops.preferences.addon_disable(module=module)
 assert not bpy.app.timers.is_registered(ext.poll_jobs)
 print('WORKFLOW_CONTRACTS_PASS')

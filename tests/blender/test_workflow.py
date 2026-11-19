@@ -45,6 +45,7 @@ class WorkflowTests(unittest.TestCase):
   with tempfile.TemporaryDirectory() as directory:
    source=Path(directory)/'source.blend';source.write_bytes(b'original')
    job=jobs.freeze_source({'id':'test','source_file':str(source)})
+   self.assertEqual(job['source_identity'],jobs.source_identity(source.stat()))
    staged=Path(job['capture_staging_file']);source.write_bytes(b'new version')
    self.assertEqual(staged.read_bytes(),b'original')
    jobs.release_source({**job,'capture_staging_file':str(source)})
@@ -52,11 +53,34 @@ class WorkflowTests(unittest.TestCase):
    jobs.release_source(job);self.assertFalse(staged.exists())
  def test_connection_index(self):
   with tempfile.TemporaryDirectory() as directory:
-   root=Path(directory)/'job';root.mkdir();(root/'job.json').write_text('{}')
-   job={'source_file':str(Path(directory)/'source.blend'),'scene':'Scene','root':str(root)}
+   root=Path(directory)/'job';root.mkdir()
+   source=Path(directory)/'source.blend';source.write_bytes(b'original')
+   manifest=root/'job.json'
+   job={'schema':jobs.SCHEMA,'id':'capture','source_file':str(source),'scene':'Scene','root':str(root),
+        'source_identity':jobs.source_identity(source.stat())}
+   jobs.atomic_json(manifest,job)
    index=Path(directory)/'connections';jobs.remember_job(index,job)
    self.assertEqual(jobs.remembered_job(index,job['source_file'],'Scene'),str(root))
    self.assertIsNone(jobs.remembered_job(index,job['source_file'],'Other Scene'))
+   legacy={key:value for key,value in job.items() if key!='source_identity'}
+   jobs.atomic_json(manifest,legacy)
+   self.assertIsNone(jobs.remembered_job(index,job['source_file'],'Scene'))
+   jobs.atomic_json(manifest,job)
+   replacement=source.with_suffix('.tmp');replacement.write_bytes(b'replaced')
+   replacement.replace(source)
+   self.assertIsNone(jobs.remembered_job(index,job['source_file'],'Scene'))
+   self.assertEqual(Path(jobs.load_job(str(manifest))),root.resolve())
+   newer=root.parent/'newer';newer.mkdir()
+   next_job={**job,'id':'newer','root':str(newer),'source_identity':jobs.source_identity(source.stat())}
+   jobs.atomic_json(newer/'job.json',next_job)
+   jobs.remember_job(index,next_job)
+   jobs.remember_job(index,job)
+   self.assertEqual(jobs.remembered_job(index,str(source),'Scene'),str(newer))
+   (newer/'job.json').write_text('{')
+   self.assertIsNone(jobs.remembered_job(index,str(source),'Scene'))
+   jobs.atomic_json(newer/'job.json',next_job)
+   source.unlink()
+   self.assertIsNone(jobs.remembered_job(index,str(source),'Scene'))
 
  def test_snapshot_identity_rejects_replaced_source(self):
   with tempfile.TemporaryDirectory() as directory:
