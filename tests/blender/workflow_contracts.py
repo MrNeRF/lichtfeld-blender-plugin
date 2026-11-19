@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2026 LichtFeld Studio Authors
 # SPDX-License-Identifier: GPL-3.0-or-later
 from pathlib import Path
-import sys,importlib
+import sys,importlib,time
 import bpy
 ROOT=Path(__file__).resolve().parents[2]
 sys.path.insert(0,str(ROOT))
@@ -132,19 +132,29 @@ with tempfile.TemporaryDirectory() as directory:
       'scene':bpy.context.scene.name,'source_identity':ext.jobs.source_identity(target.stat())}
  ext.jobs.atomic_json(manifest,job)
  ext.jobs.remember_job(connections,job)
- def complete_in_place(work, done=None, failure=None):
-  value=work()
-  if done:done(value)
- with patch.object(ext.ui_runtime,'submit',side_effect=complete_in_place):
-  bpy.ops.wm.open_mainfile(filepath=str(target),use_scripts=False)
-  assert bpy.context.scene.lichtfeld_training.job_directory==str(job_root)
-  bpy.ops.wm.open_mainfile(filepath=str(clean),use_scripts=False)
-  assert not bpy.context.scene.lichtfeld_training.job_directory
-  bpy.ops.wm.save_as_mainfile(filepath=str(target))
-  bpy.ops.wm.open_mainfile(filepath=str(target),use_scripts=False)
-  assert not bpy.context.scene.lichtfeld_training.job_directory
-  assert bpy.ops.lichtfeld.load_job(filepath=str(manifest))=={'FINISHED'}
-  assert bpy.context.scene.lichtfeld_training.job_directory==str(job_root)
+ def settle_recovery():
+  deadline=time.monotonic()+5
+  while ext.ui_runtime._tasks and time.monotonic()<deadline:
+   ext.ui_runtime.tick()
+   time.sleep(.01)
+  assert not ext.ui_runtime._tasks, 'Job recovery worker did not finish'
+ bpy.ops.wm.open_mainfile(filepath=str(target),use_scripts=False)
+ settle_recovery()
+ assert bpy.context.scene.lichtfeld_training.job_directory==str(job_root)
+ bpy.ops.wm.open_mainfile(filepath=str(clean),use_scripts=False)
+ settle_recovery()
+ assert not bpy.context.scene.lichtfeld_training.job_directory
+ bpy.ops.wm.save_as_mainfile(filepath=str(target))
+ bpy.ops.wm.open_mainfile(filepath=str(target),use_scripts=False)
+ settle_recovery()
+ assert not bpy.context.scene.lichtfeld_training.job_directory
+ assert bpy.ops.lichtfeld.load_job(filepath=str(manifest))=={'FINISHED'}
+ settle_recovery()
+ assert bpy.context.scene.lichtfeld_training.job_directory==str(job_root)
+ bpy.ops.wm.save_mainfile()
+ bpy.ops.wm.open_mainfile(filepath=str(target),use_scripts=False)
+ settle_recovery()
+ assert bpy.context.scene.lichtfeld_training.job_directory==str(job_root)
  print('REPLACED_BLEND_SKIPS_AUTOMATIC_JOB_RECOVERY_PASS',flush=True)
 bpy.ops.preferences.addon_disable(module=module)
 assert not bpy.app.timers.is_registered(ext.poll_jobs)

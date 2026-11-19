@@ -188,12 +188,19 @@ class DatasetReuse(unittest.TestCase):
     def test_fresh_training_reuses_images_without_source_checkpoint_or_old_result(self):
         with tempfile.TemporaryDirectory() as directory:
             old=fixture(directory)
+            source=old/'source.blend'
+            source.write_bytes(b'captured source')
+            manifest=jobs.read_job(old/'job.json')
+            identity=jobs.source_identity(source.stat())
+            manifest.update(source_file=str(source),scene='Scene',source_identity=identity)
+            atomic_json(old/'job.json',manifest)
             job, previous=jobs.restart_data(old,{"iterations":20,"eval_interval":10,"sh_degree":1},backend="TRUSTED",jobs_directory=directory)
             self.assertEqual(previous,"original")
             self.assertNotIn("resume",job)
             self.assertNotIn('resume_iteration', job)
             self.assertTrue(job["reuse_dataset"])
             self.assertEqual(job["backend"],"TRUSTED")
+            self.assertEqual(job["source_identity"],identity)
             self.assertFalse((Path(job["root"])/"best.json").exists())
             self.assertTrue((old/"best.json").exists())
             args=training_command(job,"hook.py")
@@ -201,6 +208,10 @@ class DatasetReuse(unittest.TestCase):
             self.assertNotIn("--resume",args)
             # Repeated experiments resolve the same immutable captured dataset.
             atomic_json(Path(job["root"])/"job.json",job)
+            index=old/'connections'
+            jobs.remember_job(index,job)
+            self.assertEqual(jobs.remembered_job(index,str(source),'Scene'),job["root"])
+            source.unlink()
             second,_=jobs.restart_data(job["root"],{"iterations":8},backend="TRUSTED",jobs_directory=directory)
             self.assertEqual(second["dataset_root"],job["dataset_root"])
             self.assertNotEqual(second["root"],job["root"])
