@@ -35,7 +35,7 @@ The start or export action stays below the settings, with the reason if it is bl
 
 Fresh training on saved images creates a new model and optimizer in a separate job. It does not restore the previous splat, even if a preview remains in the viewport. Continuing a checkpoint restores its model, optimizer and saved settings. Increasing its total steps extends/rescales the remaining schedule. The continuation dialog proposes a new total and shows the saved checkpoint schedule. Unrelated settings in the current scene do not replace the saved training and preview settings.
 
-New training jobs start with evaluation off. To compare checkpoints on reserved views and keep the best-scoring model, enable **Evaluate model** under **Training → Advanced**. The checkpoint interval controls both operations when evaluation is enabled. With evaluation off, the job still saves checkpoints and publishes the last model as its result.
+New training jobs start with evaluation off. To compare checkpoints on reserved views and keep the best-scoring model, enable **Evaluate model** under **Training → Advanced**. **Save every** sets the checkpoint interval in steps and also controls how often evaluation runs when enabled. With evaluation off, the job still saves checkpoints and publishes the last model as its result.
 
 Camera, resolution, source, lighting and map changes require a new capture. Training-only settings can be changed when starting a fresh run on saved images. Previous jobs and their results remain available. New runs and continuations use the **Training jobs** folder in Settings, even when their source dataset is stored elsewhere.
 
@@ -187,7 +187,7 @@ Training setup keeps the step budget, maximum point count and SH degree directly
 
 Choose the strategy, total steps, Gaussian budget and SH degree in the training settings. Advanced controls expose optimization and supervision options; expert JSON accepts supported scalar settings and rejects invalid or reserved fields. The job records the resulting configuration. Appearance correction follows the selected native strategy defaults; incompatible appearance modes cannot be combined.
 
-During training, **Pause** pauses optimization and **Stop and save** asks the trainer to finish with a recoverable checkpoint. Commands remain available while a new preview is being prepared. **Freeze preview** holds the current view while optimization continues. Choose **Current** for the newest model or **Best evaluated** for the strongest evaluated candidate available so far.
+During training, **Pause** pauses optimization and **Stop and save** asks the trainer to finish with a recoverable checkpoint. Commands remain available while a new preview is being prepared. **Freeze preview** holds the current view while optimization continues. When evaluation is enabled, choose **Current** for the newest model or **Best evaluated** for the highest-scoring candidate so far.
 
 When a job ends, **Reached step** reports its recorded training progress, while **Shown: step** identifies the model currently in the viewport. The best evaluated model may come from an earlier step. Older jobs without recorded progress do not display an assumed final step. **Details and files** shows the settings recorded for that job, independently of edits to the current scene.
 

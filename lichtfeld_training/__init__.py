@@ -458,7 +458,7 @@ class LichtFeldSettings(bpy.types.PropertyGroup):
     iterations: IntProperty(name="Training steps", default=training_options.PROFILES['mrnf']['iterations'], min=4, max=1000000)
     enable_eval: BoolProperty(name="Evaluate model", default=False,
                               description="Use reserved views to evaluate the model and keep the best-scoring result")
-    eval_interval: IntProperty(name="Checkpoint interval", default=training_options.PROFILES['mrnf']['eval_steps'][0], min=1, max=100000,
+    eval_interval: IntProperty(name="Save every", default=training_options.PROFILES['mrnf']['eval_steps'][0], min=1, max=100000,
                                description="Save checkpoints at this step interval and evaluate at the same steps when enabled")
     max_points: IntProperty(name="Gaussian budget", default=training_options.PROFILES['mrnf']['max_cap'], min=1000)
     sh_degree: IntProperty(name="SH degree", default=training_options.PROFILES['mrnf']['sh_degree'], min=0, max=3)
@@ -1643,7 +1643,7 @@ def import_splat(scene, root, record, job=None):
 
 class LF_OT_import(bpy.types.Operator):
     bl_idname = "lichtfeld.import_result"
-    bl_label = "Import best result"
+    bl_label = "Import saved model"
     bl_description = "Import the verified saved model, keeping the result object stable"
     bl_options = {"REGISTER", "UNDO"}
 
@@ -2160,7 +2160,7 @@ def draw_training_controls(setup, settings, wrapped):
             box.prop(settings, "normal_start_fraction")
             box.prop(settings, "normal_end_fraction")
         box.prop(settings, "enable_eval")
-        box.prop(settings, "eval_interval", text="Save and evaluate every" if settings.enable_eval else "Checkpoint interval")
+        box.prop(settings, "eval_interval")
         box.prop(settings, "keep_all_checkpoints")
         box.prop(settings,"mask_mode")
         for group, fields in training_options.GROUPS.items():
