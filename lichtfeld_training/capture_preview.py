@@ -511,7 +511,8 @@ def draw_test_progress(layout, settings):
         layout.label(text='Stopping test render…', icon='TIME')
     elif settings.test_render_samples:
         sample, total = settings.test_render_sample, settings.test_render_samples
-        layout.progress(type='BAR', factor=sample / total, text=f'{sample}/{total} samples')
+        label = 'Finishing…' if sample == total else f'{sample}/{total} samples'
+        layout.progress(type='BAR', factor=sample / total, text=label)
     else:
         layout.label(text='Rendering test image…', icon='TIME')
 
@@ -526,7 +527,7 @@ def draw_test_viewer_header(self, context):
         row.enabled = not settings.test_render_cancel
         row.operator('lichtfeld.cancel_capture_test', text='Cancel')
     elif settings.test_render_error:
-        self.layout.label(text=settings.test_render_error, icon='ERROR')
+        self.layout.label(text='Test render failed', icon='ERROR')
 
 
 def find_test_viewer(manager, source):
@@ -557,15 +558,48 @@ def show_test_viewer(context, source, image=None):
     window.screen[TEST_VIEWER] = True
     area = max(window.screen.areas, key=lambda area: area.width * area.height)
     area.type = 'IMAGE_EDITOR'
-    previous = area.spaces.active.image
     area.spaces.active.image = image
-    if previous and previous != image and not previous.users and previous.get('lichtfeld_test_image'):
-        bpy.data.images.remove(previous)
     area.tag_redraw()
     if len(window.screen.areas) > 1:
         with bpy.context.temp_override(window=window, area=area):
             bpy.ops.screen.screen_full_area(use_hide_panels=False)
         window.screen[TEST_VIEWER] = True
+
+
+def test_image_path(image):
+    return Path(bpy.path.abspath(image.filepath, library=image.library))
+
+
+def load_test_image(path):
+    image = next((item for item in bpy.data.images
+                  if item.get('lichtfeld_test_image') and test_image_path(item) == Path(path)), None)
+    if image is None:
+        image = bpy.data.images.load(path, check_existing=False)
+        image['lichtfeld_test_image'] = True
+    image.use_view_as_render = False
+    return image
+
+
+def discard_previous_test_image(source, old_path):
+    from .jobs import discard_superseded_test_image
+
+    if any(scene != source and scene.lichtfeld_training.test_render_image
+           and Path(bpy.path.abspath(scene.lichtfeld_training.test_render_image)) == old_path
+           for scene in bpy.data.scenes):
+        return
+    for image in list(bpy.data.images):
+        if not image.filepath or test_image_path(image) != old_path:
+            continue
+        # Image Editor can leave one extra real user after detaching the image.
+        if image.get('lichtfeld_test_image') and image.users <= 1 and not image.use_fake_user:
+            if not any(space.image == image for screen in bpy.data.screens for area in screen.areas
+                       for space in area.spaces if space.type == 'IMAGE_EDITOR'):
+                if not bpy.data.user_map(subset=(image,)).get(image):
+                    bpy.data.images.remove(image)
+                    continue
+        if image.users:
+            return
+    ui_runtime.submit(lambda: discard_superseded_test_image(old_path))
 
 
 def read_test_samples(root):
@@ -713,6 +747,7 @@ def test_image_steps(context, *, source=None, window=None, area=None, framing=Fa
             yield ui_runtime.DEFER
         state = finish.result()
         if state.get('state') == 'stopped':
+            ui_runtime.report_notice('INFO', 'Test render cancelled')
             return
         if state.get('state') != 'completed':
             raise RuntimeError(state.get('error', 'Test render failed. See render.log in ' + job['root']))
@@ -726,15 +761,7 @@ def test_image_steps(context, *, source=None, window=None, area=None, framing=Fa
             with bpy.context.temp_override(window=window, area=area):
                 bpy.ops.lichtfeld.show_test_image('EXEC_DEFAULT')
         if previous and previous != path:
-            from .jobs import discard_superseded_test_image
-            old_path = Path(bpy.path.abspath(previous))
-            in_use = any(item != source and item.lichtfeld_training.test_render_image == previous
-                         for item in bpy.data.scenes)
-            in_use = in_use or any(image.users and image.filepath and
-                                   Path(bpy.path.abspath(image.filepath, library=image.library)) == old_path
-                                   for image in bpy.data.images)
-            if not in_use:
-                ui_runtime.submit(lambda: discard_superseded_test_image(old_path))
+            discard_previous_test_image(source, Path(bpy.path.abspath(previous)))
     except ReferenceError:
         return  # Source removal is cancellation, not a StructRNA error notice.
     finally:
@@ -747,6 +774,14 @@ def test_image_steps(context, *, source=None, window=None, area=None, framing=Fa
             settings.test_render_cancel = False
             settings.test_render_sample = settings.test_render_samples = 0
             if viewer_opened:
+                viewer = find_test_viewer(bpy.context.window_manager, source)
+                if viewer and settings.test_render_image:
+                    area = next((area for area in viewer.screen.areas if area.type == 'IMAGE_EDITOR'), None)
+                    if area and area.spaces.active.image is None:
+                        try:
+                            area.spaces.active.image = load_test_image(settings.test_render_image)
+                        except (OSError, RuntimeError):
+                            pass
                 redraw_test_viewer(source)
         except ReferenceError:
             pass
@@ -793,6 +828,7 @@ class LF_OT_render_capture_test(bpy.types.Operator):
         source.lichtfeld_training.test_render_sample = source.lichtfeld_training.test_render_samples = 0
         def failed(error):
             source.lichtfeld_training.test_render_error = str(error)
+            redraw_test_viewer(source)
             ui_runtime.report_notice('ERROR', error)
         ui_runtime.schedule(test_image_steps(context, source=source, window=context.window, area=context.area, framing=True),
                             failed)
@@ -846,13 +882,7 @@ class LF_OT_show_test_image(bpy.types.Operator):
         try:
             source = source_scene(context.scene) or context.scene
             path = source.lichtfeld_training.test_render_image
-            image = next((item for item in bpy.data.images
-                          if item.get('lichtfeld_test_image') and item.filepath == path), None)
-            if image is None:
-                image = bpy.data.images.load(path, check_existing=False)
-                image['lichtfeld_test_image'] = True
-            image.use_view_as_render = False
-            show_test_viewer(context, source, image)
+            show_test_viewer(context, source, load_test_image(path))
             return {'FINISHED'}
         except (OSError, RuntimeError, KeyError) as error:
             self.report({'ERROR'}, str(error))

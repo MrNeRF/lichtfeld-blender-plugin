@@ -22,21 +22,34 @@ def render_test_image(root):
     import time
 
     samples = re.compile(r"(?:Sample |Rendering )(\d+)\s*/\s*(\d+)")
+    tiles = re.compile(r"Rendered (\d+)/(\d+) Tiles")
     next_update = 0.0
+    last_sample = 0
+    last_tile = 0
 
     def report(stats):
-        nonlocal next_update
+        nonlocal next_update, last_sample, last_tile
         match = samples.search(stats)
         if not match:
             return
         sample, total = map(int, match.groups())
+        tile_match = tiles.search(stats)
+        if tile_match:
+            tile, tile_count = map(int, tile_match.groups())
+            # Cycles can report the previous tile's sample count when its
+            # completed-tile counter increments.
+            if tile > last_tile and sample == total:
+                sample = 0
+            last_tile = tile
+            sample, total = tile * total + sample, tile_count * total
         now = time.monotonic()
-        if sample == 0 or (sample < total and now < next_update):
+        if sample <= last_sample or sample > total or (sample < total and now < next_update):
             return
         next_update = now + .25
         try:
             atomic_json(root / 'capture-progress.json',
                         {'done': 0, 'total': 1, 'sample': sample, 'samples': total})
+            last_sample = sample
         except OSError:
             pass  # Progress is optional; keep rendering the requested image.
 
@@ -340,7 +353,8 @@ def render_dataset(job_path, reuse_images=False):
             if geometry:
                 geometry.prepare(index)
             if single_render:
-                render_test_image(root)
+                if not reuse_images:
+                    render_test_image(root)
                 atomic_json(root / 'capture-progress.json', {'done': 1, 'total': 1})
                 return  # RGB only: never publish masks, seeds or a reusable dataset.
             if not reuse_images:

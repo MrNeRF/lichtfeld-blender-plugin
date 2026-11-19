@@ -2798,7 +2798,7 @@ def register():
     bpy.types.Scene.lichtfeld_training = PointerProperty(type=LichtFeldSettings)
     bpy.types.Collection.lichtfeld_rig_reference = PointerProperty(type=LichtFeldRigReference)
     portal_ui.register()
-    bpy.types.IMAGE_HT_header.append(capture_preview.draw_test_viewer_header)
+    bpy.types.IMAGE_HT_header.prepend(capture_preview.draw_test_viewer_header)
     bpy.app.handlers.undo_pre.append(history_changing)
     bpy.app.handlers.redo_pre.append(history_changing)
     bpy.app.handlers.undo_post.append(history_changed)
