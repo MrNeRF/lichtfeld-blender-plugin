@@ -10,6 +10,30 @@ SOURCE = 'lichtfeld_capture_preview_source'
 CAMERA = 'lichtfeld_capture_preview_camera'
 _views = {}
 _pending = {}
+_indices = {}
+
+
+def clear_camera_indices():
+    _indices.clear()
+
+
+def camera_index(settings):
+    return _indices.get(settings.id_data.session_uid, settings.get('capture_preview_index', 1))
+
+
+def set_camera_index(settings, value):
+    _indices[settings.id_data.session_uid] = value
+
+
+def visible_camera_index(_state):
+    source = source_scene(bpy.context.scene)
+    return source.lichtfeld_training.capture_preview_index if source is not None else 1
+
+
+def set_visible_camera_index(_state, value):
+    source = source_scene(bpy.context.scene)
+    if source is not None:
+        source.lichtfeld_training.capture_preview_index = value
 
 
 def camera_pending(scene):
@@ -48,12 +72,18 @@ def restore_window(window, area):
         return
     try:
         space = area.spaces.active
-        perspective, local_camera, camera = state
+        perspective, local_camera, camera, location, rotation, distance, offset, zoom = state
         if camera is not None and camera.name not in bpy.data.objects:
             camera = None
-        space.region_3d.view_perspective = perspective
+        region = space.region_3d
         space.use_local_camera = local_camera
         space.camera = camera
+        region.view_perspective = perspective
+        region.view_location = location
+        region.view_rotation = rotation
+        region.view_distance = distance
+        region.view_camera_offset = offset
+        region.view_camera_zoom = zoom
     except (ReferenceError, RuntimeError, TypeError):
         pass
 
@@ -102,7 +132,7 @@ def cleanup():
     _pending.clear()
 
 
-def prepare_camera(source, window):
+def prepare_camera(source, window, *, prefer_selected=False):
     """Use the capture copy contract for both opening and changing a view."""
     settings = source.lichtfeld_training
     scene = window.scene
@@ -115,6 +145,10 @@ def prepare_camera(source, window):
     value = capture_settings.format_for(source, settings)
     overrides = capture_settings.camera_for(settings)
     index = min(settings.capture_preview_index, len(cameras))
+    if prefer_selected:
+        active = window.view_layer.objects.active
+        if active in cameras and active.select_get(view_layer=window.view_layer):
+            index = cameras.index(active) + 1
     original = cameras[index - 1]
     if original.name not in scene.objects:
         raise ValueError('The camera collection changed. Return to capture setup and reopen framing.')
@@ -202,7 +236,6 @@ def camera_steps(source, preview, key, token):
         capture_settings.apply_format(preview, value)
         preview['capture_camera_name'] = name
         preview['capture_camera_count'] = count
-        preview['capture_format_label'] = f"{value['width']} × {value['height']} px"
         if settings.capture_preview_index != index:
             settings.capture_preview_index = index
     except ReferenceError:
@@ -218,10 +251,10 @@ def camera_steps(source, preview, key, token):
             _pending.pop(key)
 
 
-def open_steps(source, window, area):
+def open_steps(source, window, area, *, prefer_selected=False):
     """Opening can span UI ticks; defer every data edit while a render owns Main."""
     from . import rig_edit
-    work = _open_steps(source, window, area)
+    work = _open_steps(source, window, area, prefer_selected=prefer_selected)
     try:
         while True:
             if rig_edit.render_busy(bpy.context):
@@ -236,7 +269,7 @@ def open_steps(source, window, area):
         work.close()
 
 
-def _open_steps(source, window, area):
+def _open_steps(source, window, area, *, prefer_selected):
     settings = source.lichtfeld_training
     settings.operation_busy = True
     preview = None
@@ -245,7 +278,7 @@ def _open_steps(source, window, area):
     try:
         if window.scene != source:
             return
-        camera, name, count, index, value = yield from prepare_camera(source, window)
+        camera, name, count, index, value = yield from prepare_camera(source, window, prefer_selected=prefer_selected)
         if settings.capture_preview_index != index:
             settings.capture_preview_index = index
         layer = window.view_layer
@@ -255,7 +288,6 @@ def _open_steps(source, window, area):
         preview['capture_camera_name'] = name
         preview['capture_camera_count'] = count
         preview['capture_source_layer'] = layer.name
-        preview['capture_format_label'] = f"{value['width']} × {value['height']} px"
         preview.collection.objects.link(camera)
         preview.camera = camera
         preview[CAMERA] = camera
@@ -299,7 +331,10 @@ def _open_steps(source, window, area):
         if area and area.type == 'VIEW_3D':
             space = area.spaces.active
             if key not in _views:
-                _views[key] = (space.region_3d.view_perspective, space.use_local_camera, space.camera)
+                region = space.region_3d
+                _views[key] = (region.view_perspective, space.use_local_camera, space.camera,
+                               region.view_location.copy(), region.view_rotation.copy(), region.view_distance,
+                               tuple(region.view_camera_offset), region.view_camera_zoom)
         window.scene = preview
         if area and area.type == 'VIEW_3D':
             space.use_local_camera = False
@@ -344,7 +379,7 @@ class LF_OT_capture_framing(bpy.types.Operator):
         if is_preview(context.scene):
             camera_changed(source.lichtfeld_training, context)
             return {'FINISHED'}
-        work = open_steps(source, context.window, context.area)
+        work = open_steps(source, context.window, context.area, prefer_selected=True)
         def failed(error):
             ui_runtime.report_notice('ERROR', error)
         if bpy.app.background:
@@ -403,15 +438,13 @@ def draw(layout, context, source, *, width=None):
     layout.operator('lichtfeld.close_capture_framing', icon='BACK')
     box = layout.box()
     box.label(text=context.scene.get('capture_camera_name', ''))
-    box.label(text=context.scene.get('capture_format_label', ''))
     from .rig_edit import render_busy
     box.enabled = not (render_busy(context) or s.operation_busy or s.running or s.job_directory)
-    box.prop(s, 'capture_preview_index', text='Camera number')
+    box.prop(context.window_manager.lichtfeld_panels, 'framing_camera', text='Camera number')
     box.label(text=f"{context.scene.get('capture_camera_count', 0)} cameras, sorted by name")
     draw_capture_format(box, source, s, wrapped)
     draw_capture_overrides(box, s, wrapped)
-    box.operator('lichtfeld.capture_framing', text='Update framing', icon='FILE_REFRESH')
-    wrapped(layout, 'Camera changes are automatic. Update framing applies output settings and camera overrides. Source cameras stay unchanged.')
+    box.operator('lichtfeld.capture_framing', text='Apply preview settings')
     if s.test_render_active:
         layout.label(text='Rendering test image…')
     elif s.test_render_error:
@@ -421,11 +454,11 @@ def draw(layout, context, source, *, width=None):
         row.operator('lichtfeld.cancel_capture_test')
     else:
         if bpy.data.filepath:
-            row.operator('lichtfeld.render_capture_test', text='Save and render test image')
+            row.operator('lichtfeld.render_capture_test', text='Render test')
         else:
             row.operator('lichtfeld.save_capture_source', text='Save scene…')
     if s.test_render_image:
-        row.operator('lichtfeld.show_test_image', text='View last')
+        row.operator('lichtfeld.show_test_image', text='Last image')
 
 
 def draw_orphaned(layout, _context):
@@ -635,7 +668,7 @@ class LF_OT_show_test_image(bpy.types.Operator):
             area.spaces.active.image = image
             if len(window.screen.areas) > 1:
                 with bpy.context.temp_override(window=window, area=area):
-                    bpy.ops.screen.screen_full_area(use_hide_panels=True)
+                    bpy.ops.screen.screen_full_area(use_hide_panels=False)
                 window.screen['lichtfeld_test_viewer'] = True
             return {'FINISHED'}
         except (OSError, RuntimeError, KeyError) as error:
