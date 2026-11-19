@@ -2300,8 +2300,9 @@ def draw_capture_cameras(box, context, settings, ready, rig_changed, wrapped):
         box.operator('lichtfeld.live_rig', text='Finish live editing', icon='CHECKMARK')
         return
     box.prop(settings, 'camera_collection', text='Edit rig' if settings.capture_collections else 'Camera set')
-    collection_count = len(preflight.camera_collections(settings))
-    include_edited = managed and rig not in preflight.camera_collections(settings)
+    capture_sets = preflight.camera_collections(settings)
+    collection_count = len(capture_sets)
+    include_edited = managed and rig not in capture_sets
     title = f'Capture sets ({collection_count})' if settings.capture_collections else 'Combine camera sets'
     capture_list = draw_disclosure(box, 'capture_collection_details', title)
     if capture_list is not None:
@@ -2317,6 +2318,8 @@ def draw_capture_cameras(box, context, settings, ready, rig_changed, wrapped):
         add_collection.operator('lichtfeld.capture_collection_entry', text='Add collection', icon='ADD')
         if include_edited and collection_count:
             capture_list.operator('lichtfeld.capture_collection_entry', text='Include edited rig').use_edited = True
+    if not collection_count and settings.capture_collections and capture_list is None and not include_edited:
+        box.prop(settings.capture_collections[0], 'collection', text='Capture set')
     if include_edited and not collection_count:
         box.operator('lichtfeld.capture_collection_entry', text='Include edited rig').use_edited = True
     if settings.capture_collections and collection_count:
@@ -2621,7 +2624,7 @@ def draw_training(self, context):
         box.enabled = not settings.operation_busy
         draw_capture_cameras(box, context, settings, ready, pending, wrapped)
         framing = box.row()
-        framing.enabled = not camera_setup_issue and (ready.get('checking') or bool(ready['cameras']))
+        framing.enabled = ready.get('checking') or bool(ready['cameras'])
         framing.operator('lichtfeld.capture_framing', text='Check framing')
     box = draw_setup_section(layout, settings, 'output', 'Render and output')
     if box is not None:
@@ -2754,7 +2757,6 @@ def loaded(_):
     preflight.clear()
     ui_runtime.clear()
     _imported.clear()
-    portal_ui.select_workspace(bpy.context)
     source = bpy.data.filepath
     directory = preflight.connection_folder(preferences()) if source else None
     for scene in bpy.data.scenes:
@@ -2770,8 +2772,6 @@ def loaded(_):
                 settings = scene.lichtfeld_training
                 if root and bpy.data.filepath == source and not settings.job_directory and not settings.attached_session and not settings.running:
                     settings.job_directory = root
-                    if bpy.context.scene == scene:
-                        portal_ui.select_workspace(bpy.context)
             except ReferenceError:
                 pass
         ui_runtime.submit(lambda name=name: jobs.remembered_job(directory, source, name), done)

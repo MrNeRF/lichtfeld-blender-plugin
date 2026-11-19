@@ -58,12 +58,15 @@ def camera_collections(settings):
  return (collection,) if collection is not None else ()
 
 
-def camera_setup_issue(settings):
+CAMERA_SET_REQUIRED = 'Choose a camera collection in Capture sets.'
+
+
+def camera_setup_issue(settings, *, allow_live=False):
  from .rig_edit import live_root
- if live_root(settings):
+ if not allow_live and live_root(settings):
   return 'Finish live editing to continue.'
  if not camera_collections(settings):
-  return 'Choose a camera set in Cameras.'
+  return CAMERA_SET_REQUIRED
  return ''
 
 
@@ -78,7 +81,7 @@ def camera_objects(scene, settings):
  rows=getattr(settings,'capture_collections',())
  collections=camera_collections(settings)
  if rows and not collections:
-  raise ValueError('Choose a camera set in Cameras.')
+  raise ValueError(CAMERA_SET_REQUIRED)
  members=set(scene.collection.children_recursive)
  members.add(scene.collection)
  if any(collection not in members for collection in collections):

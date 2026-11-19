@@ -22,20 +22,12 @@ portal.clear_thumbnails()
 assert portal._icons["lichtfeld"] is brand
 browser = bpy.context.window_manager.lichtfeld_portal
 assert bpy.context.window_manager.lichtfeld_workspace == "TRAINING"
-bpy.context.window_manager.lichtfeld_workspace = "TRAINING"
 bpy.context.window_manager.lichtfeld_workspace = "PORTAL"
-settings = bpy.context.scene.lichtfeld_training
-settings.job_directory = "remembered-job"
-bpy.context.window_manager.property_unset("lichtfeld_workspace")
-portal.select_workspace(bpy.context)
-assert bpy.context.window_manager.lichtfeld_workspace == "TRAINING"
-# Explicit Portal navigation must not be stolen by a delayed job recovery.
-bpy.context.window_manager.lichtfeld_workspace = "PORTAL"
-portal.select_workspace(bpy.context)
+bpy.context.scene.lichtfeld_training.job_directory = "remembered-job"
+portal.tick_steps()
 assert bpy.context.window_manager.lichtfeld_workspace == "PORTAL"
-settings.job_directory = ""
+bpy.context.scene.lichtfeld_training.job_directory = ""
 bpy.context.window_manager.property_unset("lichtfeld_workspace")
-portal.select_workspace(bpy.context)
 assert bpy.context.window_manager.lichtfeld_workspace == "TRAINING"
 with TemporaryDirectory() as directory:
     filename = str(IOPath(directory) / "workspace.blend")
