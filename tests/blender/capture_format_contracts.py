@@ -462,6 +462,7 @@ preview=bpy.context.scene
 original=preview[ext.capture_preview.ORIGINAL_CAMERA]
 key=ext.preflight.CAMERA_EXCLUDED
 assert bpy.ops.lichtfeld.toggle_capture_camera()=={'FINISHED'}
+while ext.capture_preview.camera_pending(preview):ext.ui_runtime.tick()
 assert original.get(key) and preview['capture_excluded_count']==1
 s.capture_preview_index=2
 while ext.capture_preview.camera_pending(preview):ext.ui_runtime.tick()
@@ -470,8 +471,10 @@ s.capture_preview_index=1
 while ext.capture_preview.camera_pending(preview):ext.ui_runtime.tick()
 assert preview[ext.capture_preview.ORIGINAL_CAMERA] == original
 assert bpy.ops.lichtfeld.toggle_capture_camera()=={'FINISHED'}
+while ext.capture_preview.camera_pending(preview):ext.ui_runtime.tick()
 assert not original.get(key) and preview['capture_excluded_count']==0
 assert bpy.ops.lichtfeld.toggle_capture_camera()=={'FINISHED'}
+while ext.capture_preview.camera_pending(preview):ext.ui_runtime.tick()
 assert bpy.ops.lichtfeld.close_capture_framing()=={'FINISHED'}
 
 def checks(single=False):
@@ -484,12 +487,14 @@ assert original.name not in checks()['cameras']
 assert checks(single=True)['cameras']==[original.name]
 original.name='Capture 000 renamed'
 assert bpy.ops.lichtfeld.create_rig()=={'FINISHED'}
-assert original.get(key)
+assert original.get(key) and original.name in s.camera_collection.all_objects
+assert len(checks()['cameras']) == 3
 with tempfile.TemporaryDirectory() as directory:
     filename=str(Path(directory)/'excluded-camera.blend')
     name=original.name
     bpy.ops.wm.save_as_mainfile(filepath=filename)
     bpy.ops.wm.open_mainfile(filepath=filename,use_scripts=False)
     assert bpy.data.objects[name].get(key)
-    assert name not in checks()['cameras']
+    assert name in bpy.context.scene.lichtfeld_training.camera_collection.all_objects
+    assert len(checks()['cameras']) == 3 and name not in checks()['cameras']
 print('FRAMING_EXCLUSION_NAVIGATION_SAVE_AND_RIG_UPDATE_PASS',flush=True)

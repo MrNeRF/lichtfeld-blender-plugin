@@ -90,8 +90,10 @@ def restore_window(window, area):
 
 
 def remove_camera(scene):
-    camera = scene.get(CAMERA)
-    if isinstance(camera, bpy.types.Object) and camera.get(CAMERA):
+    camera = scene.camera
+    if not camera or not camera.get(CAMERA):
+        camera = next((obj for obj in scene.collection.objects if obj.type == 'CAMERA' and obj.get(CAMERA)), None)
+    if camera:
         other_scenes = [item for item in camera.users_scene if item != scene]
         if other_scenes:
             # A user deliberately linked the temporary camera elsewhere.
@@ -133,7 +135,7 @@ def cleanup():
     _pending.clear()
 
 
-def prepare_camera(source, window, *, prefer_selected=False):
+def prepare_camera(source, window, *, prefer_selected=False, request=None):
     """Use the capture copy contract for both opening and changing a view."""
     settings = source.lichtfeld_training
     scene = window.scene
@@ -151,6 +153,11 @@ def prepare_camera(source, window, *, prefer_selected=False):
         if active in cameras and active.select_get(view_layer=window.view_layer):
             index = cameras.index(active) + 1
     original = cameras[index - 1]
+    count = len(cameras)
+    excluded = sum(bool(obj.get(CAMERA_EXCLUDED)) for obj in cameras)
+    if (request and request['refresh_only'] and scene.get(ORIGINAL_CAMERA) == original
+            and scene.get('capture_camera_index') == index):
+        return None, original, count, excluded, index, value
     if original.name not in scene.objects:
         raise ValueError('The camera collection changed. Return to capture setup and reopen framing.')
     # Another window can still display a shared preview after its first window
@@ -166,19 +173,24 @@ def prepare_camera(source, window, *, prefer_selected=False):
         graph = bpy.context.evaluated_depsgraph_get()
         camera = capture_settings.copy_camera(original, graph, overrides)
     camera[CAMERA] = True
-    return camera, original, len(cameras), sum(bool(obj.get(CAMERA_EXCLUDED)) for obj in cameras), index, value
+    return camera, original, count, excluded, index, value
 
 
-def camera_changed(settings, _context):
+def camera_changed(settings, _context, *, refresh_only=False):
     """Queue one update per visible preview; RNA callbacks never copy scene data."""
     source = settings.id_data
     if settings.running or settings.job_directory:
         return
     for window in bpy.context.window_manager.windows:
         preview = window.scene
-        if source_scene(preview) != source or camera_pending(preview):
+        if source_scene(preview) != source:
             continue
-        key, token = preview.as_pointer(), object()
+        key = preview.as_pointer()
+        if key in _pending:
+            if not refresh_only:
+                _pending[key]['refresh_only'] = False
+            continue
+        token = {'refresh_only': refresh_only}
         _pending[key] = token
         ui_runtime.schedule(camera_steps(source, preview, key, token),
                             lambda error: ui_runtime.report_notice('ERROR', error))
@@ -216,7 +228,7 @@ def camera_steps(source, preview, key, token):
                 yield ui_runtime.DEFER
                 continue
             if work is None:
-                work = prepare_camera(source, window)
+                work = prepare_camera(source, window, request=token)
             try:
                 next(work)
             except ReferenceError:
@@ -228,17 +240,21 @@ def camera_steps(source, preview, key, token):
                 camera, original, count, excluded, index, value = result.value
                 break
             yield
+        if camera is None:
+            preview['capture_camera_count'] = count
+            preview['capture_excluded_count'] = excluded
+            return
         # No yield between camera allocation and commit/cleanup.
+        remove_camera(preview)
         preview.collection.objects.link(camera)
         preview.camera = camera
-        remove_camera(preview)
-        preview[CAMERA] = camera
         camera = None
         capture_settings.apply_format(preview, value)
         preview['capture_camera_name'] = original.name
         preview[ORIGINAL_CAMERA] = original
         preview['capture_excluded_count'] = excluded
         preview['capture_camera_count'] = count
+        preview['capture_camera_index'] = index
         if settings.capture_preview_index != index:
             settings.capture_preview_index = index
     except ReferenceError:
@@ -292,10 +308,10 @@ def _open_steps(source, window, area, *, prefer_selected):
         preview[ORIGINAL_CAMERA] = original
         preview['capture_excluded_count'] = excluded
         preview['capture_camera_count'] = count
+        preview['capture_camera_index'] = index
         preview['capture_source_layer'] = layer.name
         preview.collection.objects.link(camera)
         preview.camera = camera
-        preview[CAMERA] = camera
         preview.world = source.world
         preview.render.engine = source.render.engine
         if source.render.engine == 'CYCLES':
@@ -458,26 +474,29 @@ class LF_OT_toggle_capture_camera(bpy.types.Operator):
             return False
         settings = source.lichtfeld_training
         camera = preview.get(ORIGINAL_CAMERA)
-        if settings.running or settings.operation_busy or settings.attached_session:
+        if settings.running or settings.operation_busy or settings.attached_session or settings.job_directory:
             return False
         return (isinstance(camera, bpy.types.Object) and camera.is_editable
                 and source.objects.get(camera.name) == camera
                 and any(group.all_objects.get(camera.name) == camera for group in camera_collections(settings)))
 
     def execute(self, context):
-        from .preflight import CAMERA_EXCLUDED, invalidate
+        from .preflight import CAMERA_EXCLUDED, camera_collections, invalidate
         preview = context.scene
-        source = source_scene(preview)
         camera = preview[ORIGINAL_CAMERA]
+        if not bpy.app.background and bpy.ops.ed.undo_push.poll():
+            bpy.ops.ed.undo_push(message='Before changing capture inclusion')
         was_excluded = bool(camera.get(CAMERA_EXCLUDED))
         if was_excluded:
             del camera[CAMERA_EXCLUDED]
         else:
             camera[CAMERA_EXCLUDED] = True
-        for scene in bpy.data.scenes:
-            if source_scene(scene) == source:
-                scene['capture_excluded_count'] = scene.get('capture_excluded_count', 0) + (-1 if was_excluded else 1)
         invalidate()
+        sources = {source_scene(window.scene) for window in context.window_manager.windows}
+        for source in sources - {None}:
+            settings = source.lichtfeld_training
+            if any(group.all_objects.get(camera.name) == camera for group in camera_collections(settings)):
+                camera_changed(settings, context, refresh_only=True)
         return {'FINISHED'}
 
 
@@ -497,10 +516,15 @@ def draw(layout, context, source, *, width=None):
     from .preflight import CAMERA_EXCLUDED
     total = context.scene.get('capture_camera_count', 0)
     excluded = context.scene.get('capture_excluded_count', 0)
-    if excluded:
-        box.label(text=f"{total - excluded:,} included · {excluded:,} excluded")
+    if camera_pending(context.scene):
+        box.label(text='Updating cameras…')
+    elif excluded:
+        included = total - excluded
+        wrapped(box, f"{included:,} included · {excluded:,} excluded")
+        if included < capture_settings.MIN_VIEWS:
+            wrapped(box, f'Include at least {capture_settings.MIN_VIEWS} cameras to capture.')
     else:
-        box.label(text=f"{total:,} cameras, in name order")
+        wrapped(box, f"{total:,} cameras, in name order")
     if camera and camera.get(CAMERA_EXCLUDED):
         box.label(text='Excluded from capture')
         box.operator('lichtfeld.toggle_capture_camera', text='Include again')

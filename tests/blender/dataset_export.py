@@ -50,6 +50,7 @@ with tempfile.TemporaryDirectory() as directory:
   preview=bpy.context.scene
   excluded=preview[ext.capture_preview.ORIGINAL_CAMERA]
   assert bpy.ops.lichtfeld.toggle_capture_camera()=={'FINISHED'}
+  while ext.capture_preview.camera_pending(preview):ext.ui_runtime.tick()
   assert preview['capture_excluded_count']==1
   assert bpy.ops.lichtfeld.close_capture_framing()=={'FINISHED'}
   expected_cameras.remove(excluded.name)
