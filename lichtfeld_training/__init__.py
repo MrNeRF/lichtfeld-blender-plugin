@@ -2715,6 +2715,7 @@ def history_changing(_):
     # Close the cooperative scan while its datablocks are still valid.
     preflight.invalidate()
     ui_runtime.before_history()
+    capture_preview.clear_pending()
     for window in bpy.context.window_manager.windows:
         for operator in window.modal_operators:
             if isinstance(operator, _RigOperation):
@@ -2731,6 +2732,8 @@ def history_changed(_):
         scene.lichtfeld_training.test_render_sample = scene.lichtfeld_training.test_render_samples = 0
         source = capture_preview.source_scene(scene)
         if source:
+            # Undo restores the applied camera. Discard navigation queued for the old state.
+            capture_preview.set_camera_index(source.lichtfeld_training, scene.get('capture_camera_index', 1))
             capture_preview.camera_changed(source.lichtfeld_training, None, refresh_only=True)
 
 
@@ -2765,6 +2768,7 @@ def loaded(_):
     capture_preview.clear_test_viewers()
     preflight.clear()
     ui_runtime.clear()
+    capture_preview.clear_pending()
     _imported.clear()
     source = bpy.data.filepath
     directory = preflight.connection_folder(preferences()) if source else None
