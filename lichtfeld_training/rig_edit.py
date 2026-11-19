@@ -285,6 +285,20 @@ def managed_members(collection):
     return old, targets[0] if targets else None
 
 
+def remove_camera_objects(objects, unused):
+    valid = []
+    for obj in objects:
+        try:
+            data = obj.data
+        except ReferenceError:
+            continue  # Blender may have deleted the object between modal steps.
+        if data is not None:
+            unused[data.as_pointer()] = data
+        valid.append(obj)
+    if valid:
+        bpy.data.batch_remove(ids=valid)
+
+
 def commit(owner, settings, previous, staging, target, recipe):
     """Preserve generated camera/target IDs, custom objects and collection links."""
     uses_aim = target.get('lichtfeld_aim_used', True)
@@ -329,6 +343,10 @@ def commit(owner, settings, previous, staging, target, recipe):
         previous.objects.link(target)
         staging.objects.unlink(target)
     settings.rig_aim = final_target
+    # Bound each removal so the modal operator can pause for native renders.
+    batch_size = 32
+    consumed = []
+    unused = {data.as_pointer(): data for obj, data, matrix, constraint_target, constraint_index in owner.rig_backup}
     for index, prepared in enumerate(new):
         if index < len(old):
             original = old[index]
@@ -345,10 +363,10 @@ def commit(owner, settings, previous, staging, target, recipe):
             rotate_after_aim(original, final_target,
                 tuple(getattr(rotation, 'to_min_' + axis + '_rot') for axis in 'xyz') if rotation else None,
                 world=bool(rotation and rotation.owner_space == 'WORLD'))
-            data = prepared.data
-            bpy.data.objects.remove(prepared, do_unlink=True)
-            if data.users == 0:
-                bpy.data.cameras.remove(data)
+            consumed.append(prepared)
+            if len(consumed) == batch_size:
+                remove_camera_objects(consumed, unused)
+                consumed.clear()
         else:
             track(prepared, final_target if prepared.constraints.get(AIM) else None)
             rotation = prepared.constraints.get(ROTATION)
@@ -357,14 +375,24 @@ def commit(owner, settings, previous, staging, target, recipe):
             previous.objects.link(prepared)
             staging.objects.unlink(prepared)
         yield
-    unused = {data.as_pointer(): data for obj, data, matrix, constraint_target, constraint_index in owner.rig_backup}
-    for obj in old[len(new):]:
-        unused[obj.data.as_pointer()] = obj.data
-        bpy.data.objects.remove(obj, do_unlink=True)
+    if consumed:
+        remove_camera_objects(consumed, unused)
         yield
-    for data in unused.values():
-        if data.users == 0:
-            bpy.data.cameras.remove(data)
+    surplus = old[len(new):]
+    for start in range(0, len(surplus), batch_size):
+        remove_camera_objects(surplus[start:start + batch_size], unused)
+        yield
+    data_blocks = list(unused.values())
+    for start in range(0, len(data_blocks), batch_size):
+        orphaned = []
+        for data in data_blocks[start:start + batch_size]:
+            try:
+                if data.users == 0:
+                    orphaned.append(data)
+            except ReferenceError:
+                continue
+        if orphaned:
+            bpy.data.batch_remove(ids=orphaned)
         yield
     owner.rig_backup = []
     for root in retired:
