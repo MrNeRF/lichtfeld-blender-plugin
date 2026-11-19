@@ -38,7 +38,7 @@ def actions(state, external=False, result=False, best=False, checkpoint=False, b
 
 # Only these settings can change when training an already captured dataset.
 TRAINING_FIELDS = (
- 'iterations', 'eval_interval', 'max_points', 'sh_degree', 'strategy', 'mask_mode',
+ 'iterations', 'enable_eval', 'eval_interval', 'max_points', 'sh_degree', 'strategy', 'mask_mode',
  'use_depth_loss', 'use_normal_loss', 'depth_loss_weight', 'normal_loss_weight',
  'normal_start_fraction', 'normal_end_fraction', 'preview_seconds', 'preview_points',
  'full_preview', 'preview_sh_degree', 'preview_mode', 'optimizer', 'optimizer_schedule', 'optimizer_file',

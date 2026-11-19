@@ -372,13 +372,13 @@ class TrainingBridge:
                 self.error = "Trainer failed; the last valid result is retained"
             self.finish_writer(wait=True)
             self.iteration = hook["iteration"]
-            score = metric_at(self.root / "output/metrics.csv", self.iteration)
+            score = metric_at(self.root / "output/metrics.csv", self.iteration) if self.eval_steps else None
             model = lf.get_scene().training_model()
             if score and better({**score, "count": model.num_points},
                                 {**self.best["score"], "count": self.best["count"]}
                                 if self.best and self.best.get("score") else None):
                 self.retain_best(write_splat(self.root, self.capture(), self.iteration, "best", score))
-            if self.best is None:
+            if self.best is None or (not self.eval_steps and terminal != "failed"):
                 self.retain_best(write_splat(self.root, self.capture(), self.iteration, "last"))
             self.publish("failed" if self.error else "finalizing")
         except Exception as error:

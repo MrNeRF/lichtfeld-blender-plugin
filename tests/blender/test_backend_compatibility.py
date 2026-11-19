@@ -218,6 +218,7 @@ class NativeCompatibility(unittest.TestCase):
             bridge, namespace = self.bridge()
             bridge.root = Path('unused')
             bridge.best = {'path': 'retained.ply'}
+            bridge.eval_steps = {4}
             bridge.writer = Mock()
             bridge.on_end({'iteration': 4, 'terminal_state': outcome})
             expected = outcome if outcome in {'completed', 'stopped', 'failed'} else 'failed'

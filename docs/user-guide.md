@@ -33,7 +33,9 @@ The start or export action stays below the settings, with the reason if it is bl
 | Try different optimization settings on the same capture | Train saved images / Train again · same images |
 | Continue optimizing a saved model | Continue from checkpoint… |
 
-Fresh training on saved images creates a new model and optimizer in a separate job. It does not restore the previous splat, even if a preview remains in the viewport. Continuing a checkpoint restores its model, optimizer and saved settings. Increasing its total steps extends/rescales the remaining schedule. The continuation dialog proposes a new total from the saved job, shows its evaluation interval, and keeps its training settings and preview quality. Unrelated settings in the current scene do not replace them.
+Fresh training on saved images creates a new model and optimizer in a separate job. It does not restore the previous splat, even if a preview remains in the viewport. Continuing a checkpoint restores its model, optimizer and saved settings. Increasing its total steps extends/rescales the remaining schedule. The continuation dialog proposes a new total and shows the saved checkpoint schedule. Unrelated settings in the current scene do not replace the saved training and preview settings.
+
+New training jobs start with evaluation off. To compare checkpoints on reserved views and keep the best-scoring model, enable **Evaluate model** under **Training → Advanced**. The checkpoint interval controls both operations when evaluation is enabled. With evaluation off, the job still saves checkpoints and publishes the last model as its result.
 
 Camera, resolution, source, lighting and map changes require a new capture. Training-only settings can be changed when starting a fresh run on saved images. Previous jobs and their results remain available. New runs and continuations use the **Training jobs** folder in Settings, even when their source dataset is stored elsewhere.
 

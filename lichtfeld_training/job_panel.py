@@ -8,7 +8,9 @@ from .ui_text import draw_disclosure
 
 def draw(layout, context, settings, status, reader_error, wrapped, color_view=False, status_error=False, reader_stopped=False):
     external = bool(settings.attached_session)
-    capture_only = status.get("job", {}).get("capture_only", False)
+    job_settings = status.get("job", {})
+    capture_only = job_settings.get("capture_only", False)
+    evaluation = job_settings.get("enable_eval", True)
     phase = workflow.phase(status.get("state", settings.status))
     capture = phase in workflow.CAPTURE_PHASES
     busy = settings.operation_busy
@@ -82,12 +84,13 @@ def draw(layout, context, settings, status, reader_error, wrapped, color_view=Fa
                 quality = "Preview size limited automatically"
             preview.label(text=quality)
             if phase in workflow.TRAINING_PHASES and not external:
-                row = preview.row(align=True)
-                row.enabled = not busy
-                row.operator("lichtfeld.model_view", text="Current", depress=status.get("viewer_mode") != "best").mode = "CURRENT"
-                best_row = row.row(align=True)
-                best_row.enabled = bool(best)
-                best_row.operator("lichtfeld.model_view", text="Best evaluated", depress=status.get("viewer_mode") == "best").mode = "BEST"
+                if evaluation:
+                    row = preview.row(align=True)
+                    row.enabled = not busy
+                    row.operator("lichtfeld.model_view", text="Current", depress=status.get("viewer_mode") != "best").mode = "CURRENT"
+                    best_row = row.row(align=True)
+                    best_row.enabled = bool(best)
+                    best_row.operator("lichtfeld.model_view", text="Best evaluated", depress=status.get("viewer_mode") == "best").mode = "BEST"
                 row = preview.row()
                 row.enabled = flags["previews"]
                 row.operator(command, text="Freeze preview" if settings.previews_enabled else "Resume preview", icon="PAUSE" if settings.previews_enabled else "PLAY").action = "preview_off" if settings.previews_enabled else "preview_on"
@@ -157,7 +160,7 @@ def draw(layout, context, settings, status, reader_error, wrapped, color_view=Fa
             if not color_view:
                 details.operator("lichtfeld.capture_lighting", text="Use capture lighting", icon="LIGHT")
         if flags["import"] and not color_view:
-            details.operator("lichtfeld.import_result", text="Load best saved model", icon="IMPORT")
+            details.operator("lichtfeld.import_result", text="Load best saved model" if evaluation else "Load saved model", icon="IMPORT")
         if not external and not color_view:
             details.operator("lichtfeld.open_job", text="Open job folder", icon="FILE_FOLDER")
             if not settings.running:
