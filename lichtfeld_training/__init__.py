@@ -2730,11 +2730,7 @@ def history_changed(_):
         scene.lichtfeld_training.test_render_active = False
         scene.lichtfeld_training.test_render_cancel = False
         scene.lichtfeld_training.test_render_sample = scene.lichtfeld_training.test_render_samples = 0
-        source = capture_preview.source_scene(scene)
-        if source:
-            # Undo restores the applied camera. Discard navigation queued for the old state.
-            capture_preview.set_camera_index(source.lichtfeld_training, scene.get('capture_camera_index', 1))
-            capture_preview.camera_changed(source.lichtfeld_training, None, refresh_only=True)
+    capture_preview.restore_history_navigation(bpy.context)
 
 
 @persistent

@@ -49,6 +49,23 @@ def clear_pending():
     _pending.clear()
 
 
+def restore_history_navigation(context):
+    """Use one visible, restored camera per source, preferring the active window."""
+    windows = sorted(context.window_manager.windows, key=lambda window: window != context.window)
+    restored = set()
+    for window in windows:
+        preview = window.scene
+        source = source_scene(preview)
+        if source is None or source in restored:
+            continue
+        restored.add(source)
+        settings = source.lichtfeld_training
+        index = preview.get('capture_camera_index')
+        if type(index) is int and 1 <= index <= capture_settings.MAX_VIEWS:
+            set_camera_index(settings, index)
+        camera_changed(settings, context, refresh_only=True)
+
+
 def is_preview(scene):
     try:
         return isinstance(scene, bpy.types.Scene) and (bool(scene.get('lichtfeld_capture_preview')) or SOURCE in scene)

@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Real evaluated copies, portrait fitting and temporary framing lifecycle."""
 from pathlib import Path
+from types import SimpleNamespace
 import sys
 import importlib
 import bpy
@@ -498,3 +499,27 @@ with tempfile.TemporaryDirectory() as directory:
     assert name in bpy.context.scene.lichtfeld_training.camera_collection.all_objects
     assert len(checks()['cameras']) == 3 and name not in checks()['cameras']
 print('FRAMING_EXCLUSION_NAVIGATION_SAVE_AND_RIG_UPDATE_PASS',flush=True)
+
+source = bpy.context.scene
+settings = source.lichtfeld_training
+framing = ext.capture_preview
+previews = [bpy.data.scenes.new(name) for name in ('Active framing', 'Second framing', 'Hidden framing')]
+for index, preview in enumerate(previews, start=2):
+    preview[framing.SOURCE] = source
+    preview['capture_camera_index'] = index
+active, secondary = (SimpleNamespace(scene=preview) for preview in previews[:2])
+context = SimpleNamespace(window=active, window_manager=SimpleNamespace(windows=[secondary, active]))
+with patch.object(framing, 'camera_changed') as changed:
+    framing.restore_history_navigation(context)
+    assert settings.capture_preview_index == 2
+    changed.assert_called_once_with(settings, context, refresh_only=True)
+    context.window_manager.windows = [active]
+    for invalid in (None, 0, ext.capture_settings.MAX_VIEWS + 1):
+        if invalid is None:
+            del active.scene['capture_camera_index']
+        else:
+            active.scene['capture_camera_index'] = invalid
+        framing.restore_history_navigation(context)
+        assert settings.capture_preview_index == 2
+framing.cleanup()
+print('FRAMING_HISTORY_PREFERS_VISIBLE_ACTIVE_WINDOW_PASS', flush=True)
