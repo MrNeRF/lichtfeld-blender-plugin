@@ -757,8 +757,11 @@ class LF_OT_capture_collection(bpy.types.Operator):
             rig = settings.camera_collection
             if not rows or not rig or rig in preflight.camera_collections(settings):
                 return {'CANCELLED'}
-            rows.add().collection = rig
+            empty = next((row for row in rows if row.collection is None), None)
+            (empty if empty is not None else rows.add()).collection = rig
         elif self.index < 0:
+            if any(row.collection is None for row in rows):
+                return {'CANCELLED'}
             if not rows and settings.camera_collection:
                 rows.add().collection = settings.camera_collection
             rows.add()
@@ -2278,7 +2281,9 @@ def draw_capture_cameras(box, context, settings, ready, rig_changed, wrapped):
             row.operator('lichtfeld.capture_collection_entry', text='', icon='REMOVE').index = index
         if not settings.capture_collections:
             capture_list.label(text='Using the selected collection')
-        capture_list.operator('lichtfeld.capture_collection_entry', text='Add collection', icon='ADD')
+        add_collection = capture_list.row()
+        add_collection.enabled = all(entry.collection is not None for entry in settings.capture_collections)
+        add_collection.operator('lichtfeld.capture_collection_entry', text='Add collection', icon='ADD')
         if managed and rig not in preflight.camera_collections(settings):
             capture_list.operator('lichtfeld.capture_collection_entry', text='Include edited rig').use_edited = True
     if settings.capture_collections:

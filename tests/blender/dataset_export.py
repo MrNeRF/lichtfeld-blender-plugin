@@ -36,6 +36,8 @@ with tempfile.TemporaryDirectory() as directory:
   s.rig_phase=.3
   assert bpy.ops.lichtfeld.create_rig(new_rig=True)=={'FINISHED'}
   assert [entry.collection for entry in s.capture_collections] == [first]
+  assert bpy.ops.lichtfeld.capture_collection_entry()=={'FINISHED'}
+  assert bpy.ops.lichtfeld.capture_collection_entry()=={'CANCELLED'}
   assert bpy.ops.lichtfeld.capture_collection_entry(use_edited=True)=={'FINISHED'}
   assert [entry.collection for entry in s.capture_collections] == [first, s.camera_collection]
   assert bpy.ops.lichtfeld.capture_collection_entry(use_edited=True)=={'CANCELLED'}
