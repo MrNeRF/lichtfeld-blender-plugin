@@ -1018,12 +1018,15 @@ assert [entry.collection for entry in s.capture_collections] == [first_rig]
 s.capture_collections.clear()
 assert bpy.ops.lichtfeld.capture_collection_entry() == {'FINISHED'}
 assert s.capture_collections[0].collection == second_rig
+assert checked()['camera_count'] == 10
+s.capture_collections[0].collection = None
 try:
     checked()
 except ValueError as error:
-    assert 'empty entries' in str(error)
+    assert 'Choose a collection in Capture sets' in str(error)
 else:
-    raise AssertionError('Incomplete capture collection did not block the check')
+    raise AssertionError('An entirely empty capture list fell back to the edited rig')
+s.capture_collections[0].collection = second_rig
 s.capture_collections[1].collection = first_rig
 s.camera_collection = first_rig
 assert bpy.ops.lichtfeld.read_rig() == {'FINISHED'}

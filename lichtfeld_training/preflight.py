@@ -60,9 +60,9 @@ def camera_collections(settings):
 def camera_objects(scene, settings):
  cameras=set()
  rows=getattr(settings,'capture_collections',())
- if any(row.collection is None for row in rows):
-  raise ValueError('Choose a collection for each capture entry, or remove the empty entries.')
  collections=camera_collections(settings)
+ if rows and not collections:
+  raise ValueError('Choose a collection in Capture sets.')
  members=set(scene.collection.children_recursive)
  members.add(scene.collection)
  if any(collection not in members for collection in collections):
