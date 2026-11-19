@@ -94,6 +94,8 @@ def preview_sh_limit(job):
 def training_config(job):
     preview_sh_limit(job)
     steps = evaluation_steps(job["iterations"], job["eval_interval"])
+    # Jobs created before the switch was exposed always evaluated.
+    enable_eval = job.get("enable_eval", True)
     if job.get("optimizer") is not None:
         profiles = read_json(Path(__file__).with_name("training_profiles.json"))
         strategy = job.get("strategy", "mrnf")
@@ -106,8 +108,8 @@ def training_config(job):
     optimization.update({
             "iterations": job["iterations"], "strategy": job.get("strategy", "mrnf"),
             "max_cap": job["max_points"], "sh_degree": job["sh_degree"],
-            "eval_steps": steps, "save_steps": steps,
-            "enable_eval": True, "eval_all": False,
+            "eval_steps": steps if enable_eval else [], "save_steps": steps,
+            "enable_eval": enable_eval, "eval_all": False,
             "enable_save_eval_images": False,
             "mask_mode": ("alpha_consistent" if job.get("scope", "SCENE") != "SCENE" else "none") if job.get("mask_mode","AUTO")=="AUTO" else job["mask_mode"],
         })
@@ -139,9 +141,11 @@ def training_config(job):
 def training_command(job, hook):
     root = Path(job["root"])
     args = [job["backend"], "--headless", "-o", str(root / "output"),
-            "--config", str(root / "training.json"), "--eval", "--export", "ply",
+            "--config", str(root / "training.json"), "--export", "ply",
             "--test-every", str(job.get("test_every", 8)), "--centralize", "off",
             "--python-script", str(hook), "--no-download"]
+    if job.get("enable_eval", True):
+        args.append("--eval")
     if job.get("resume"):
         args += ["--resume", job["resume"]]
     else:

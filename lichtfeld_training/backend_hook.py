@@ -309,7 +309,9 @@ class TrainingBridge:
                     anchors = read_dataset_json(dataset/'depths/depth_anchors.json',{}).get('anchors',{})
                     active = sum(bool(item.get('depth',{}).get('valid')) for item in anchors.values())
                     manifest = read_dataset_json(dataset/'manifest.json',{})
-                    expected = manifest.get('views',0)-len(manifest.get('validation',[]))
+                    expected = manifest.get('views', 0)
+                    if self.eval_steps:
+                        expected -= len(manifest.get('validation', []))
                     if not active or active < expected:
                         raise RuntimeError('Depth supervision could not be anchored for all training views. Check resolution, coverage and depth variation, or disable depth supervision.')
                     self.supervision = f'Depth active: {active} anchored views'
@@ -372,13 +374,13 @@ class TrainingBridge:
                 self.error = "Trainer failed; the last valid result is retained"
             self.finish_writer(wait=True)
             self.iteration = hook["iteration"]
-            score = metric_at(self.root / "output/metrics.csv", self.iteration)
+            score = metric_at(self.root / "output/metrics.csv", self.iteration) if self.eval_steps else None
             model = lf.get_scene().training_model()
             if score and better({**score, "count": model.num_points},
                                 {**self.best["score"], "count": self.best["count"]}
                                 if self.best and self.best.get("score") else None):
                 self.retain_best(write_splat(self.root, self.capture(), self.iteration, "best", score))
-            if self.best is None:
+            if self.best is None or (not self.eval_steps and terminal != "failed"):
                 self.retain_best(write_splat(self.root, self.capture(), self.iteration, "last"))
             self.publish("failed" if self.error else "finalizing")
         except Exception as error:

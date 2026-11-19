@@ -456,8 +456,10 @@ class LichtFeldSettings(bpy.types.PropertyGroup):
         update=capture_preview.camera_changed)
     samples: IntProperty(name="Render samples", min=1, max=2147483647, get=scene_render.sample_get, set=scene_render.sample_set)
     iterations: IntProperty(name="Training steps", default=training_options.PROFILES['mrnf']['iterations'], min=4, max=1000000)
-    eval_interval: IntProperty(name="Evaluate every", default=training_options.PROFILES['mrnf']['eval_steps'][0], min=1, max=100000,
-                               description="Choose the best model using reserved views at this step interval")
+    enable_eval: BoolProperty(name="Evaluate model", default=False,
+                              description="Use reserved views to evaluate the model and keep the best-scoring result")
+    eval_interval: IntProperty(name="Save every", default=training_options.PROFILES['mrnf']['eval_steps'][0], min=1, max=100000,
+                               description="Save checkpoints at this step interval and evaluate at the same steps when enabled")
     max_points: IntProperty(name="Gaussian budget", default=training_options.PROFILES['mrnf']['max_cap'], min=1000)
     sh_degree: IntProperty(name="SH degree", default=training_options.PROFILES['mrnf']['sh_degree'], min=0, max=3)
     preview_mode: EnumProperty(name="Preview updates", items=[
@@ -1327,7 +1329,7 @@ def capture_job(context, capture):
            "render_settings": render_settings,
            "capture_camera": capture_settings.camera_for(settings),
            **{name: getattr(settings, name) for name in (
-               "iterations", "eval_interval", "max_points", "sh_degree", "preview_seconds",
+               "iterations", "enable_eval", "eval_interval", "max_points", "sh_degree", "preview_seconds",
                "preview_points", "preview_sh_degree", "full_preview", "preview_mode", "resolution", "samples", "engine", "cycles_device",
                "strategy", "mask_mode", "use_depth_loss", "use_normal_loss", "depth_loss_weight",
                "normal_loss_weight", "normal_start_fraction", "normal_end_fraction", "reuse_render_data")},
@@ -1641,13 +1643,13 @@ def import_splat(scene, root, record, job=None):
 
 class LF_OT_import(bpy.types.Operator):
     bl_idname = "lichtfeld.import_result"
-    bl_label = "Import best result"
-    bl_description = "Import the verified best candidate, keeping the result object stable"
+    bl_label = "Import saved model"
+    bl_description = "Import the verified saved model, keeping the result object stable"
     bl_options = {"REGISTER", "UNDO"}
 
     def execute(self, context):
         if not allowed(context, "import_best"):
-            self.report({"ERROR"}, "Wait for a valid best candidate and the current import to finish")
+            self.report({"ERROR"}, "Wait for a saved model and for the current import to finish")
             return {"CANCELLED"}
         current = ui_runtime.binding(context.scene)
         if current:
@@ -1789,9 +1791,11 @@ class LF_OT_resume(bpy.types.Operator):
     def draw(self, context):
         self.layout.label(text="Continue the saved model and optimizer.")
         self.layout.prop(self, "new_total")
-        interval = self.saved_status(context).get('job', {}).get('eval_interval')
+        job = self.saved_status(context).get('job', {})
+        interval = job.get('eval_interval')
         if interval is not None:
-            self.layout.label(text=f"Evaluate every {interval:,} steps (saved job)")
+            action = "Save and evaluate" if job.get("enable_eval", True) else "Save checkpoints"
+            self.layout.label(text=f"{action} every {interval:,} steps")
         self.layout.label(text="Saved training and preview settings are retained.")
 
     def execute(self, context):
@@ -2155,6 +2159,7 @@ def draw_training_controls(setup, settings, wrapped):
             box.prop(settings, "normal_loss_weight")
             box.prop(settings, "normal_start_fraction")
             box.prop(settings, "normal_end_fraction")
+        box.prop(settings, "enable_eval")
         box.prop(settings, "eval_interval")
         box.prop(settings, "keep_all_checkpoints")
         box.prop(settings,"mask_mode")

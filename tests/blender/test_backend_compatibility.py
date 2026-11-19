@@ -194,20 +194,22 @@ class NativeCompatibility(unittest.TestCase):
             path = root / 'depths/depth_anchors.json'
             path.write_text(json.dumps({'anchors': anchors}, indent=2), encoding='utf-8')
             self.assertGreater(path.stat().st_size, 262144)
-            core.atomic_json(root / 'manifest.json', {'views': 1000, 'validation': []})
-            for active in (True, False):
+            core.atomic_json(root / 'manifest.json', {'views': 1000, 'validation': list(anchors)[900:]})
+            for count, evaluation, accepted in ((1000, False, True), (900, True, True),
+                                                 (900, False, False), (0, False, False)):
                 bridge, namespace = self.bridge()
                 bridge.root = root
                 bridge.job = {'use_depth_loss': True, 'dataset_root': str(root)}
                 bridge.geometry_checked = True
                 bridge.supervision_checked = False
-                if not active:
-                    path.write_text(json.dumps({'anchors': {}}, indent=2), encoding='utf-8')
+                bridge.eval_steps = {4} if evaluation else set()
+                if count != len(anchors):
+                    path.write_text(json.dumps({'anchors': dict(list(anchors.items())[:count])}), encoding='utf-8')
                 bridge.on_step({'iteration': 1, 'loss': .1, 'num_gaussians': 2,
                                 'iterations': 4, 'is_paused': False})
-                if active:
+                if accepted:
                     self.assertFalse(bridge.error)
-                    self.assertEqual(bridge.supervision, 'Depth active: 1000 anchored views')
+                    self.assertEqual(bridge.supervision, f'Depth active: {count} anchored views')
                     namespace['lf'].session.return_value.request_stop.assert_not_called()
                 else:
                     self.assertIn('could not be anchored', bridge.error)
@@ -218,6 +220,7 @@ class NativeCompatibility(unittest.TestCase):
             bridge, namespace = self.bridge()
             bridge.root = Path('unused')
             bridge.best = {'path': 'retained.ply'}
+            bridge.eval_steps = {4}
             bridge.writer = Mock()
             bridge.on_end({'iteration': 4, 'terminal_state': outcome})
             expected = outcome if outcome in {'completed', 'stopped', 'failed'} else 'failed'

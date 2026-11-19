@@ -14,6 +14,7 @@ profile=ext.training_options.PROFILES['mrnf']
 assert (s.iterations,s.max_points,s.sh_degree,s.seed_points)==(
  profile['iterations'],profile['max_cap'],profile['sh_degree'],profile['init_num_pts'])
 assert s.eval_interval==profile['eval_steps'][0]
+assert not s.enable_eval and ext.training_settings(s)['enable_eval'] is False
 import math
 for name in ext.training_options.FIELDS:
  actual,expected=getattr(s,name),profile[name]

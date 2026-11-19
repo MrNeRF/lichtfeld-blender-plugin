@@ -109,6 +109,25 @@ class TrainingCoreTest(unittest.TestCase):
         self.assertFalse(config["optimization"]["use_ppisp"])
         self.assertFalse(config["optimization"]["eval_all"])
 
+    def test_evaluation_can_be_disabled_without_removing_checkpoints(self):
+        job = {"iterations": 123, "eval_interval": 40, "max_points": 1000,
+               "sh_degree": 1, "test_every": 4, "enable_eval": False}
+        optimization = core.training_config(job)["optimization"]
+        self.assertFalse(optimization["enable_eval"])
+        self.assertEqual(optimization["eval_steps"], [])
+        self.assertEqual(optimization["save_steps"], [40, 80, 120, 123])
+        job.update(root="job", backend="trainer")
+        for resume in (None, "checkpoint.licht"):
+            job["resume"] = resume
+            self.assertNotIn("--eval", core.training_command(job, "hook.py"))
+        job["enable_eval"] = True
+        optimization = core.training_config(job)["optimization"]
+        self.assertTrue(optimization["enable_eval"])
+        self.assertEqual(optimization["eval_steps"], optimization["save_steps"])
+        self.assertIn("--eval", core.training_command(job, "hook.py"))
+        del job["enable_eval"]
+        self.assertIn("--eval", core.training_command(job, "hook.py"))
+
     def test_hook_captures_exact_model_and_retains_earlier_best(self):
         class Tensor:
             def __init__(self, array): self.array = np.asarray(array)
@@ -196,6 +215,12 @@ class TrainingCoreTest(unittest.TestCase):
                 bridge.session.finish()
                 bridge.session.pool.close()
                 bridge = None
+                bridge = module.TrainingBridge({**core.read_json(root / "job.json"), "enable_eval": False})
+                with patch.object(module, "metric_at", side_effect=AssertionError("Evaluation disabled")):
+                    bridge.on_end({"iteration": 9, "terminal_state": "completed"})
+                last = core.read_json(root / "best.json")
+                self.assertEqual((last["kind"], last["iteration"]), ("last", 9))
+                self.assertTrue(core.verify_artifact(root, last).is_file())
         finally:
             if bridge:
                 bridge.writer.shutdown(wait=True)
