@@ -1,6 +1,6 @@
 schema_version = "1.0.0"
 id = "lichtfeld_training"
-version = "0.1.0"
+version = "0.1.0-beta.1"
 name = "LichtFeld"
 tagline = "Train Gaussian splats and import your LichtFeld Portal assets"
 maintainer = "LichtFeld Contributors"

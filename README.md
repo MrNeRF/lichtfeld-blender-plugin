@@ -7,7 +7,7 @@
 
 Browse your LichtFeld Portal assets and bring their splats into Blender, or create a camera rig, capture a calibrated dataset, and train a navigable Gaussian splat from your scene. Capture, training and Portal asset preparation use separate processes, so the LichtFeld Studio window can remain closed.
 
-**Version 0.1.0 · Blender 5.3.x · GPL-3.0-or-later**
+**Version 0.1.0-beta.1 · Blender 5.3.x · GPL-3.0-or-later**
 
 ## What you can do
 
@@ -46,7 +46,7 @@ Windows is the current native integration test platform. CPU contracts also run 
 
 ## Install and configure
 
-1. Obtain `lichtfeld_training-0.1.0.zip` from the `lichtfeld-training-extension` artifact of a successful [workflow run](https://github.com/MrNeRF/lichtfeld-blender-plugin/actions/workflows/contracts.yml), and extract the downloaded artifact container. To build the extension from source, run `python tools/package_blender_training.py` with Python 3.11 or newer. The installable archive is written to `dist/`.
+1. Download `lichtfeld_training-<version>.zip` from the [releases page](https://github.com/MrNeRF/lichtfeld-blender-plugin/releases). To build the extension from source, run `python tools/package_blender_training.py` with Python 3.11 or newer. The installable archive is written to `dist/`.
 2. In Blender, open **Edit → Preferences → Get Extensions**, then choose **Install from Disk…** from the menu and select the ZIP. Enable **LichtFeld**.
 3. Open its preferences, select the actual LichtFeld **executable file**, and choose a permanent jobs directory. Select **Verify installation**.
 4. In the 3D Viewport, press **N** and open the **LichtFeld** sidebar tab. Choose **Portal** or **Capture / Train**. The gear opens extension preferences; the question mark opens the user guide.

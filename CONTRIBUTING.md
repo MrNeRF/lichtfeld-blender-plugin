@@ -11,7 +11,7 @@ Use Blender 5.3.x and Python 3.11 or newer for packaging. Keep the extension and
 - Use English user/developer documentation. Keep local reports, screenshots, qualification logs and development histories outside the repository.
 - Preserve copyright and SPDX notices. Document new dependencies or incorporated source in [CREDITS.md](CREDITS.md), including its actual license/permissions.
 
-The current development version remains `0.1.0`; change it only for an intentional release. Do not add source assets, downloaded scenes or native binaries to the installable archive. The reviewed pure Python protocol wheel is a shared LichtFeld dependency. Portal uses the client in the configured LichtFeld Studio installation.
+Change the manifest version only for an intentional release. Do not add source assets, downloaded scenes or native binaries to the installable archive. The reviewed pure Python protocol wheel is a shared LichtFeld dependency. Portal uses the client in the configured LichtFeld Studio installation.
 
 Keep additions focused on concrete behavior. Reuse existing workflow owners and test suites; avoid duplicate protocol logic, redundant layers and test scaffolding that merely repeats implementation details.
 
@@ -36,7 +36,7 @@ python -m pip install "numpy>=2,<3" lichtfeld_training/wheels/lichtfeld_training
 
 ```sh
 python tools/package_blender_training.py --output /path/outside/source/packages
-blender --command extension validate /path/outside/source/packages/lichtfeld_training-0.1.0.zip
+blender --command extension validate /path/outside/source/packages/lichtfeld_training-<version>.zip
 ```
 
 The packager checks the reviewed runtime inventory and Python syntax before replacing an output ZIP. It includes license/credits and the user documentation. Install it in an isolated Blender profile for package checks; do not overwrite a user's installed extension or preferences during tests. Set `BLENDER_USER_CONFIG`, `BLENDER_USER_SCRIPTS` and `BLENDER_USER_EXTENSIONS` to scratch directories and verify the loaded extension/dependency paths. Rebuilds with an unchanged development version need a fresh profile: Blender can reuse an already installed wheel with the same distribution name and version.
@@ -50,7 +50,7 @@ python -m unittest discover -s tests/blender -p "test_*.py"
 python -m unittest discover -s tests/packaging -p "test_*.py"
 ```
 
-GitHub Actions runs these contracts on Windows and Linux with Python 3.11 and 3.13. After they pass, the package job builds the installable source ZIP and uploads the `lichtfeld-training-extension` workflow artifact. GPU/Blender fixtures remain separate from these CPU-only checks.
+GitHub Actions runs these contracts on Windows and Linux with Python 3.11 and 3.13. After they pass, the package job builds the installable source ZIP and uploads the `lichtfeld-training-extension` workflow artifact. Pushing a tag `v<version>` that matches the manifest version publishes that ZIP as a GitHub release; a pre-release suffix such as `0.1.0-beta.1` marks it as a pre-release. The ZIP is pure Python and serves every platform. GPU/Blender fixtures remain separate from these CPU-only checks.
 
 For a real capture/training smoke test, supply a compatible backend and a separate scratch directory:
 
