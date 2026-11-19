@@ -58,7 +58,7 @@ def camera_collections(settings):
  return (collection,) if collection is not None else ()
 
 
-CAMERA_SET_REQUIRED = 'Choose a camera collection in Capture sets.'
+CAMERA_SET_REQUIRED = 'Choose a camera set.'
 
 
 def camera_setup_issue(settings, *, allow_live=False):

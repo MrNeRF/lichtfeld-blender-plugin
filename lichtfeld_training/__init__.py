@@ -963,6 +963,8 @@ class LF_OT_rig(_RigOperation, bpy.types.Operator):
         yield from rig_edit.commit(self, settings, previous, collection, target, recipe)
         if capture_sets and not settings.capture_collections:
             settings.capture_collections.add().collection = capture_sets[0]
+        elif not create_separately and previous is None and settings.capture_collections and not preflight.camera_collections(settings):
+            settings.capture_collections[0].collection = collection
         rig_edit.copy_reference(settings.camera_collection.lichtfeld_rig_reference, reference)
         if capture_sources:
             for _ in preflight.remember_sources(settings, capture_sources):
@@ -2288,7 +2290,7 @@ def draw_capture_cameras(box, context, settings, ready, rig_changed, wrapped):
         box.label(text='Finish interrupted rig edit' if finishing else 'Live rig · changes are immediate', icon='ORIENTATION_GIMBAL')
         controls = box.column()
         controls.enabled = not finishing
-        controls.prop(settings, 'live_radius')
+        controls.prop(settings, 'live_radius', text='Distance')
         controls.prop(settings, 'live_phase')
         target = settings.rig_aim
         follow = target.constraints.get(rig_edit.FOLLOW) if target else None

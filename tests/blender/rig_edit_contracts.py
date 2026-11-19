@@ -1023,7 +1023,7 @@ s.capture_collections[0].collection = None
 try:
     checked()
 except ValueError as error:
-    assert 'Choose a camera collection in Capture sets' in str(error)
+    assert str(error) == ext.preflight.CAMERA_SET_REQUIRED
 else:
     raise AssertionError('An entirely empty capture list fell back to the edited rig')
 s.capture_collections[0].collection = second_rig
@@ -1091,7 +1091,7 @@ assert removed != s.camera_collection
 bpy.data.collections.remove(removed, do_unlink=True)
 assert not ext.preflight.camera_collections(s)
 assert not bpy.ops.lichtfeld.capture_framing.poll()
-assert ext.preflight.camera_setup_issue(s) == 'Choose a camera collection in Capture sets.'
+assert ext.preflight.camera_setup_issue(s) == 'Choose a camera set.'
 assert bpy.ops.lichtfeld.live_rig() == {'FINISHED'}
 assert ext.preflight.camera_setup_issue(s) == 'Finish live editing to continue.'
 for operator in (ext.LF_OT_start, ext.LF_OT_export_dataset):
@@ -1099,7 +1099,7 @@ for operator in (ext.LF_OT_start, ext.LF_OT_export_dataset):
     assert not operator.poll.__func__(SimpleNamespace(poll_message_set=reasons.append), bpy.context)
     assert reasons == ['Finish live editing to continue.']
 assert bpy.ops.lichtfeld.live_rig() == {'FINISHED'}
-assert ext.preflight.camera_setup_issue(s) == 'Choose a camera collection in Capture sets.'
+assert ext.preflight.camera_setup_issue(s) == 'Choose a camera set.'
 assert bpy.ops.lichtfeld.capture_collection_entry(use_edited=True) == {'FINISHED'}
 assert [row.collection for row in s.capture_collections] == [s.camera_collection]
 assert checked()['camera_count'] == 8
@@ -1117,10 +1117,15 @@ print('DELETED_CAPTURE_SET_RECOVERS_WITHOUT_CHANGING_CONTENT_PASS', flush=True)
 # in the existing capture row must recover even without a generated edit target.
 bpy.data.collections.remove(s.camera_collection, do_unlink=True)
 assert s.camera_collection is None and not ext.preflight.camera_collections(s)
-assert ext.preflight.camera_setup_issue(s) == 'Choose a camera collection in Capture sets.'
+assert ext.preflight.camera_setup_issue(s) == 'Choose a camera set.'
 replacement = bpy.data.collections.new("Custom cameras")
 bpy.context.scene.collection.children.link(replacement)
 camera = bpy.data.objects.new("Custom capture camera", bpy.data.cameras.new("Custom capture camera"))
 replacement.objects.link(camera)
 s.capture_collections[0].collection = replacement
 assert checked()['camera_count'] == 1 and bpy.ops.lichtfeld.capture_framing.poll()
+
+s.capture_collections[0].collection = None
+assert bpy.ops.lichtfeld.create_rig() == {'FINISHED'}
+assert [row.collection for row in s.capture_collections] == [s.camera_collection]
+assert checked()['camera_count'] == 8
