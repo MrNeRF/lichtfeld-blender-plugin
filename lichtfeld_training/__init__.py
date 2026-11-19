@@ -963,6 +963,8 @@ class LF_OT_rig(_RigOperation, bpy.types.Operator):
         yield from rig_edit.commit(self, settings, previous, collection, target, recipe)
         if capture_sets and not settings.capture_collections:
             settings.capture_collections.add().collection = capture_sets[0]
+        elif not create_separately and previous is None and settings.capture_collections and not preflight.camera_collections(settings):
+            settings.capture_collections[0].collection = collection
         rig_edit.copy_reference(settings.camera_collection.lichtfeld_rig_reference, reference)
         if capture_sources:
             for _ in preflight.remember_sources(settings, capture_sources):
@@ -1351,6 +1353,9 @@ class LF_OT_start(bpy.types.Operator):
             return False
         if context.scene.lichtfeld_training.running:
             return False
+        if issue := preflight.camera_setup_issue(context.scene.lichtfeld_training):
+            cls.poll_message_set(issue)
+            return False
         try:
             if not preferences(context).backend_path:
                 cls.poll_message_set("Choose the LichtFeld executable in the add-on preferences")
@@ -1504,6 +1509,9 @@ class LF_OT_export_dataset(bpy.types.Operator):
     def poll(cls, context):
         s = context.scene.lichtfeld_training
         if s.running or s.operation_busy or s.attached_session:
+            return False
+        if issue := preflight.camera_setup_issue(s):
+            cls.poll_message_set(issue)
             return False
         if not bpy.data.filepath or bpy.data.is_dirty:
             cls.poll_message_set("Save the .blend before exporting its exact saved revision")
@@ -2267,8 +2275,6 @@ def draw_rig_actions(layout, settings, pending, *, edit=False):
             row.operator('lichtfeld.read_rig', text='Revert', icon='LOOP_BACK')
     if managed and not pending and settings.rig_parameter_source == rig and settings.rig_mode in {'SPHERE', 'HEMISPHERE', 'RINGS'}:
         row.operator('lichtfeld.live_rig', text='Edit live')
-    if preflight.camera_collections(settings):
-        layout.operator('lichtfeld.capture_framing', text='Check framing')
     if managed and edit:
         layout.operator('lichtfeld.create_rig', text='Create new rig').new_rig = True
 
@@ -2284,7 +2290,7 @@ def draw_capture_cameras(box, context, settings, ready, rig_changed, wrapped):
         box.label(text='Finish interrupted rig edit' if finishing else 'Live rig · changes are immediate', icon='ORIENTATION_GIMBAL')
         controls = box.column()
         controls.enabled = not finishing
-        controls.prop(settings, 'live_radius')
+        controls.prop(settings, 'live_radius', text='Distance')
         controls.prop(settings, 'live_phase')
         target = settings.rig_aim
         follow = target.constraints.get(rig_edit.FOLLOW) if target else None
@@ -2293,11 +2299,12 @@ def draw_capture_cameras(box, context, settings, ready, rig_changed, wrapped):
             wrapped(box, 'The aim object was removed. Finish editing to choose a new target.')
         wrapped(box, 'Finish to keep these camera poses and return to setup.' if finishing else
                      'Drag to adjust. Esc cancels a gesture; Undo restores it. Finish to edit shape or camera count.')
-        box.operator('lichtfeld.capture_framing', text='Check framing', icon='VIEW_CAMERA')
         box.operator('lichtfeld.live_rig', text='Finish live editing', icon='CHECKMARK')
         return
     box.prop(settings, 'camera_collection', text='Edit rig' if settings.capture_collections else 'Camera set')
-    collection_count = len(preflight.camera_collections(settings))
+    capture_sets = preflight.camera_collections(settings)
+    collection_count = len(capture_sets)
+    include_edited = managed and rig not in capture_sets
     title = f'Capture sets ({collection_count})' if settings.capture_collections else 'Combine camera sets'
     capture_list = draw_disclosure(box, 'capture_collection_details', title)
     if capture_list is not None:
@@ -2311,9 +2318,13 @@ def draw_capture_cameras(box, context, settings, ready, rig_changed, wrapped):
         add_collection = capture_list.row()
         add_collection.enabled = all(entry.collection is not None for entry in settings.capture_collections)
         add_collection.operator('lichtfeld.capture_collection_entry', text='Add collection', icon='ADD')
-        if managed and rig not in preflight.camera_collections(settings):
+        if include_edited and collection_count:
             capture_list.operator('lichtfeld.capture_collection_entry', text='Include edited rig').use_edited = True
-    if settings.capture_collections:
+    if not collection_count and settings.capture_collections and capture_list is None and not include_edited:
+        box.prop(settings.capture_collections[0], 'collection', text='Capture set')
+    if include_edited and not collection_count:
+        box.operator('lichtfeld.capture_collection_entry', text='Include edited rig').use_edited = True
+    if settings.capture_collections and collection_count:
         box.label(text='Checking cameras…' if ready.get('checking') else f"{len(ready['cameras']):,} capture cameras",
                   icon='BLANK1')
     if rig:
@@ -2458,7 +2469,10 @@ def draw_capture_options(box, context, settings, capture_only, wrapped):
 
 def draw_capture_actions(setup, settings, ready, errors, capture_only, wrapped):
     checking = settings.operation_busy or ready.get('checking') or ready.get('environment', {}).get('checking')
-    if checking:
+    camera_issue = preflight.camera_setup_issue(settings)
+    if camera_issue:
+        wrapped(setup, camera_issue)
+    elif checking:
         setup.label(text='Updating setup…' if settings.operation_busy else 'Checking capture setup…', icon='TIME')
     elif errors:
         if errors[0] not in ready.get('camera_issues', {}):
@@ -2469,7 +2483,7 @@ def draw_capture_actions(setup, settings, ready, errors, capture_only, wrapped):
         setup.operator('wm.save_as_mainfile' if not bpy.data.filepath else 'wm.save_mainfile',
                        text='Save scene before capture', icon='FILE_TICK')
     row = setup.row()
-    row.enabled = not errors and not checking
+    row.enabled = not errors and not checking and not camera_issue
     row.scale_y = 1.4
     row.operator('lichtfeld.export_dataset' if capture_only else 'lichtfeld.start_training',
                  text='Generate dataset…' if capture_only else 'Capture and start training',
@@ -2599,6 +2613,9 @@ def draw_training(self, context):
     capture_only = settings.dataset_mode == "EXPORT"
     ready = preflight.cached(context, prefs, capture_only=capture_only)
     errors = preflight.issues(ready)
+    camera_setup_issue = preflight.camera_setup_issue(settings)
+    if camera_setup_issue:
+        errors = [camera_setup_issue, *(error for error in errors if error != camera_setup_issue)]
     rig = settings.camera_collection
     pending = rig and rig.get('lichtfeld_generated') and (not rig_edit.recipe_matches(rig, settings) or ready.get('reference_changed', False))
     box = draw_setup_section(layout, settings, 'content', 'Capture')
@@ -2608,6 +2625,9 @@ def draw_training(self, context):
     if box is not None:
         box.enabled = not settings.operation_busy
         draw_capture_cameras(box, context, settings, ready, pending, wrapped)
+        framing = box.row()
+        framing.enabled = ready.get('checking') or bool(ready['cameras'])
+        framing.operator('lichtfeld.capture_framing', text='Check framing')
     box = draw_setup_section(layout, settings, 'output', 'Render and output')
     if box is not None:
         draw_capture_options(box, context, settings, capture_only, wrapped)
@@ -2639,6 +2659,8 @@ def draw_training(self, context):
     covered = set(preflight.save_issues()) if not backend_required else set()
     if backend_required:
         covered.add(installation.get('message', 'Choose your LichtFeld Studio installation.'))
+    if camera_setup_issue and not backend_required:
+        covered.add(camera_setup_issue)
     other_errors = [error for error in errors if error not in (camera_issues or {}) and error not in covered]
     checks = layout.box() if other_errors else None
     if checks is not None:
@@ -2737,7 +2759,6 @@ def loaded(_):
     preflight.clear()
     ui_runtime.clear()
     _imported.clear()
-    portal_ui.select_workspace(bpy.context)
     source = bpy.data.filepath
     directory = preflight.connection_folder(preferences()) if source else None
     for scene in bpy.data.scenes:
@@ -2753,8 +2774,6 @@ def loaded(_):
                 settings = scene.lichtfeld_training
                 if root and bpy.data.filepath == source and not settings.job_directory and not settings.attached_session and not settings.running:
                     settings.job_directory = root
-                    if bpy.context.scene == scene:
-                        portal_ui.select_workspace(bpy.context)
             except ReferenceError:
                 pass
         ui_runtime.submit(lambda name=name: jobs.remembered_job(directory, source, name), done)

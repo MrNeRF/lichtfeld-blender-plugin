@@ -125,18 +125,6 @@ def import_target(scene):
     return scene
 
 
-def select_workspace(context):
-    """Open an existing capture/job scene in its workflow after loading a file."""
-    if context.window_manager.is_property_set("lichtfeld_workspace"):
-        return  # Keep the current workspace until Blender replaces its UI state.
-    settings = context.scene.lichtfeld_training
-    training = (settings.job_directory or settings.attached_session or settings.running or
-                settings.camera_collection or settings.capture_collections or settings.dataset_mode == "REUSE" or
-                capture_preview.is_preview(context.scene) or preview_scene.is_preview(context.scene))
-    if training:
-        context.window_manager.lichtfeld_workspace = "TRAINING"
-
-
 def import_steps(scene, identifier, count, fields):
     if not bpy.app.background and bpy.ops.ed.undo_push.poll():
         bpy.ops.ed.undo_push(message="Before Portal import")
@@ -222,7 +210,6 @@ def tick_steps():
     global _stage, _pending, _rows, _generation, _identity, _last_revision, _destination
     global _last_online, _refresh_wanted, _frame
     if _runtime is None:
-        select_workspace(bpy.context)
         return 0.5
     online = bpy.app.online_access
     if online and _last_online is False:
@@ -659,9 +646,9 @@ def register():
     bpy.types.WindowManager.lichtfeld_portal = PointerProperty(type=LF_PortalState, options={"SKIP_SAVE"})
     bpy.types.WindowManager.lichtfeld_workspace = EnumProperty(name="LichtFeld workspace",
         description="Choose Portal assets or the scene capture and training workflow",
-        items=(("PORTAL", "Portal", "Browse and import your Portal assets", "ASSET_MANAGER", 0),
-               ("TRAINING", "Capture / Train", "Prepare cameras and datasets, train or view a trainer", "CAMERA_DATA", 1)),
-        default="PORTAL", options={"SKIP_SAVE"})
+        items=(("TRAINING", "Capture / Train", "Prepare cameras and datasets, train or view a trainer", "CAMERA_DATA", 1),
+               ("PORTAL", "Portal", "Browse and import your Portal assets", "ASSET_MANAGER", 0)),
+        default="TRAINING", options={"SKIP_SAVE"})
     bpy.types.TOPBAR_MT_file_import.append(import_menu)
     if not bpy.app.background:
         bpy.app.timers.register(tick, first_interval=0.2, persistent=True)
