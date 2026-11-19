@@ -243,7 +243,8 @@ settings.status = "Training"
 status = {"state": "training", "best": {"score": {"psnr": 30}}, "control_available": True}
 context = SimpleNamespace(scene=scene, region=SimpleNamespace(width=300))
 orders = []
-with patch.object(ui, "peek", return_value=SimpleNamespace(status=status, reader=SimpleNamespace(error="",status_error=False))), patch.object(ext, "preferences", return_value=None):
+reader = SimpleNamespace(error="", status_error=False, stop=threading.Event())
+with patch.object(ui, "peek", return_value=SimpleNamespace(status=status, reader=reader)), patch.object(ext, "preferences", return_value=None):
     for busy in (False, True, False):
         settings.importing = busy
         layout = PanelLayout()
