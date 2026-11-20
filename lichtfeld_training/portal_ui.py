@@ -410,10 +410,15 @@ def account_controls(layout):
 
 def gallery_controls(layout, context):
     from .ui_text import draw_paragraph
-    heading = layout.row(align=True)
+    heading = layout.split(factor=0.95, align=True)
     heading.label(text="LichtFeld · Portal Gallery", icon_value=brand_icon())
-    heading.operator_context = "INVOKE_DEFAULT"
-    heading.operator("lichtfeld.setup", text="", icon="PREFERENCES")
+    actions = heading.row(align=True)
+    actions.operator_context = "INVOKE_DEFAULT"
+    actions.operator("lichtfeld.setup", text="", icon="PREFERENCES")
+    close = actions.row(align=True)
+    close.operator_context = "EXEC_DEFAULT"
+    close.template_popup_confirm("lichtfeld.close_portal_gallery", text=" ",
+                                 icon="PANEL_CLOSE", cancel_text="", cancel_default=True)
     if not account_controls(layout):
         return
     snapshot = state()
@@ -559,6 +564,16 @@ class LF_OT_portal_action(bpy.types.Operator):
         return {"FINISHED"}
 
 
+class LF_OT_close_portal_gallery(bpy.types.Operator):
+    bl_idname = "lichtfeld.close_portal_gallery"
+    bl_label = "Close Portal Gallery"
+    bl_options = {"INTERNAL"}
+
+    def execute(self, context):
+        # The native popup template handles dismissal and invokes cancel().
+        return {"FINISHED"}
+
+
 class LF_OT_portal_browser(bpy.types.Operator):
     bl_idname = "lichtfeld.portal_gallery"
     bl_label = "Portal Gallery"
@@ -630,7 +645,7 @@ class LF_PT_portal(bpy.types.Panel):
             draw_paragraph(self.layout, snapshot["message"], context.region.width, context.preferences.system.ui_scale)
 
 
-CLASSES = (LF_PortalRow, LF_PortalState, LF_OT_portal_action, LF_OT_portal_browser, LF_PT_portal)
+CLASSES = (LF_PortalRow, LF_PortalState, LF_OT_portal_action, LF_OT_close_portal_gallery, LF_OT_portal_browser, LF_PT_portal)
 
 
 def import_menu(self, context):
