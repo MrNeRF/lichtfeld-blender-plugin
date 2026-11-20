@@ -90,6 +90,23 @@ def fallback_scene(excluding=None, *, create=False):
     return scene
 
 
+def remember_view(window, area):
+    key = (window.as_pointer(), area.as_pointer())
+    if key not in _views:
+        space = area.spaces.active
+        region = space.region_3d
+        _views[key] = (region.view_perspective, space.use_local_camera, space.camera,
+                       region.view_location.copy(), region.view_rotation.copy(), region.view_distance,
+                       tuple(region.view_camera_offset), region.view_camera_zoom)
+
+
+def show_camera(area):
+    space = area.spaces.active
+    space.use_local_camera = False
+    space.region_3d.view_perspective = 'CAMERA'
+    area.tag_redraw()
+
+
 def restore_window(window, area):
     if not area:
         return
@@ -207,21 +224,27 @@ def prepare_camera(source, window, *, prefer_selected=False, request=None):
     return camera, original, count, excluded, index, value
 
 
-def camera_changed(settings, _context, *, refresh_only=False):
+def camera_changed(settings, context, *, refresh_only=False):
     """Queue one update per visible preview; RNA callbacks never copy scene data."""
     source = settings.id_data
     if settings.running or settings.job_directory:
         return
+    area = context.area if context and not refresh_only else None
     for window in bpy.context.window_manager.windows:
         preview = window.scene
         if source_scene(preview) != source:
             continue
         key = preview.as_pointer()
+        view = None
+        if area and area.type == 'VIEW_3D' and window == context.window:
+            view = (window.as_pointer(), area.as_pointer())
         if key in _pending:
             if not refresh_only:
                 _pending[key]['refresh_only'] = False
+            if view is not None:
+                _pending[key]['view'] = view
             continue
-        token = {'refresh_only': refresh_only}
+        token = {'refresh_only': refresh_only, 'view': view}
         _pending[key] = token
         ui_runtime.schedule(camera_steps(source, preview, key, token),
                             lambda error: ui_runtime.report_notice('ERROR', error))
@@ -288,7 +311,19 @@ def camera_steps(source, preview, key, token):
         preview[ORIGINAL_CAMERA] = original
         preview['capture_excluded_count'] = excluded
         preview['capture_camera_count'] = count
+        changed = preview.get('capture_camera_index') != index
         preview['capture_camera_index'] = index
+        if changed and token['view'] is not None:
+            window_id, area_id = token['view']
+            for visible in bpy.context.window_manager.windows:
+                if visible.as_pointer() != window_id or visible.scene != preview:
+                    continue
+                for editor in visible.screen.areas:
+                    if editor.as_pointer() == area_id and editor.type == 'VIEW_3D':
+                        remember_view(visible, editor)
+                        show_camera(editor)
+                        break
+                break
         if settings.capture_preview_index != index:
             settings.capture_preview_index = index
     except ReferenceError:
@@ -387,18 +422,11 @@ def _open_steps(source, window, area, *, prefer_selected):
             yield
         if window.scene != source:
             return
-        key = (window.as_pointer(), area.as_pointer()) if area else None
         if area and area.type == 'VIEW_3D':
-            space = area.spaces.active
-            if key not in _views:
-                region = space.region_3d
-                _views[key] = (region.view_perspective, space.use_local_camera, space.camera,
-                               region.view_location.copy(), region.view_rotation.copy(), region.view_distance,
-                               tuple(region.view_camera_offset), region.view_camera_zoom)
+            remember_view(window, area)
         window.scene = preview
         if area and area.type == 'VIEW_3D':
-            space.use_local_camera = False
-            space.region_3d.view_perspective = 'CAMERA'
+            show_camera(area)
         complete = True
         yield
     finally:
@@ -481,7 +509,8 @@ class LF_OT_close_capture_framing(bpy.types.Operator):
         missing_source = source is None
         source = source or fallback_scene(scene, create=True)
         restore_source(context.window, scene, source)
-        restore_window(context.window, context.area)
+        for area in context.window.screen.areas:
+            restore_window(context.window, area)
         remains_open = any(w.scene == scene for w in context.window_manager.windows)
         if not remains_open:
             remove(scene)

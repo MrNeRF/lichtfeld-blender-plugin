@@ -117,6 +117,23 @@ for _ in range(3):
         assert (len(bpy.data.scenes),len(bpy.data.objects),len(bpy.data.cameras))==preview_counts
     while ext.capture_preview.camera_pending(preview):ext.ui_runtime.tick()
     assert preview['capture_camera_name']==cameras[0].name
+    # The sidebar returns this viewport to its camera after orbiting away.
+    area = next(area for area in bpy.context.window.screen.areas if area.type == 'VIEW_3D')
+    region = area.spaces.active.region_3d
+    with bpy.context.temp_override(area=area):
+        region.view_perspective = 'PERSP'
+        ext.capture_preview.camera_changed(s, bpy.context, refresh_only=True)
+        while ext.capture_preview.camera_pending(preview):ext.ui_runtime.tick()
+        assert region.view_perspective == 'PERSP'
+        assert bpy.ops.lichtfeld.capture_framing() == {'FINISHED'}
+        while ext.capture_preview.camera_pending(preview):ext.ui_runtime.tick()
+        assert region.view_perspective == 'PERSP'
+        bpy.context.window_manager.lichtfeld_panels.framing_camera = 2
+        while ext.capture_preview.camera_pending(preview):ext.ui_runtime.tick()
+        assert region.view_perspective == 'CAMERA'
+        assert preview['capture_camera_name'] == cameras[1].name
+        s.capture_preview_index = 1
+        while ext.capture_preview.camera_pending(preview):ext.ui_runtime.tick()
     # An invalid view leaves the last usable preview intact and permits recovery.
     cameras[2].data.type='ORTHO'
     with patch.object(ext.ui_runtime,'report_notice') as notice:
@@ -158,6 +175,31 @@ for _ in range(3):
     ext.ui_runtime.tick()
     assert bpy.context.scene==source
     assert (len(bpy.data.scenes),len(bpy.data.objects),len(bpy.data.cameras))==counts
+# A second viewport can browse cameras without changing the first viewport.
+window = bpy.context.window
+primary = next(area for area in window.screen.areas if area.type == 'VIEW_3D')
+secondary = next(area for area in window.screen.areas if area.type == 'PROPERTIES')
+secondary.type = 'VIEW_3D'
+secondary_space = secondary.spaces.active
+secondary_space.region_3d.view_perspective = 'ORTHO'
+secondary_space.use_local_camera = True
+secondary_space.camera = source.camera
+local_camera = source.camera
+for _ in ext.capture_preview.open_steps(source, window, primary):pass
+preview = window.scene
+primary.spaces.active.region_3d.view_perspective = 'PERSP'
+with bpy.context.temp_override(area=secondary):
+    bpy.context.window_manager.lichtfeld_panels.framing_camera = 3
+    while ext.capture_preview.camera_pending(preview):ext.ui_runtime.tick()
+    assert secondary_space.region_3d.view_perspective == 'CAMERA'
+    assert primary.spaces.active.region_3d.view_perspective == 'PERSP'
+with bpy.context.temp_override(area=primary):
+    assert bpy.ops.lichtfeld.close_capture_framing() == {'FINISHED'}
+assert secondary_space.region_3d.view_perspective == 'ORTHO'
+assert secondary_space.use_local_camera and secondary_space.camera == local_camera
+secondary.type = 'PROPERTIES'
+print('FRAMING_SECONDARY_VIEW_RESTORES_PERSPECTIVE_AND_LOCAL_CAMERA_PASS', flush=True)
+
 source.cycles.device = 'CPU'
 source.render.engine = original_engine
 source.render.use_border = False
