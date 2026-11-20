@@ -1972,6 +1972,9 @@ class LF_OT_load_job(bpy.types.Operator):
     filter_glob: StringProperty(default="job.json", options={"HIDDEN"})
 
     def invoke(self, context, event):
+        folder = preflight.jobs_folder(preferences(context))
+        if folder and os.path.isdir(folder):
+            self.filepath = os.path.join(folder, "")
         context.window_manager.fileselect_add(self)
         return {"RUNNING_MODAL"}
 
