@@ -412,7 +412,7 @@ def gallery_controls(layout, context):
     from .ui_text import draw_paragraph
     heading = layout.split(factor=0.95, align=True)
     heading.label(text="LichtFeld · Portal Gallery", icon_value=brand_icon())
-    actions = heading.row(align=True)
+    actions = heading.split(factor=0.5)
     actions.operator_context = "INVOKE_DEFAULT"
     actions.operator("lichtfeld.setup", text="", icon="PREFERENCES")
     close = actions.row(align=True)
