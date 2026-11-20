@@ -20,6 +20,8 @@ s.scope='SCENE';s.views=4;s.rig_distance=1.05
 original_engine = source.render.engine
 source.render.engine = 'CYCLES'
 source.cycles.device = 'GPU'
+source.cycles.film_transparent_glass = True
+source.cycles.film_transparent_roughness = .27
 source.render.use_border = True
 source.render.use_crop_to_border = True
 source.render.border_min_x = .2
@@ -29,8 +31,8 @@ source.render.border_max_y = .8
 def display_settings(scene):
     render = scene.render
     return (render.engine, render.use_border, render.use_crop_to_border, render.border_min_x,
-            render.border_min_y, render.border_max_x, render.border_max_y, scene.cycles.device)
-source_display = display_settings(source)
+            render.border_min_y, render.border_max_x, render.border_max_y, scene.cycles.device, render.film_transparent,
+            scene.cycles.film_transparent_glass, scene.cycles.film_transparent_roughness)
 s.capture_aspect='WIDE';s.resolution=1024
 ext.capture_settings.apply_format(source, ext.capture_settings.preset_format(s))
 print('CHECK first wide rig',flush=True)
@@ -72,7 +74,9 @@ owned=copy.data;bpy.data.objects.remove(copy);bpy.data.cameras.remove(owned)
 bpy.context.view_layer.update()
 counts=(len(bpy.data.scenes),len(bpy.data.objects),len(bpy.data.cameras))
 poses={camera.name: camera.evaluated_get(graph).matrix_world.normalized().copy() for camera in cameras}
-for _ in range(3):
+for transparent in (True, False, True):
+    source.render.film_transparent = transparent
+    source_display = display_settings(source)
     print('CHECK framing lifecycle',flush=True)
     opening=ext.capture_preview.open_steps(source,bpy.context.window,None)
     with patch.object(ext.rig_edit,'render_busy',return_value=True):
@@ -83,6 +87,7 @@ for _ in range(3):
     assert ext.capture_preview.source_scene(preview)==source
     assert display_settings(preview) == display_settings(source) == source_display
     preview.render.border_min_x = .35
+    preview.render.film_transparent = not transparent
     preview_display = display_settings(preview)
     assert (preview.render.resolution_x,preview.render.resolution_y)==(576,1024)
     assert preview.camera.data.lens==40 and preview.camera.data!=data
@@ -204,6 +209,7 @@ source.cycles.device = 'CPU'
 source.render.engine = original_engine
 source.render.use_border = False
 source.render.use_crop_to_border = False
+source.render.film_transparent = False
 # Invalid settings fail before creating any preview data, with the source restored.
 s.capture_clip_start=300
 try:

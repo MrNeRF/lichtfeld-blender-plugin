@@ -383,8 +383,11 @@ def _open_steps(source, window, area, *, prefer_selected):
         preview.camera = camera
         preview.world = source.world
         preview.render.engine = source.render.engine
+        preview.render.film_transparent = source.render.film_transparent
         if source.render.engine == 'CYCLES':
             preview.cycles.device = source.cycles.device
+            preview.cycles.film_transparent_glass = source.cycles.film_transparent_glass
+            preview.cycles.film_transparent_roughness = source.cycles.film_transparent_roughness
         for field in ('use_border', 'use_crop_to_border', 'border_min_x', 'border_min_y', 'border_max_x', 'border_max_y'):
             setattr(preview.render, field, getattr(source.render, field))
         preview.frame_set(source.frame_current)
@@ -736,6 +739,8 @@ def draw(layout, context, source, *, width=None):
             row.operator('lichtfeld.save_capture_source', text='Save scene…')
     if s.test_render_image:
         row.operator('lichtfeld.show_test_image', text='Last image')
+    if not s.test_render_active and s.scope == 'SCENE' and context.scene.render.film_transparent:
+        wrapped(layout, 'Entire scene keeps the background. Use Collection to hide it.')
 
 
 def draw_orphaned(layout, _context):
