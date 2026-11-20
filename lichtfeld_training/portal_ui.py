@@ -417,8 +417,8 @@ def gallery_controls(layout, context):
     actions.operator("lichtfeld.setup", text="", icon="PREFERENCES")
     close = actions.row(align=True)
     close.operator_context = "EXEC_DEFAULT"
-    close.template_popup_confirm("lichtfeld.close_portal_gallery", text=" ",
-                                 icon="PANEL_CLOSE", cancel_text="", cancel_default=True)
+    close.template_popup_confirm("lichtfeld.close_portal_gallery", text="×",
+                                 cancel_text="", cancel_default=True)
     if not account_controls(layout):
         return
     snapshot = state()
