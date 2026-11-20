@@ -28,7 +28,7 @@ Train a Gaussian splat from your Blender scene, or bring your LichtFeld Portal s
 [**Portal**](https://portal.lichtfeld.io/) •
 [**Join Discord**](https://discord.gg/TbxJST2BbC)
 
-**Version 0.1.0-beta.1 · Blender 5.3.x · GPL-3.0-or-later**
+**Version 0.1.0-beta.2 · Blender 5.3.x · GPL-3.0-or-later**
 
 </div>
 
