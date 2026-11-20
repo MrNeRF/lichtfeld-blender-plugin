@@ -19,6 +19,7 @@ subject.objects.link(cube)
 s.scope="COLLECTION";s.source_collection=subject;s.views=8;s.rig_mode="SPHERE"
 assert bpy.ops.lichtfeld.create_rig()=={"FINISHED"}
 collection=s.camera_collection
+assert not collection['lichtfeld_fit_limited']
 assert all(tuple(obj.users_collection)==(collection,) for obj in collection.objects if obj.type=='CAMERA')
 assert not any(obj.type=='CAMERA' and obj.get('lichtfeld_generated') for obj in bpy.context.scene.collection.objects)
 original=sorted((o for o in collection.objects if o.type=="CAMERA"),key=lambda o:o["lichtfeld_camera_index"])
@@ -27,7 +28,7 @@ s.rig_auto_fit=False;s.rig_radius=3.25
 assert bpy.ops.lichtfeld.create_rig()=={'FINISHED'}
 assert collection['lichtfeld_generated_radius']==3.25 and not collection['lichtfeld_fit_limited']
 assert all(abs(o.location.length-3.25)<1e-5 for o in original)
-s.rig_auto_fit=True
+s.rig_auto_fit=True;s.rig_distance=2.8
 with patch.object(ext.capture_settings,'fitting_factor',return_value=10):
     assert bpy.ops.lichtfeld.create_rig()=={'FINISHED'}
 assert collection['lichtfeld_fit_limited']
@@ -431,15 +432,18 @@ bpy.ops.preferences.addon_enable(module=module)
 s = bpy.context.scene.lichtfeld_training
 s.scope = 'SCENE'; s.views = 8; s.rig_mode = 'HEMISPHERE'
 s.rig_auto_fit = False; s.rig_radius = 3
-s.rig_distance = 1.05
+assert s.rig_distance == 1.0
 assert bpy.ops.lichtfeld.create_rig() == {'FINISHED'}
 rig = s.camera_collection
-assert s.rig_distance < 1.05  # Native RNA boundary rounded to float32.
+assert s.rig_distance == 1.0
 assert ext.rig_edit.decode_recipe(rig['lichtfeld_rig_recipe'])['rig_distance']==s.rig_distance
+legacy = json.loads(rig['lichtfeld_rig_recipe'])
+legacy['rig_distance'] = 1.0499999523162842
+assert ext.rig_edit.decode_recipe(json.dumps(legacy))['rig_distance'] == legacy['rig_distance']
 s.rig_distance = 2.8
 assert bpy.ops.lichtfeld.read_rig()=={'FINISHED'}
-assert s.rig_distance < 1.05
-invalid=json.loads(rig['lichtfeld_rig_recipe']);invalid['rig_distance']=1.0
+assert s.rig_distance == 1.0
+invalid=json.loads(rig['lichtfeld_rig_recipe']);invalid['rig_distance']=0.99
 try:
     ext.rig_edit.decode_recipe(json.dumps(invalid))
     raise AssertionError('An actual out-of-range rig distance was accepted')

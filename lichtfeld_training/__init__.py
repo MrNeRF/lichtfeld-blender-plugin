@@ -327,8 +327,8 @@ class LichtFeldSettings(bpy.types.PropertyGroup):
         description="Fit the rig reference at the chosen lens and output aspect; disable to choose an exact distance from the center")
     rig_radius: FloatProperty(name="Camera radius", default=3, min=.01, max=1000000, subtype="DISTANCE", unit="LENGTH",
         description="Exact distance from the rig reference center; apply to update camera positions")
-    rig_distance: FloatProperty(name="Minimum distance multiplier", default=2.8, min=1.05, max=100,
-        description="Multiply the reference bounding-sphere radius; automatic framing may move cameras farther away to fit the subject")
+    rig_distance: FloatProperty(name="Minimum distance factor", default=1.0, min=1.0, max=100,
+        description="Set a minimum distance in multiples of the reference bounding radius. Leave at 1 for automatic framing alone, or increase it to give the cameras more room")
     rig_phase: FloatProperty(name="Azimuth offset", subtype="ANGLE", default=0)
     rig_position_variation: FloatProperty(name="Position jitter", default=0, min=0, max=25,
         subtype='PERCENTAGE', soft_max=10,
@@ -546,23 +546,6 @@ class LF_OT_setup(bpy.types.Operator):
         bpy.ops.screen.userpref_show()
         context.preferences.active_section = "ADDONS"
         bpy.ops.preferences.addon_show(module=_PACKAGE)
-        return {"FINISHED"}
-
-
-class LF_OT_tight_framing(bpy.types.Operator):
-    bl_idname = "lichtfeld.tight_framing"
-    bl_label = "Fit cameras closer"
-    bl_description = "Enable Auto fit and set Distance factor to 1.05. Create or apply the rig to update camera positions, then check framing before capture"
-
-    @classmethod
-    def poll(cls,context):
-        s=context.scene.lichtfeld_training
-        return not s.running and not s.operation_busy and s.rig_mode not in {'PATH','MESH'}
-
-    def execute(self,context):
-        s=context.scene.lichtfeld_training
-        s.rig_auto_fit=True
-        s.rig_distance=1.05
         return {"FINISHED"}
 
 
@@ -883,7 +866,7 @@ class LF_OT_rig(_RigOperation, bpy.types.Operator):
         self.collection = collection
         if settings.rig_mode not in {'PATH', 'MESH'}:
             collection['lichtfeld_generated_radius'] = radius
-            collection['lichtfeld_fit_limited'] = bool(settings.rig_auto_fit and fit > settings.rig_distance)
+            collection['lichtfeld_fit_limited'] = bool(settings.rig_auto_fit and 1.0 < settings.rig_distance < fit)
         prepared_reference = collection.lichtfeld_rig_reference
         if reference.mode == 'UNSET':
             prepared_reference.mode = 'OBJECTS'
@@ -2382,8 +2365,7 @@ def draw_capture_cameras(box, context, settings, ready, rig_changed, wrapped):
     if settings.rig_mode not in {'PATH', 'MESH'}:
         box.prop(settings, 'rig_auto_fit', text='Auto fit')
         box.prop(settings, 'rig_distance' if settings.rig_auto_fit else 'rig_radius',
-                 text='Distance factor' if settings.rig_auto_fit else 'Distance')
-        box.operator('lichtfeld.tight_framing')
+                 text='Min. factor' if settings.rig_auto_fit else 'Distance')
         if managed and settings.rig_parameter_source == rig:
             radius = rig.get('lichtfeld_generated_radius')
             if type(radius) in (int, float) and math.isfinite(radius) and radius > 0:
@@ -2775,6 +2757,7 @@ def loaded(_):
     directory = preflight.connection_folder(preferences()) if source else None
     for scene in bpy.data.scenes:
         settings = scene.lichtfeld_training
+        rig_edit.restore_legacy_distance(scene)
         settings.test_render_active = False
         settings.test_render_cancel = False
         settings.test_render_sample = settings.test_render_samples = 0
@@ -2792,12 +2775,17 @@ def loaded(_):
         ui_runtime.submit(lambda name=name: jobs.remembered_job(directory, source, name), done)
 
 
-_CLASSES = (LichtFeldPanelState, LichtFeldPreferences, LichtFeldSourceRef, LichtFeldCaptureCollection, LichtFeldRigReference, LichtFeldSettings, LF_OT_notice, LF_OT_verify, LF_OT_setup, LF_OT_tight_framing, LF_OT_panorama_density, LF_OT_capture_collection, LF_OT_rig, LF_OT_live_rig, rig_edit.LF_GGT_live_rig,
+_CLASSES = (LichtFeldPanelState, LichtFeldPreferences, LichtFeldSourceRef, LichtFeldCaptureCollection, LichtFeldRigReference, LichtFeldSettings, LF_OT_notice, LF_OT_verify, LF_OT_setup, LF_OT_panorama_density, LF_OT_capture_collection, LF_OT_rig, LF_OT_live_rig, rig_edit.LF_GGT_live_rig,
             LF_OT_start, LF_OT_export_dataset, LF_OT_pick_sources, LF_OT_select_aim, LF_OT_inspect_camera, LF_OT_read_rig, LF_OT_command, LF_OT_import, LF_OT_resume, LF_OT_dataset, LF_OT_new_capture, LF_OT_inspect_dataset, LF_OT_restart, LF_OT_folder, LF_OT_reconnect, LF_OT_load_job, LF_OT_compare,
             LF_OT_setup_view, LF_OT_scan_sessions, LF_OT_attach_session, LF_OT_detach_session, LF_OT_previous_job, LF_OT_color_look, LF_OT_color_command, LF_OT_model_view, LF_OT_color_view, LF_OT_capture_lighting,
             *rig_path.CLASSES, *rig_analysis.CLASSES, *capture_preview.CLASSES, *scene_render.CLASSES, *portal_ui.CLASSES)
 
 ui_help.apply(_CLASSES)
+
+
+def restore_legacy_rigs():
+    for scene in bpy.data.scenes:
+        rig_edit.restore_legacy_distance(scene)
 
 
 def register():
@@ -2806,6 +2794,7 @@ def register():
     bpy.types.WindowManager.lichtfeld_panels = PointerProperty(type=LichtFeldPanelState)
     bpy.types.Scene.lichtfeld_training = PointerProperty(type=LichtFeldSettings)
     bpy.types.Collection.lichtfeld_rig_reference = PointerProperty(type=LichtFeldRigReference)
+    bpy.app.timers.register(restore_legacy_rigs)
     portal_ui.register()
     bpy.types.IMAGE_HT_header.prepend(capture_preview.draw_test_viewer_header)
     bpy.app.handlers.undo_pre.append(history_changing)
@@ -2819,6 +2808,8 @@ def register():
 
 
 def unregister():
+    if bpy.app.timers.is_registered(restore_legacy_rigs):
+        bpy.app.timers.unregister(restore_legacy_rigs)
     capture_preview.clear_test_viewers()
     bpy.types.IMAGE_HT_header.remove(capture_preview.draw_test_viewer_header)
     portal_ui.unregister()

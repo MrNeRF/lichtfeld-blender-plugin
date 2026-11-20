@@ -131,7 +131,7 @@ Automatic framing uses the effective horizontal and vertical field of view, incl
 
 **Last distance** is the radius recorded at the last successful rig generation, in the scene's units. If automatic fitting increased the minimum distance, the panel explains why; disable **Auto fit** and set **Distance** for an exact radius. Apply updates camera positions. Manual camera moves do not change this historical value, and older rigs show it after their next generation. **Look at** and **Move aim target in viewport** are directly accessible; the aim offset is inside **Geometry and lens**.
 
-**Fit cameras closer**, beside the distance controls, enables **Auto fit** and sets **Distance factor** to 1.05. It changes the setup parameters only: use **Create camera rig** or **Apply rig changes** to move the cameras, then check framing. Automatic fitting can still increase the final distance to keep the reference in view.
+**Auto fit** calculates a distance that fits the reference in the frame. Leave **Min. factor** at 1 for automatic framing, or increase it to set a minimum radius in multiples of the reference bounding radius. For a closer or exact distance, turn off **Auto fit** and set **Distance**. Create or apply the rig to update the cameras.
 
 ### Inspect framing and render one view
 
