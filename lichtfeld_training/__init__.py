@@ -866,7 +866,7 @@ class LF_OT_rig(_RigOperation, bpy.types.Operator):
         self.collection = collection
         if settings.rig_mode not in {'PATH', 'MESH'}:
             collection['lichtfeld_generated_radius'] = radius
-            collection['lichtfeld_fit_limited'] = bool(settings.rig_auto_fit and fit > settings.rig_distance)
+            collection['lichtfeld_fit_limited'] = bool(settings.rig_auto_fit and 1.0 < settings.rig_distance < fit)
         prepared_reference = collection.lichtfeld_rig_reference
         if reference.mode == 'UNSET':
             prepared_reference.mode = 'OBJECTS'
@@ -2757,6 +2757,7 @@ def loaded(_):
     directory = preflight.connection_folder(preferences()) if source else None
     for scene in bpy.data.scenes:
         settings = scene.lichtfeld_training
+        rig_edit.restore_legacy_distance(scene)
         settings.test_render_active = False
         settings.test_render_cancel = False
         settings.test_render_sample = settings.test_render_samples = 0
@@ -2782,12 +2783,18 @@ _CLASSES = (LichtFeldPanelState, LichtFeldPreferences, LichtFeldSourceRef, Licht
 ui_help.apply(_CLASSES)
 
 
+def restore_legacy_rigs():
+    for scene in bpy.data.scenes:
+        rig_edit.restore_legacy_distance(scene)
+
+
 def register():
     for cls in _CLASSES:
         bpy.utils.register_class(cls)
     bpy.types.WindowManager.lichtfeld_panels = PointerProperty(type=LichtFeldPanelState)
     bpy.types.Scene.lichtfeld_training = PointerProperty(type=LichtFeldSettings)
     bpy.types.Collection.lichtfeld_rig_reference = PointerProperty(type=LichtFeldRigReference)
+    bpy.app.timers.register(restore_legacy_rigs)
     portal_ui.register()
     bpy.types.IMAGE_HT_header.prepend(capture_preview.draw_test_viewer_header)
     bpy.app.handlers.undo_pre.append(history_changing)
@@ -2801,6 +2808,8 @@ def register():
 
 
 def unregister():
+    if bpy.app.timers.is_registered(restore_legacy_rigs):
+        bpy.app.timers.unregister(restore_legacy_rigs)
     capture_preview.clear_test_viewers()
     bpy.types.IMAGE_HT_header.remove(capture_preview.draw_test_viewer_header)
     portal_ui.unregister()

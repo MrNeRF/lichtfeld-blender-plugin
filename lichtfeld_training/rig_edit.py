@@ -456,6 +456,22 @@ def decode_recipe(encoded):
         raise ValueError('Invalid path link mode')
     return values
 
+def restore_legacy_distance(scene):
+    settings = scene.lichtfeld_training
+    if not scene.is_editable or settings.is_property_set('rig_distance'):
+        return
+    rig = settings.rig_parameter_source
+    if rig is None or rig != settings.camera_collection or not rig.get('lichtfeld_generated'):
+        return
+    try:
+        value = decode_recipe(rig.get('lichtfeld_rig_recipe')).get('rig_distance')
+    except (TypeError, ValueError):
+        return
+    # The old RNA default was absent from the scene but stored in its applied recipe.
+    if value is not None and math.isclose(value, 2.8, abs_tol=1e-6):
+        settings.rig_distance = value
+
+
 def recipe_matches(collection, settings):
     from . import rig_recipe
 
