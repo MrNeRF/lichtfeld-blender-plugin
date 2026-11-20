@@ -207,21 +207,27 @@ def prepare_camera(source, window, *, prefer_selected=False, request=None):
     return camera, original, count, excluded, index, value
 
 
-def camera_changed(settings, _context, *, refresh_only=False):
+def camera_changed(settings, context, *, refresh_only=False):
     """Queue one update per visible preview; RNA callbacks never copy scene data."""
     source = settings.id_data
     if settings.running or settings.job_directory:
         return
+    area = context.area if context and not refresh_only else None
     for window in bpy.context.window_manager.windows:
         preview = window.scene
         if source_scene(preview) != source:
             continue
         key = preview.as_pointer()
+        view = None
+        if area and area.type == 'VIEW_3D' and window == context.window:
+            view = (window.as_pointer(), area.as_pointer())
         if key in _pending:
             if not refresh_only:
                 _pending[key]['refresh_only'] = False
+            if view is not None:
+                _pending[key]['view'] = view
             continue
-        token = {'refresh_only': refresh_only}
+        token = {'refresh_only': refresh_only, 'view': view}
         _pending[key] = token
         ui_runtime.schedule(camera_steps(source, preview, key, token),
                             lambda error: ui_runtime.report_notice('ERROR', error))
@@ -288,7 +294,20 @@ def camera_steps(source, preview, key, token):
         preview[ORIGINAL_CAMERA] = original
         preview['capture_excluded_count'] = excluded
         preview['capture_camera_count'] = count
+        changed = preview.get('capture_camera_index') != index
         preview['capture_camera_index'] = index
+        if changed and token['view'] is not None:
+            window_id, area_id = token['view']
+            for visible in bpy.context.window_manager.windows:
+                if visible.as_pointer() != window_id or visible.scene != preview:
+                    continue
+                for editor in visible.screen.areas:
+                    if editor.as_pointer() == area_id and editor.type == 'VIEW_3D':
+                        editor.spaces.active.use_local_camera = False
+                        editor.spaces.active.region_3d.view_perspective = 'CAMERA'
+                        editor.tag_redraw()
+                        break
+                break
         if settings.capture_preview_index != index:
             settings.capture_preview_index = index
     except ReferenceError:

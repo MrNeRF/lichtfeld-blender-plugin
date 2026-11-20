@@ -117,6 +117,20 @@ for _ in range(3):
         assert (len(bpy.data.scenes),len(bpy.data.objects),len(bpy.data.cameras))==preview_counts
     while ext.capture_preview.camera_pending(preview):ext.ui_runtime.tick()
     assert preview['capture_camera_name']==cameras[0].name
+    # The sidebar returns this viewport to its camera after orbiting away.
+    area = next(area for area in bpy.context.window.screen.areas if area.type == 'VIEW_3D')
+    region = area.spaces.active.region_3d
+    with bpy.context.temp_override(area=area):
+        region.view_perspective = 'PERSP'
+        ext.capture_preview.camera_changed(s, bpy.context, refresh_only=True)
+        while ext.capture_preview.camera_pending(preview):ext.ui_runtime.tick()
+        assert region.view_perspective == 'PERSP'
+        bpy.context.window_manager.lichtfeld_panels.framing_camera = 2
+        while ext.capture_preview.camera_pending(preview):ext.ui_runtime.tick()
+        assert region.view_perspective == 'CAMERA'
+        assert preview['capture_camera_name'] == cameras[1].name
+        s.capture_preview_index = 1
+        while ext.capture_preview.camera_pending(preview):ext.ui_runtime.tick()
     # An invalid view leaves the last usable preview intact and permits recovery.
     cameras[2].data.type='ORTHO'
     with patch.object(ext.ui_runtime,'report_notice') as notice:
