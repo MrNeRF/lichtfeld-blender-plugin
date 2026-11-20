@@ -431,15 +431,18 @@ bpy.ops.preferences.addon_enable(module=module)
 s = bpy.context.scene.lichtfeld_training
 s.scope = 'SCENE'; s.views = 8; s.rig_mode = 'HEMISPHERE'
 s.rig_auto_fit = False; s.rig_radius = 3
-s.rig_distance = 1.05
+assert s.rig_distance == 1.0
 assert bpy.ops.lichtfeld.create_rig() == {'FINISHED'}
 rig = s.camera_collection
-assert s.rig_distance < 1.05  # Native RNA boundary rounded to float32.
+assert s.rig_distance == 1.0
 assert ext.rig_edit.decode_recipe(rig['lichtfeld_rig_recipe'])['rig_distance']==s.rig_distance
+legacy = json.loads(rig['lichtfeld_rig_recipe'])
+legacy['rig_distance'] = 1.0499999523162842
+assert ext.rig_edit.decode_recipe(json.dumps(legacy))['rig_distance'] == legacy['rig_distance']
 s.rig_distance = 2.8
 assert bpy.ops.lichtfeld.read_rig()=={'FINISHED'}
-assert s.rig_distance < 1.05
-invalid=json.loads(rig['lichtfeld_rig_recipe']);invalid['rig_distance']=1.0
+assert s.rig_distance == 1.0
+invalid=json.loads(rig['lichtfeld_rig_recipe']);invalid['rig_distance']=0.99
 try:
     ext.rig_edit.decode_recipe(json.dumps(invalid))
     raise AssertionError('An actual out-of-range rig distance was accepted')

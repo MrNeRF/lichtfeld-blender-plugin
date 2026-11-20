@@ -11,9 +11,7 @@ bpy.ops.preferences.addon_enable(module=module)
 ext=importlib.import_module(module)
 area=Path(sys.argv[sys.argv.index("--")+1]).resolve();area.mkdir(parents=True,exist_ok=True)
 s=bpy.context.scene.lichtfeld_training;s.views=4;s.rig_mode="SPHERE"
-s.rig_distance=5
-assert bpy.ops.lichtfeld.tight_framing()=={"FINISHED"}
-assert s.rig_auto_fit and abs(s.rig_distance-1.05)<1e-5
+assert s.rig_auto_fit and s.rig_distance == 1.0
 bpy.context.scene.view_settings.use_curve_mapping=True
 bpy.context.scene.view_settings.use_white_balance=True
 assert bpy.ops.lichtfeld.create_rig()=={"FINISHED"}
@@ -50,4 +48,4 @@ assert manifest['display_overrides_baked'] is False
 assert manifest['source_display']['use_curve_mapping'] and manifest['source_display']['use_white_balance']
 print("EVALUATED_RIG_TARGET_CAPTURE_POSES_PASS")
 print('SCALED_PARENT_CAPTURE_NORMALIZED_CALIBRATION_AND_SOURCE_PRESERVATION_PASS')
-print("TIGHT_FRAMING_AND_CAPTURE_COLOR_PROFILE_PASS")
+print("AUTO_FIT_DEFAULT_AND_CAPTURE_COLOR_PROFILE_PASS")
