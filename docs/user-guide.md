@@ -141,6 +141,8 @@ For an actual RGB check, choose the camera in framing and press **Render test**.
 
 The command saves the source project without temporary framing scenes, then restores framing while rendering that camera with the dataset settings. The last PNG and its logs remain available in the job folder. A successful replacement can remove the previous test job. Save a separate copy if you want to keep that image. Blender opens an Image Editor when the test starts. Its header shows the sample count when available and offers **Cancel**, which restores the previous PNG if one is available. The final PNG appears in the same window when ready. **Last image** reopens it from framing. **Cancel test render** replaces the render action while the test runs. Undo or Redo in Blender also cancels an in-progress test render.
 
+The framing viewport starts with the source scene’s **Film → Transparent** setting. This lets an HDRI light the preview without appearing in the viewport background. Changes to that setting inside framing stay in the temporary scene.
+
 If the project has never been saved, **Save scene…** first opens Blender's Save As dialog on the source scene; after saving, reopen **Check framing**. During preparation, the source setup briefly replaces framing and shows the running test with a Cancel action. If saving or capture validation fails, rendering does not start and the source setup remains open; validation errors stay visible in the panel so you can resolve them and retry through Check framing.
 
 The test also works with a single camera and does not need LichtFeld Studio. No reusable dataset, supervision maps, initial points or training is created, and previous training jobs remain unchanged.

@@ -348,6 +348,7 @@ def _open_steps(source, window, area, *, prefer_selected):
         preview.camera = camera
         preview.world = source.world
         preview.render.engine = source.render.engine
+        preview.render.film_transparent = source.render.film_transparent
         if source.render.engine == 'CYCLES':
             preview.cycles.device = source.cycles.device
         for field in ('use_border', 'use_crop_to_border', 'border_min_x', 'border_min_y', 'border_max_x', 'border_max_y'):
