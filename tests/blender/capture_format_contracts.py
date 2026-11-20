@@ -20,6 +20,8 @@ s.scope='SCENE';s.views=4;s.rig_distance=1.05
 original_engine = source.render.engine
 source.render.engine = 'CYCLES'
 source.cycles.device = 'GPU'
+source.cycles.film_transparent_glass = True
+source.cycles.film_transparent_roughness = .27
 source.render.use_border = True
 source.render.use_crop_to_border = True
 source.render.border_min_x = .2
@@ -29,7 +31,8 @@ source.render.border_max_y = .8
 def display_settings(scene):
     render = scene.render
     return (render.engine, render.use_border, render.use_crop_to_border, render.border_min_x,
-            render.border_min_y, render.border_max_x, render.border_max_y, scene.cycles.device, render.film_transparent)
+            render.border_min_y, render.border_max_x, render.border_max_y, scene.cycles.device, render.film_transparent,
+            scene.cycles.film_transparent_glass, scene.cycles.film_transparent_roughness)
 s.capture_aspect='WIDE';s.resolution=1024
 ext.capture_settings.apply_format(source, ext.capture_settings.preset_format(s))
 print('CHECK first wide rig',flush=True)

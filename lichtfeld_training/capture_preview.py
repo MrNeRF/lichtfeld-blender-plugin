@@ -351,6 +351,8 @@ def _open_steps(source, window, area, *, prefer_selected):
         preview.render.film_transparent = source.render.film_transparent
         if source.render.engine == 'CYCLES':
             preview.cycles.device = source.cycles.device
+            preview.cycles.film_transparent_glass = source.cycles.film_transparent_glass
+            preview.cycles.film_transparent_roughness = source.cycles.film_transparent_roughness
         for field in ('use_border', 'use_crop_to_border', 'border_min_x', 'border_min_y', 'border_max_x', 'border_max_y'):
             setattr(preview.render, field, getattr(source.render, field))
         preview.frame_set(source.frame_current)
