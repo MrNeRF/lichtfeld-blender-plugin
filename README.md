@@ -30,6 +30,10 @@ Train a Gaussian splat from your Blender scene, or bring your LichtFeld Portal s
 
 **Version 0.1.0-beta.2 · Blender 5.3.x · GPL-3.0-or-later**
 
+<a href="https://youtu.be/dkKiWb-cRwc"><img src="https://img.youtube.com/vi/dkKiWb-cRwc/maxresdefault.jpg" alt="LichtFeld Blender Plugin - Create splats from within Blender 5.3" width="720"></a>
+
+**▶ [Watch the video: Create splats from within Blender 5.3](https://youtu.be/dkKiWb-cRwc)**
+
 </div>
 
 ## What you can do
