@@ -77,6 +77,7 @@ def clip_capture_scene(context, shape, transform, sources):
     """Clip evaluated surfaces in the disposable capture scene."""
     import bmesh
     import bpy
+    from idprop.types import IDPropertyArray
     from mathutils import Matrix, Vector
 
     if shape == "BOX":
@@ -95,31 +96,52 @@ def clip_capture_scene(context, shape, transform, sources):
     collections = tuple(dict.fromkeys(render_collections(context.view_layer.layer_collection)))
     objects = tuple(dict.fromkeys(obj for collection in collections for obj in collection.objects
                                   if not obj.hide_render))
-    for collection in collections:
-        if collection.hide_viewport:
-            collection.hide_viewport = False
+    viewport_settings = []
+    hidden_objects = []
+
+    def for_evaluation(owner, field, value):
+        original = getattr(owner, field)
+        if value != original:
+            setattr(owner, field, value)
+            viewport_settings.append((owner, field, original))
+
+    # Check geometry with render-dependent bounds before using a viewport bbox.
     for obj in objects:
-        if obj.hide_viewport:
-            obj.hide_viewport = False
+        for modifier in obj.modifiers:
+            if not modifier.show_render:
+                continue
+            if modifier.type == "NODES" and uses_viewport_switch(modifier.node_group, set()):
+                raise ValueError(f"Capture region cannot clip {obj.name} using Geometry Nodes Is Viewport.")
+            if modifier.type == "PARTICLE_SYSTEM":
+                raise ValueError(f"Capture region cannot clip particle systems on {obj.name}. Realize them before capture.")
+
+    for collection in collections:
+        for_evaluation(collection, "hide_viewport", False)
+    for obj in objects:
+        for_evaluation(obj, "hide_viewport", False)
         if obj.hide_get(view_layer=context.view_layer):
             obj.hide_set(False, view_layer=context.view_layer)
-        if obj.type in {"CURVE", "SURFACE", "FONT"} and obj.data.render_resolution_u:
-            obj.data.resolution_u = obj.data.render_resolution_u
+            hidden_objects.append(obj)
+        if obj.type in {"CURVE", "SURFACE", "FONT"}:
+            for axis in ("u", "v"):
+                resolution = getattr(obj.data, f"render_resolution_{axis}")
+                if resolution:
+                    for_evaluation(obj.data, f"resolution_{axis}", resolution)
         if obj.type == "META":
-            obj.data.resolution = obj.data.render_resolution
+            for_evaluation(obj.data, "resolution", obj.data.render_resolution)
         for modifier in obj.modifiers:
-            if modifier.show_viewport != modifier.show_render:
-                modifier.show_viewport = modifier.show_render
-            if modifier.type in {"SUBSURF", "MULTIRES"} and modifier.levels != modifier.render_levels:
-                modifier.levels = modifier.render_levels
+            for_evaluation(modifier, "show_viewport", modifier.show_render)
+            if not modifier.show_render:
+                continue
+            if modifier.type in {"SUBSURF", "MULTIRES"}:
+                for_evaluation(modifier, "levels", modifier.render_levels)
             if modifier.type == "SCREW":
-                modifier.steps = modifier.render_steps
+                for_evaluation(modifier, "steps", modifier.render_steps)
             if modifier.type == "OCEAN":
-                modifier.viewport_resolution = modifier.resolution
+                for_evaluation(modifier, "viewport_resolution", modifier.resolution)
     render = context.scene.render
     if render.use_simplify:
-        render.simplify_subdivision = render.simplify_subdivision_render
-        render.simplify_child_particles = render.simplify_child_particles_render
+        for_evaluation(render, "simplify_subdivision", render.simplify_subdivision_render)
     context.view_layer.update()
     graph = context.evaluated_depsgraph_get()
     render_objects = set(objects)
@@ -147,14 +169,15 @@ def clip_capture_scene(context, shape, transform, sources):
         if obj in replacements or not crossing_planes:
             continue
 
-        if any(modifier.type == "NODES" and modifier.show_render
-               and uses_viewport_switch(modifier.node_group, set()) for modifier in obj.modifiers):
-            raise ValueError(f"Capture region cannot clip {obj.name} using Geometry Nodes Is Viewport.")
-        if obj.particle_systems:
-            raise ValueError(f"Capture region cannot clip particle systems on {obj.name}. Realize them before capture.")
         if obj.type not in {"MESH", "CURVE", "SURFACE", "FONT", "META"}:
             raise ValueError(f"Capture region cannot clip {obj.name} ({obj.type}). Convert it to a mesh first.")
         mesh = bpy.data.meshes.new_from_object(evaluated, preserve_all_data_layers=True, depsgraph=graph)
+        if evaluated.type == "MESH":
+            # Freeze the original bounds used by Generated coordinates before
+            # changing the vertex buffer on the clipped mesh.
+            mesh.use_auto_texspace = False
+            mesh.texspace_location = evaluated.data.texspace_location
+            mesh.texspace_size = evaluated.data.texspace_size
         surface = bmesh.new()
         try:
             surface.from_mesh(mesh)
@@ -184,6 +207,8 @@ def clip_capture_scene(context, shape, transform, sources):
         for key, value in obj.items():
             if isinstance(value, (bool, int, float, str)):
                 clipped[key] = value
+            elif isinstance(value, IDPropertyArray):
+                clipped[key] = value.to_list()
         for index, slot in enumerate(obj.material_slots):
             if slot.link == "OBJECT" and index < len(mesh.materials) and mesh.materials[index] != slot.material:
                 mesh.materials[index] = slot.material
@@ -194,14 +219,37 @@ def clip_capture_scene(context, shape, transform, sources):
             if getattr(clipped, field) != value:
                 setattr(clipped, field, value)
         clipped.matrix_world = world
-        for collection in obj.users_collection:
-            collection.objects.link(clipped)
         replacements[obj] = clipped
 
+    # Restore viewport settings before rendering so the evaluated view layer
+    # does not keep render-resolution modifiers and hidden meshes alive.
+    for obj in hidden_objects:
+        obj.hide_set(True, view_layer=context.view_layer)
+    for owner, field, value in reversed(viewport_settings):
+        setattr(owner, field, value)
+
     # Keep the source IDs linked for depsgraph dependencies (rigs and constraints).
-    for obj in replacements:
-        if animated_render_visibility(obj):
-            raise ValueError(f"Capture region cannot override animated render visibility on {obj.name}.")
+    if blocked := next((obj for obj in replacements if animated_render_visibility(obj)), None):
+        raise ValueError(f"Capture region cannot override animated render visibility on {blocked.name}.")
+    for obj, clipped in replacements.items():
         obj.hide_render = True
+        if clipped is None:
+            continue
+        name = obj.name
+        obj.name = f"{name} · Capture source"
+        clipped.name = name
+        if obj.lightgroup:
+            clipped.lightgroup = obj.lightgroup
+        for field in ("receiver_collection", "blocker_collection"):
+            collection = getattr(obj.light_linking, field)
+            if collection is not None:
+                setattr(clipped.light_linking, field, collection)
+        for collection in obj.users_collection:
+            collection.objects.link(clipped)
+            source_link = collection.collection_objects[collection.objects.find(obj.name)]
+            target_link = collection.collection_objects[collection.objects.find(clipped.name)]
+            state = source_link.light_linking.link_state
+            if target_link.light_linking.link_state != state:
+                target_link.light_linking.link_state = state
     context.view_layer.update()
     return [result for obj in sources if (result := replacements.get(obj, obj)) is not None]

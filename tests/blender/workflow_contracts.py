@@ -71,6 +71,12 @@ s.scope = "SCENE"
 capture_region = importlib.import_module(f'{module}.capture_region')
 cube = bpy.data.objects["Cube"]
 cube["test_roi_attribute"] = 0.75
+cube["test_roi_vector"] = [0.25, 0.5, 0.75]
+original_name = cube.name
+original_texspace = tuple(cube.data.texspace_size)
+collection = cube.users_collection[0]
+original_link = collection.collection_objects[collection.objects.find(cube.name)]
+original_link.light_linking.link_state = "EXCLUDE"
 default_material = bpy.data.materials.new("ROI source material")
 override = bpy.data.materials.new("ROI object override")
 cube.data.materials.append(default_material)
@@ -91,12 +97,21 @@ assert max(abs(vertex.co.x) for vertex in clipped.data.vertices) <= 0.50001
 assert len(clipped.data.polygons) > len(cube.data.polygons)
 assert not clipped.visible_camera and clipped["test_roi_attribute"] == 0.75
 assert clipped.material_slots[-1].material == override
+assert clipped.name == original_name
+assert tuple(clipped["test_roi_vector"]) == (0.25, 0.5, 0.75)
+assert tuple(clipped.data.texspace_size) == original_texspace
+assert modifier.levels == 0
+clipped_link = collection.collection_objects[collection.objects.find(clipped.name)]
+assert clipped_link.light_linking.link_state == "EXCLUDE"
+original_link.light_linking.link_state = "INCLUDE"
 bpy.data.objects.remove(clipped, do_unlink=True)
+cube.name = original_name
 cube.hide_render = False
 cube.visible_camera = True
 cube.modifiers.remove(modifier)
 cube.data.materials.pop(index=len(cube.data.materials)-1)
 del cube["test_roi_attribute"]
+del cube["test_roi_vector"]
 print("CAPTURE_REGION_RENDER_PROPERTIES_PASS")
 s.job_directory='/previous/job'
 s.previous_job=s.job_directory;s.job_directory='';s.attached_session='/external/session'
