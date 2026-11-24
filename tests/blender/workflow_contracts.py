@@ -68,6 +68,36 @@ region.empty_display_size *= 2
 assert ext.preflight.signature(bpy.context) != signature
 bpy.data.objects.remove(region, do_unlink=True)
 s.scope = "SCENE"
+capture_region = importlib.import_module(f'{module}.capture_region')
+cube = bpy.data.objects["Cube"]
+cube["test_roi_attribute"] = 0.75
+default_material = bpy.data.materials.new("ROI source material")
+override = bpy.data.materials.new("ROI object override")
+cube.data.materials.append(default_material)
+cube.material_slots[-1].link = "OBJECT"
+cube.material_slots[-1].material = override
+modifier = cube.modifiers.new("ROI render subdivision", "SUBSURF")
+modifier.subdivision_type = "SIMPLE"
+modifier.levels = 0
+modifier.render_levels = 2
+cube.visible_camera = False
+cube.keyframe_insert(data_path="hide_render", frame=1)
+assert capture_region.animated_render_visibility(cube)
+cube.animation_data_clear()
+volume = capture_region.local_transform("BOX", [[2,0,0,0],[0,0.5,0,0],[0,0,0.5,0],[0,0,0,1]])
+clipped, = capture_region.clip_capture_scene(bpy.context, "BOX", volume, [cube])
+assert cube.hide_render and clipped != cube
+assert max(abs(vertex.co.x) for vertex in clipped.data.vertices) <= 0.50001
+assert len(clipped.data.polygons) > len(cube.data.polygons)
+assert not clipped.visible_camera and clipped["test_roi_attribute"] == 0.75
+assert clipped.material_slots[-1].material == override
+bpy.data.objects.remove(clipped, do_unlink=True)
+cube.hide_render = False
+cube.visible_camera = True
+cube.modifiers.remove(modifier)
+cube.data.materials.pop(index=len(cube.data.materials)-1)
+del cube["test_roi_attribute"]
+print("CAPTURE_REGION_RENDER_PROPERTIES_PASS")
 s.job_directory='/previous/job'
 s.previous_job=s.job_directory;s.job_directory='';s.attached_session='/external/session'
 bpy.ops.lichtfeld.detach_session()

@@ -335,11 +335,11 @@ def render_dataset(job_path, reuse_images=False):
     source_display = capture_color_profile(scene)
     width, height = capture_format['width'], capture_format['height']
     journal = read_dataset_json(root / 'capture-frames.json', {}) if reuse_images else {}
-    if reuse_images and journal.get("capture_region") != region:
-        raise ValueError("The capture region changed. Capture the frame again.")
     saved_frames = journal.get('frames', [])
     if reuse_images and (journal.get('job_id') != job['id'] or len(saved_frames) != len(cameras)):
         raise ValueError('Saved camera calibration is incomplete or belongs to another capture. Existing images are preserved.')
+    if reuse_images and journal.get("capture_region") != region:
+        raise ValueError("The capture region changed. Capture the frame again.")
     frames = []
     geometry = None
     if not single_render and not reuse_images and (visible_seed or job.get('use_depth_loss') or job.get('use_normal_loss')):
