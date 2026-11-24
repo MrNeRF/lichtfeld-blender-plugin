@@ -129,8 +129,11 @@ def capture_helpers(settings):
 
 def signature(context):
  s=context.scene.lichtfeld_training
+ region=s.capture_region_object
  return (context.scene.as_pointer(),context.view_layer.as_pointer(),s.scope,s.source_collection.as_pointer() if s.source_collection else 0,
   s.camera_collection.as_pointer() if s.camera_collection else 0,
+  (region.as_pointer(),region.empty_display_type,region.empty_display_size,
+   tuple(tuple(row) for row in region.matrix_world)) if region else None,
   tuple(row.collection.session_uid if row.collection else None for row in getattr(s,'capture_collections',())),
   context.scene.frame_current,
   tuple(obj.as_pointer() for obj in capture_helpers(s)),
@@ -209,7 +212,7 @@ def collect(context,capture_only=False,*,single_render=False):
  s=context.scene.lichtfeld_training
  sources=[];errors=[];visibility={};visibility_sources=[]
  helpers=capture_helpers(s)
- capture_format=None;render=None
+ capture_format=None;render=None;region=None
  members={}
  for obj in object_steps(context.view_layer.objects):
   if obj is not None:members[obj.name]=obj
@@ -226,6 +229,12 @@ def collect(context,capture_only=False,*,single_render=False):
    sources.append(obj.name);visibility[obj.name]=is_hidden(obj,context.view_layer,members=members)
   yield
  if not sources:errors.append('Choose at least one surface object.')
+ if s.capture_region_object:
+  from .capture_region import region_spec
+  try:
+   region=region_spec(context,s.capture_region_object)
+  except ValueError as error:
+   errors.append(str(error))
  checks=yield from camera_checks(context,single_render=single_render)
  cameras=checks['cameras'];camera_count=checks['camera_count']
  generated_cameras=checks['generated_cameras'];camera_issues=checks['camera_issues']
@@ -255,12 +264,16 @@ def collect(context,capture_only=False,*,single_render=False):
   yield
  capture_errors=list(dict.fromkeys(errors))
  errors.extend(training_options.validate(s.strategy,training_options.optimizer_values(s)))
- if s.scope=='SCENE' and s.mask_mode not in {'AUTO','none'}:errors.append('Whole-scene RGB capture has no foreground mask. Choose Automatic/None or capture objects/a collection.')
+ from .bridge_core import capture_mask_mode
+ try:
+  capture_mask_mode(s.scope,s.mask_mode,volume_mask=region is not None)
+ except ValueError as error:
+  errors.append(str(error))
  if s.refine_start>=s.refine_end:errors.append('Refinement start must be before its end.')
  if s.growth_end>s.refine_end:errors.append('Growth must end before refinement ends.')
  if s.use_normal_loss and s.normal_start_fraction>=s.normal_end_fraction:errors.append('Normal supervision start must be before its end.')
  return {'sources':sources,'cameras':cameras,'camera_count':camera_count,'framing_camera_count':checks['framing_camera_count'],'camera_selection_error':camera_error,'generated_cameras':generated_cameras,'camera_issues':camera_issues,'visibility':visibility,'visibility_sources':visibility_sources or sources,'capture_errors':capture_errors,'errors':capture_errors if capture_only else list(dict.fromkeys(errors)),
-         'signature':initial,'frame':context.scene.frame_current,'reference_changed':reference_changed,'format':capture_format,'render':render}
+         'signature':initial,'frame':context.scene.frame_current,'capture_region':region,'reference_changed':reference_changed,'format':capture_format,'render':render}
 
 def synchronous(context,prefs):
  work=collect(context)

@@ -91,6 +91,14 @@ def preview_sh_limit(job):
     return degree
 
 
+def capture_mask_mode(scope, mode, *, volume_mask=False):
+    if scope == "SCENE" and not volume_mask and mode not in {"AUTO", "none"}:
+        raise ValueError("Whole-scene captures have no foreground mask. Choose Automatic or None.")
+    if mode == "AUTO":
+        return "alpha_consistent" if volume_mask or scope != "SCENE" else "none"
+    return mode
+
+
 def training_config(job):
     preview_sh_limit(job)
     steps = evaluation_steps(job["iterations"], job["eval_interval"])
@@ -111,7 +119,8 @@ def training_config(job):
             "eval_steps": steps if enable_eval else [], "save_steps": steps,
             "enable_eval": enable_eval, "eval_all": False,
             "enable_save_eval_images": False,
-            "mask_mode": ("alpha_consistent" if job.get("scope", "SCENE") != "SCENE" else "none") if job.get("mask_mode","AUTO")=="AUTO" else job["mask_mode"],
+            "mask_mode": capture_mask_mode(job.get("scope", "SCENE"), job.get("mask_mode", "AUTO"),
+                                           volume_mask=bool(job.get("capture_region"))),
         })
     if job.get("optimizer") is not None:
         schedule = job.get("optimizer_schedule", {})

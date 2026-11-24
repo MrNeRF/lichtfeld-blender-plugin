@@ -56,6 +56,18 @@ assert bpy.ops.lichtfeld.create_rig()=={'FINISHED'}
 assert sum(o.type == "CAMERA" for o in s.camera_collection.objects)==9
 assert len([c for c in bpy.data.collections if c.get('lichtfeld_generated')])==1
 assert len([o for o in bpy.data.objects if o.get('lichtfeld_generated')])==9
+# The volume belongs to capture setup, independently of the content source.
+assert bpy.ops.lichtfeld.create_capture_region(shape="SPHERE") == {"FINISHED"}
+region = s.capture_region_object
+assert region.empty_display_type == "SPHERE"
+for scope in ("SCENE", "SELECTION", "COLLECTION"):
+ s.scope = scope
+ assert s.capture_region_object == region
+signature = ext.preflight.signature(bpy.context)
+region.empty_display_size *= 2
+assert ext.preflight.signature(bpy.context) != signature
+bpy.data.objects.remove(region, do_unlink=True)
+s.scope = "SCENE"
 s.job_directory='/previous/job'
 s.previous_job=s.job_directory;s.job_directory='';s.attached_session='/external/session'
 bpy.ops.lichtfeld.detach_session()
