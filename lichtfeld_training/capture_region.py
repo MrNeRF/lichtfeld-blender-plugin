@@ -285,11 +285,20 @@ def clip_capture_scene(context, shape, transform, sources):
 
     def keep_outside(obj):
         replacements[obj] = None
-        if eevee and obj.type in _CONVERTIBLE_TYPES and obj.type != "META":
-            exterior = obj.copy()
-            exterior.name = f"{obj.name} · Indirect lighting"
-            if hide_eevee_exterior(exterior):
-                exteriors[obj] = exterior
+        if not eevee or obj.type not in (_CONVERTIBLE_TYPES - {"META"}):
+            return
+        # A live node graph can assign materials independently of the object slots.
+        if obj.particle_systems or any(modifier.type == "NODES" and modifier.show_render
+                                       for modifier in obj.modifiers):
+            return
+        evaluated = obj.evaluated_get(graph)
+        source_materials = {slot.material for slot in obj.material_slots}
+        if any(slot.material not in source_materials for slot in evaluated.material_slots):
+            return
+        exterior = obj.copy()
+        exterior.name = f"{obj.name} · Indirect lighting"
+        if hide_eevee_exterior(exterior):
+            exteriors[obj] = exterior
 
     for obj in objects:
         if obj.type in _NON_SURFACE_TYPES:
@@ -320,8 +329,20 @@ def clip_capture_scene(context, shape, transform, sources):
         exterior_mesh = None
         try:
             surface.from_mesh(mesh)
+            if preserve_lighting:
+                bmesh.ops.delete(surface, geom=[vertex for vertex in surface.verts if not vertex.link_faces],
+                                 context="VERTS")
             marker = surface.faces.layers.int.new("LichtFeld capture interior") if preserve_lighting else None
             inside = list(surface.faces) if preserve_lighting else None
+            stable_inside = []
+            if inside and shape == "ELLIPSOID":
+                # Faces in the hull's inscribed sphere cannot meet any cutting plane.
+                inner_radius = min(limit for _, limit in planes) - 0.000001
+                inner_vertices = {vertex for vertex in surface.verts
+                                  if (to_region @ vertex.co).length_squared <= inner_radius * inner_radius}
+                stable_inside = [face for face in inside if all(vertex in inner_vertices for vertex in face.verts)]
+                stable = set(stable_inside)
+                inside = [face for face in inside if face not in stable]
             for normal, limit in crossing_planes:
                 if not surface.faces or inside is not None and not inside:
                     break
@@ -360,7 +381,7 @@ def clip_capture_scene(context, shape, transform, sources):
                     inside.extend(face for face in dict.fromkeys((*crossing, *faces)) if face.is_valid
                                   and local_normal.dot(face.calc_center_median()) <= local_limit + epsilon)
             if inside is not None:
-                inside = [face for face in inside if face.is_valid]
+                inside = [face for face in (*stable_inside, *inside) if face.is_valid]
                 if not inside:
                     bpy.data.meshes.remove(mesh)
                     keep_outside(obj)
@@ -389,8 +410,6 @@ def clip_capture_scene(context, shape, transform, sources):
             surface.free()
         if not has_faces:
             bpy.data.meshes.remove(mesh)
-            if exterior_mesh is not None:
-                bpy.data.meshes.remove(exterior_mesh)
             replacements[obj] = None
             continue
         clipped = bpy.data.objects.new(f"{obj.name} · Capture region", mesh)

@@ -141,6 +141,7 @@ clipped_link = collection.collection_objects[collection.objects.find(clipped.nam
 assert clipped_link.light_linking.link_state == "EXCLUDE"
 original_link.light_linking.link_state = "INCLUDE"
 bpy.data.objects.remove(clipped, do_unlink=True)
+bpy.data.objects.remove(bpy.data.objects[f"{original_name} · Indirect lighting"], do_unlink=True)
 cube.name = original_name
 cube.hide_render = False
 cube.visible_camera = True
@@ -212,6 +213,7 @@ for subject, inactive in ((bezier, mesh_object), (mesh_object, bezier)):
  subject.location.x = 10
  assert capture_region.clip_capture_scene(bpy.context, "BOX", volume, [subject]) == []
  assert subject.hide_render
+ assert f"{subject.name} · Indirect lighting" not in bpy.data.objects
  subject.hide_render = False
  subject.location.x = 0
  subject.scale = (1, 1, 1)
@@ -229,6 +231,7 @@ clipped, = capture_region.clip_capture_scene(bpy.context, "BOX", volume, [bezier
 assert bezier.hide_render and clipped.type == "MESH" and clipped.data.polygons
 assert all(abs(vertex.co.x) <= 0.50001 for vertex in clipped.data.vertices)
 bpy.data.objects.remove(clipped, do_unlink=True)
+bpy.data.objects.remove(bpy.data.objects["ROI Bezier · Indirect lighting"], do_unlink=True)
 bpy.data.objects.remove(bezier, do_unlink=True)
 cube.hide_render = False
 print("CAPTURE_REGION_RENDER_PROPERTIES_PASS")
@@ -347,6 +350,25 @@ def check_roi_lighting(out, engine):
                     geometry.close()
             finally:
                 sys.path.pop(0)
+        if cycles:
+            for obj in list(scene.objects):
+                bpy.data.objects.remove(obj, do_unlink=True)
+            bpy.ops.mesh.primitive_grid_add(x_subdivisions=65, y_subdivisions=65, size=2, location=(0, 0, 10))
+            grid = bpy.context.object
+            grid.name = 'Capture ellipsoid grid'
+            grid.scale = (12, 12, 1)
+            original_area = sum(face.area for face in grid.data.polygons)
+            original_faces = len(grid.data.polygons)
+            bpy.context.view_layer.update()
+            volume = np.diag([1., 1., 1., 1.])
+            volume[2, 3] = -10
+            interior, = capture_region.clip_capture_scene(bpy.context, 'ELLIPSOID', volume, [grid])
+            exterior = scene.objects['Capture ellipsoid grid · Indirect lighting']
+            assert all((interior.matrix_world @ vertex.co).xy.length <= 1.00001
+                       for vertex in interior.data.vertices)
+            assert abs(sum(face.area for piece in (interior, exterior) for face in piece.data.polygons)
+                       - original_area) < .0001
+            assert len(exterior.data.polygons) < original_faces * 1.25
     finally:
         window.scene = original
         bpy.data.scenes.remove(scene)
