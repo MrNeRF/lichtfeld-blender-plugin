@@ -199,6 +199,15 @@ tree.links.new(box.outputs["Mesh"], points.inputs["Mesh"])
 tree.links.new(incoming.outputs[0], join.inputs[0])
 tree.links.new(points.outputs["Points"], join.inputs[0])
 tree.links.new(join.outputs[0], outgoing.inputs[0])
+bezier.scale = (0.1, 0.1, 0.1)
+assert capture_region.clip_capture_scene(bpy.context, "BOX", volume, [bezier]) == [bezier]
+assert not bezier.hide_render
+bezier.location.x = 10
+assert capture_region.clip_capture_scene(bpy.context, "BOX", volume, [bezier]) == []
+assert bezier.hide_render
+bezier.hide_render = False
+bezier.location.x = 0
+bezier.scale = (1, 1, 1)
 try:
  capture_region.clip_capture_scene(bpy.context, "BOX", volume, [bezier])
 except ValueError as error:

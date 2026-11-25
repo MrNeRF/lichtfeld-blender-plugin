@@ -169,6 +169,7 @@ def clip_capture_scene(context, shape, transform, sources):
         for_evaluation(render, "simplify_subdivision", render.simplify_subdivision_render)
     context.view_layer.update()
     graph = context.evaluated_depsgraph_get()
+    evaluated_components = {}
     for obj in objects:
         if not any(modifier.type == "NODES" and modifier.show_render for modifier in obj.modifiers):
             continue
@@ -178,14 +179,10 @@ def clip_capture_scene(context, shape, transform, sources):
         if geometry.instance_references():
             raise ValueError(f"Capture region requires realized geometry on {obj.name}.")
         # Mesh conversion does not preserve these GeometrySet components.
-        unsupported = [label for field, label in (
+        evaluated_components[obj] = [label for field, label in (
             ("curves", "curves"), ("pointcloud", "points"), ("volume", "volume"),
             ("grease_pencil", "Grease Pencil"),
         ) if getattr(geometry, field) is not None]
-        if unsupported:
-            components = ", ".join(unsupported)
-            raise ValueError(f"Capture region cannot preserve {components} generated on {obj.name}. "
-                             "Convert the evaluated output to a mesh before capture.")
     region_matrix = Matrix(transform.tolist())
 
     def crossing_bounds(evaluated, to_region):
@@ -211,10 +208,10 @@ def clip_capture_scene(context, shape, transform, sources):
         instance = entry.object
         if instance.type in _NON_SURFACE_TYPES:
             continue
-        # Blender exposes the evaluated surface of some legacy objects as a
-        # self instance. Geometry Nodes instances were checked on the geometry above.
-        if (instance.original == parent and parent.type in {"CURVE", "SURFACE", "FONT", "META"}
-                and parent.instance_type == "NONE"):
+        # Blender exposes evaluated components as self instances. Real Geometry
+        # Nodes instances were checked on the evaluated geometry above.
+        if (instance.original == parent and parent.instance_type == "NONE"
+                and (parent in evaluated_components or parent.type in {"CURVE", "SURFACE", "FONT", "META"})):
             continue
         if parent.type != "EMPTY" or parent.instance_type != "COLLECTION":
             raise ValueError(f"Capture region requires realized geometry on {parent.name}.")
@@ -244,6 +241,10 @@ def clip_capture_scene(context, shape, transform, sources):
         if not crossing_planes:
             continue
 
+        if unsupported := evaluated_components.get(obj):
+            components = ", ".join(unsupported)
+            raise ValueError(f"Capture region cannot preserve {components} generated on {obj.name}. "
+                             "Convert the evaluated output to a mesh before capture.")
         if obj.type not in _CONVERTIBLE_TYPES:
             raise ValueError(f"Capture region cannot clip {obj.name} ({obj.type}). Convert it to a mesh first.")
         mesh = bpy.data.meshes.new_from_object(evaluated, preserve_all_data_layers=True, depsgraph=graph)
