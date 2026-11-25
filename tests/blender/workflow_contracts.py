@@ -91,7 +91,27 @@ cube.keyframe_insert(data_path="hide_render", frame=1)
 assert capture_region.animated_render_visibility(cube)
 cube.animation_data_clear()
 volume = capture_region.local_transform("BOX", [[2,0,0,0],[0,0.5,0,0],[0,0,0.5,0],[0,0,0,1]])
+asset = bpy.data.collections.new("ROI test asset")
+asset.objects.link(bpy.data.objects.new("ROI instance mesh", cube.data.copy()))
+instances = bpy.data.collections.new("ROI test instances")
+bpy.context.scene.collection.children.link(instances)
+inside = bpy.data.objects.new("ROI inside", None)
+outside = bpy.data.objects.new("ROI outside", None)
+for instance in (inside, outside):
+ instances.objects.link(instance)
+ instance.instance_type = "COLLECTION"
+ instance.instance_collection = asset
+ instance.scale = (0.1, 0.1, 0.1)
+outside.location.x = 10
+layer = bpy.context.view_layer.layer_collection.children[instances.name]
+layer.hide_viewport = True
 clipped, = capture_region.clip_capture_scene(bpy.context, "BOX", volume, [cube])
+assert not inside.hide_render and outside.hide_render and layer.hide_viewport
+bpy.data.collections.remove(instances)
+bpy.data.objects.remove(inside)
+bpy.data.objects.remove(outside)
+bpy.data.objects.remove(asset.objects[0], do_unlink=True)
+bpy.data.collections.remove(asset)
 assert cube.hide_render and clipped != cube
 assert max(abs(vertex.co.x) for vertex in clipped.data.vertices) <= 0.50001
 assert len(clipped.data.polygons) > len(cube.data.polygons)
