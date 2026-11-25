@@ -2539,9 +2539,11 @@ def draw_capture_options(box, context, settings, capture_only, wrapped):
     if details is not None:
         details.label(text='View Layer: ' + context.view_layer.name)
         details.prop(settings, "seed_points")
+        mask_options = details.column(align=True)
+        mask_options.use_property_split = False
         if settings.scope == "SCENE" and not settings.capture_region_object:
-            details.prop(context.scene.render, "film_transparent", text="Film Transparent (scene)")
-        row = details.row()
+            mask_options.prop(context.scene.render, "film_transparent", text="Film Transparent (scene)")
+        row = mask_options.row()
         row.enabled = capture_has_alpha(settings.scope, settings.capture_region_object,
                                         context.scene.render.film_transparent)
         row.prop(settings, "export_mask_sidecars")
