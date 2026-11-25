@@ -88,7 +88,7 @@ modifier.levels = 0
 modifier.render_levels = 2
 cube.visible_camera = False
 cube.keyframe_insert(data_path="hide_render", frame=1)
-assert capture_region.animated_render_visibility(cube)
+assert capture_region.animated_render_visibility(cube, {"hide_render"})
 cube.animation_data_clear()
 volume = capture_region.local_transform("BOX", [[2,0,0,0],[0,0.5,0,0],[0,0,0.5,0],[0,0,0,1]])
 asset = bpy.data.collections.new("ROI test asset")
@@ -232,6 +232,88 @@ bpy.data.objects.remove(clipped, do_unlink=True)
 bpy.data.objects.remove(bezier, do_unlink=True)
 cube.hide_render = False
 print("CAPTURE_REGION_RENDER_PROPERTIES_PASS")
+
+
+def check_cycles_roi_lighting(out):
+    import numpy as np
+
+    window = bpy.context.window
+    original = window.scene
+    scene = bpy.data.scenes.new('ROI lighting test')
+    window.scene = scene
+    try:
+        scene.render.engine = 'CYCLES'
+        scene.cycles.device = 'CPU'
+        scene.cycles.samples = 96
+        scene.cycles.use_adaptive_sampling = False
+        scene.cycles.use_denoising = False
+        scene.render.film_transparent = True
+        scene.render.image_settings.color_mode = 'RGBA'
+        scene.view_settings.view_transform = 'Standard'
+        scene.render.resolution_x = scene.render.resolution_y = 64
+        scene.render.resolution_percentage = 100
+        scene.world = bpy.data.worlds.new('ROI lighting world')
+        scene.world.node_tree.nodes['Background'].inputs['Strength'].default_value = 0
+        bpy.ops.mesh.primitive_plane_add(size=4)
+        subject = bpy.context.object
+        bpy.ops.mesh.primitive_plane_add(size=.8, location=(1.7, 0, 1.5))
+        emitter = bpy.context.object
+        mat = bpy.data.materials.new('Colored emission')
+        nodes = mat.node_tree.nodes
+        light = nodes.new('ShaderNodeEmission')
+        light.inputs['Color'].default_value = (1, .05, .02, 1)
+        light.inputs['Strength'].default_value = 18
+        mat.node_tree.links.new(light.outputs[0], nodes.get('Material Output').inputs['Surface'])
+        emitter.data.materials.append(mat)
+        asset = bpy.data.collections.new('Emitter collection')
+        for collection in list(emitter.users_collection):
+            collection.objects.unlink(emitter)
+        asset.objects.link(emitter)
+        instance = bpy.data.objects.new('Emitter instance', None)
+        scene.collection.objects.link(instance)
+        instance.instance_type = 'COLLECTION'
+        instance.instance_collection = asset
+        camera = bpy.data.objects.new('Camera', bpy.data.cameras.new('Camera'))
+        scene.collection.objects.link(camera)
+        camera.location = (0, 0, 7)
+        camera.data.lens = 45
+        scene.camera = camera
+
+        def render(name):
+            scene.render.filepath = str(out / f'{name}.png')
+            bpy.ops.render.render(write_still=True)
+            image = bpy.data.images.load(scene.render.filepath, check_existing=False)
+            try:
+                pixels = np.empty(64 * 64 * 4, dtype=np.float32)
+                image.pixels.foreach_get(pixels)
+                return pixels.reshape((64, 64, 4))
+            finally:
+                bpy.data.images.remove(image)
+
+        full = render('full')
+        clipped, = capture_region.clip_capture_scene(bpy.context, 'BOX', np.diag([1, 1, 2, 1]), [subject])
+        kept = render('kept')
+        assert subject.hide_render and not clipped.hide_render
+        assert not instance.hide_render and not instance.visible_camera
+        instance.hide_render = True
+        removed = render('removed')
+
+        # The emitter contributes lighting but never appears in the clipped alpha.
+        center = (slice(28, 36), slice(28, 36), 0)
+        assert abs(kept[center].mean() - full[center].mean()) < .08
+        assert kept[center].mean() > .3 and removed[center].mean() < .04
+        assert np.array_equal(kept[:, :, 3], removed[:, :, 3])
+        assert 0 < (kept[:, :, 3] > .5).sum() < (full[:, :, 3] > .5).sum() / 2
+    finally:
+        window.scene = original
+        bpy.data.scenes.remove(scene)
+
+
+from tempfile import TemporaryDirectory
+with TemporaryDirectory(prefix='lichtfeld-roi-lighting-') as directory:
+    check_cycles_roi_lighting(Path(directory))
+print('CYCLES_ROI_LIGHTING_PASS', flush=True)
+
 s.job_directory='/previous/job'
 s.previous_job=s.job_directory;s.job_directory='';s.attached_session='/external/session'
 bpy.ops.lichtfeld.detach_session()
@@ -333,6 +415,7 @@ with tempfile.TemporaryDirectory() as directory:
  settle_recovery()
  assert bpy.context.scene.lichtfeld_training.job_directory==str(job_root)
  print('REPLACED_BLEND_SKIPS_AUTOMATIC_JOB_RECOVERY_PASS',flush=True)
+
 bpy.ops.preferences.addon_disable(module=module)
 assert not bpy.app.timers.is_registered(ext.poll_jobs)
 print('WORKFLOW_CONTRACTS_PASS')

@@ -52,13 +52,13 @@ def uses_viewport_switch(tree, seen):
                for node in tree.nodes)
 
 
-def animated_render_visibility(obj):
+def animated_render_visibility(obj, fields):
     from bpy_extras.anim_utils import action_get_channelbag_for_slot
 
     animation = obj.animation_data
     if animation is None:
         return False
-    if any(curve.data_path == "hide_render" for curve in animation.drivers):
+    if any(curve.data_path in fields for curve in animation.drivers):
         return True
     actions = [(animation.action, animation.action_slot)]
     for track in animation.nla_tracks:
@@ -68,7 +68,7 @@ def animated_render_visibility(obj):
         if action is None or slot is None:
             continue
         bag = action_get_channelbag_for_slot(action, slot)
-        if bag is not None and any(curve.data_path == "hide_render" for curve in bag.fcurves):
+        if bag is not None and any(curve.data_path in fields for curve in bag.fcurves):
             return True
     return False
 
@@ -99,6 +99,7 @@ def clip_capture_scene(context, shape, transform, sources):
     from idprop.types import IDPropertyArray
     from mathutils import Matrix, Vector
 
+    preserve_lighting = context.scene.render.engine == "CYCLES"
     planes = [(Vector(axis), 1.0) for axis in
               ((1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, -1, 0), (0, 0, 1), (0, 0, -1))]
     if shape == "ELLIPSOID":
@@ -199,6 +200,7 @@ def clip_capture_scene(context, shape, transform, sources):
     # A direct collection instance can be kept or hidden as a whole. Mixing
     # inside and outside children would require realizing the collection.
     replacements = {}
+    exteriors = {}
     instance_bounds = {}
     render_objects = set(objects)
     for entry in graph.object_instances:
@@ -255,6 +257,7 @@ def clip_capture_scene(context, shape, transform, sources):
             mesh.texspace_location = evaluated.data.texspace_location
             mesh.texspace_size = evaluated.data.texspace_size
         surface = bmesh.new()
+        exterior_mesh = None
         try:
             surface.from_mesh(mesh)
             for normal, limit in crossing_planes:
@@ -267,8 +270,26 @@ def clip_capture_scene(context, shape, transform, sources):
                 bmesh.ops.bisect_plane(
                     surface, geom=[*surface.verts, *surface.edges, *surface.faces],
                     dist=0.000001, plane_co=local_normal * (local_limit / local_normal.length_squared),
-                    plane_no=local_normal.normalized(), clear_outer=True,
+                    plane_no=local_normal.normalized(), clear_outer=not preserve_lighting,
                 )
+            if preserve_lighting:
+                # Separate the two pieces to avoid coincident surfaces casting shadows.
+                def outside(face):
+                    center = to_region @ face.calc_center_median()
+                    return any(normal.dot(center) > limit + 0.000001
+                               for normal, limit in crossing_planes)
+
+                exterior = surface.copy()
+                try:
+                    bmesh.ops.delete(exterior, geom=[face for face in exterior.faces if not outside(face)],
+                                     context="FACES")
+                    if exterior.faces:
+                        exterior_mesh = mesh.copy()
+                        exterior.to_mesh(exterior_mesh)
+                finally:
+                    exterior.free()
+                bmesh.ops.delete(surface, geom=[face for face in surface.faces if outside(face)],
+                                 context="FACES")
             has_faces = bool(surface.faces)
             if has_faces:
                 surface.to_mesh(mesh)
@@ -276,6 +297,8 @@ def clip_capture_scene(context, shape, transform, sources):
             surface.free()
         if not has_faces:
             bpy.data.meshes.remove(mesh)
+            if exterior_mesh is not None:
+                bpy.data.meshes.remove(exterior_mesh)
             replacements[obj] = None
             continue
         clipped = bpy.data.objects.new(f"{obj.name} · Capture region", mesh)
@@ -300,6 +323,15 @@ def clip_capture_scene(context, shape, transform, sources):
                 setattr(clipped, field, value)
         clipped.matrix_world = world
         replacements[obj] = clipped
+        if exterior_mesh is not None:
+            for index, material in enumerate(mesh.materials):
+                if exterior_mesh.materials[index] != material:
+                    exterior_mesh.materials[index] = material
+            exterior = clipped.copy()
+            exterior.data = exterior_mesh
+            exterior.name = f"{obj.name} · Indirect lighting"
+            exterior.visible_camera = False
+            exteriors[obj] = exterior
 
     # Restore viewport settings before rendering so the evaluated view layer
     # does not keep render-resolution modifiers and hidden meshes alive.
@@ -309,32 +341,40 @@ def clip_capture_scene(context, shape, transform, sources):
         setattr(owner, field, value)
 
     # Keep the source IDs linked for depsgraph dependencies (rigs and constraints).
-    if blocked := next((obj for obj in replacements if animated_render_visibility(obj)), None):
+    visibility_fields = {"hide_render", "visible_camera"} if preserve_lighting else {"hide_render"}
+    if blocked := next((obj for obj in replacements if animated_render_visibility(obj, visibility_fields)), None):
         raise ValueError(f"Capture region cannot override animated render visibility on {blocked.name}.")
     for obj, clipped in replacements.items():
-        if not obj.is_editable or obj.is_property_readonly("hide_render"):
+        field = "visible_camera" if preserve_lighting and clipped is None else "hide_render"
+        if not obj.is_editable or obj.is_property_readonly(field):
             raise ValueError(f"Capture region cannot cut or hide linked object {obj.name}. Make it local first.")
         if clipped is not None and any(not collection.is_editable for collection in obj.users_collection):
             raise ValueError(f"Capture region cannot replace {obj.name} in a linked collection. Make the collection local first.")
     for obj, clipped in replacements.items():
+        if clipped is None and preserve_lighting:
+            obj.visible_camera = False
+            continue
         obj.hide_render = True
         if clipped is None:
             continue
         name = obj.name
         obj.name = f"{name} · Capture source"
         clipped.name = name
-        if obj.lightgroup:
-            clipped.lightgroup = obj.lightgroup
-        for field in ("receiver_collection", "blocker_collection"):
-            collection = getattr(obj.light_linking, field)
-            if collection is not None:
-                setattr(clipped.light_linking, field, collection)
+        pieces = (clipped, exteriors[obj]) if obj in exteriors else (clipped,)
+        for piece in pieces:
+            if obj.lightgroup:
+                piece.lightgroup = obj.lightgroup
+            for field in ("receiver_collection", "blocker_collection"):
+                collection = getattr(obj.light_linking, field)
+                if collection is not None:
+                    setattr(piece.light_linking, field, collection)
         for collection in obj.users_collection:
-            collection.objects.link(clipped)
             source_link = collection.collection_objects[collection.objects.find(obj.name)]
-            target_link = collection.collection_objects[collection.objects.find(clipped.name)]
             state = source_link.light_linking.link_state
-            if target_link.light_linking.link_state != state:
-                target_link.light_linking.link_state = state
+            for piece in pieces:
+                collection.objects.link(piece)
+                target_link = collection.collection_objects[collection.objects.find(piece.name)]
+                if target_link.light_linking.link_state != state:
+                    target_link.light_linking.link_state = state
     context.view_layer.update()
     return [result for obj in sources if (result := replacements.get(obj, obj)) is not None]
