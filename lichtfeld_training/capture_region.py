@@ -192,15 +192,17 @@ def clip_capture_scene(context, shape, transform, sources):
             continue
         parent = entry.parent.original
         instance = entry.object
-        if instance.type in _NON_SURFACE_TYPES or instance.hide_render:
+        if instance.type in _NON_SURFACE_TYPES:
             continue
-        # Blender also reports evaluated legacy surfaces as self instances.
+        # Legacy surfaces can appear as their own evaluated object at the
+        # original transform, including with a passthrough Geometry Nodes tree.
         if (instance.original == parent and parent.type in {"CURVE", "SURFACE", "FONT", "META"}
-                and parent.instance_type == "NONE"
-                and not any(modifier.type == "NODES" and modifier.show_render for modifier in parent.modifiers)):
+                and parent.instance_type == "NONE" and entry.matrix_world == instance.matrix_world):
             continue
         if parent.type != "EMPTY" or parent.instance_type != "COLLECTION":
             raise ValueError(f"Capture region requires realized geometry on {parent.name}.")
+        if instance.hide_render:
+            continue
         if instance.type not in (_CONVERTIBLE_TYPES - {"META"}) or instance.modifiers:
             raise ValueError(f"Capture region requires realized geometry on {parent.name}.")
         bounds = crossing_bounds(instance, region_matrix @ entry.matrix_world)

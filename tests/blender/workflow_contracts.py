@@ -148,6 +148,42 @@ cube.modifiers.remove(modifier)
 cube.data.materials.pop(index=len(cube.data.materials)-1)
 del cube["test_roi_attribute"]
 del cube["test_roi_vector"]
+cube.hide_render = True
+curve = bpy.data.curves.new("ROI Bezier", "CURVE")
+curve.dimensions = "3D"
+curve.bevel_depth = 0.12
+spline = curve.splines.new("BEZIER")
+spline.bezier_points.add(1)
+for point, x in zip(spline.bezier_points, (-2, 2)):
+ point.co = (x, 0, 0)
+ point.handle_left_type = point.handle_right_type = "AUTO"
+bezier = bpy.data.objects.new("ROI Bezier", curve)
+bpy.context.scene.collection.objects.link(bezier)
+tree = bpy.data.node_groups.new("ROI passthrough", "GeometryNodeTree")
+for direction in ("INPUT", "OUTPUT"):
+ tree.interface.new_socket(name="Geometry", in_out=direction, socket_type="NodeSocketGeometry")
+incoming = tree.nodes.new("NodeGroupInput")
+outgoing = tree.nodes.new("NodeGroupOutput")
+tree.links.new(incoming.outputs[0], outgoing.inputs[0])
+bezier.modifiers.new("Passthrough", "NODES").node_group = tree
+# A real instance emitted by the modifier must still be rejected.
+object_info = tree.nodes.new("GeometryNodeObjectInfo")
+object_info.inputs["Object"].default_value = cube
+object_info.inputs["As Instance"].default_value = True
+tree.links.new(object_info.outputs["Geometry"], outgoing.inputs[0])
+try:
+ capture_region.clip_capture_scene(bpy.context, "BOX", volume, [bezier])
+except ValueError as error:
+ assert "requires realized geometry" in str(error)
+else:
+ raise AssertionError("An instance emitted by Geometry Nodes was accepted")
+tree.links.new(incoming.outputs[0], outgoing.inputs[0])
+clipped, = capture_region.clip_capture_scene(bpy.context, "BOX", volume, [bezier])
+assert bezier.hide_render and clipped.type == "MESH" and clipped.data.polygons
+assert all(abs(vertex.co.x) <= 0.50001 for vertex in clipped.data.vertices)
+bpy.data.objects.remove(clipped, do_unlink=True)
+bpy.data.objects.remove(bezier, do_unlink=True)
+cube.hide_render = False
 print("CAPTURE_REGION_RENDER_PROPERTIES_PASS")
 s.job_directory='/previous/job'
 s.previous_job=s.job_directory;s.job_directory='';s.attached_session='/external/session'
