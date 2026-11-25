@@ -169,6 +169,12 @@ def clip_capture_scene(context, shape, transform, sources):
         for_evaluation(render, "simplify_subdivision", render.simplify_subdivision_render)
     context.view_layer.update()
     graph = context.evaluated_depsgraph_get()
+    for obj in objects:
+        if not any(modifier.type == "NODES" and modifier.show_render for modifier in obj.modifiers):
+            continue
+        geometry = obj.evaluated_get(graph).evaluated_geometry()
+        if geometry is not None and geometry.instance_references():
+            raise ValueError(f"Capture region requires realized geometry on {obj.name}.")
     region_matrix = Matrix(transform.tolist())
 
     def crossing_bounds(evaluated, to_region):
@@ -194,10 +200,10 @@ def clip_capture_scene(context, shape, transform, sources):
         instance = entry.object
         if instance.type in _NON_SURFACE_TYPES:
             continue
-        # Legacy surfaces can appear as their own evaluated object at the
-        # original transform, including with a passthrough Geometry Nodes tree.
+        # Blender exposes the evaluated surface of some legacy objects as a
+        # self instance. Geometry Nodes instances were checked on the geometry above.
         if (instance.original == parent and parent.type in {"CURVE", "SURFACE", "FONT", "META"}
-                and parent.instance_type == "NONE" and entry.matrix_world == instance.matrix_world):
+                and parent.instance_type == "NONE"):
             continue
         if parent.type != "EMPTY" or parent.instance_type != "COLLECTION":
             raise ValueError(f"Capture region requires realized geometry on {parent.name}.")

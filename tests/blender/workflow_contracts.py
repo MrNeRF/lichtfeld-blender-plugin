@@ -177,6 +177,21 @@ except ValueError as error:
  assert "requires realized geometry" in str(error)
 else:
  raise AssertionError("An instance emitted by Geometry Nodes was accepted")
+# GeometrySet instances can refer back to the curve itself in the depsgraph.
+box = tree.nodes.new("GeometryNodeMeshCube")
+geometry_instance = tree.nodes.new("GeometryNodeGeometryToInstance")
+tree.links.new(box.outputs["Mesh"], geometry_instance.inputs["Geometry"])
+tree.links.new(geometry_instance.outputs[0], outgoing.inputs[0])
+for offset in (0, 10):
+ bezier.location.x = offset
+ try:
+  capture_region.clip_capture_scene(bpy.context, "BOX", volume, [bezier])
+ except ValueError as error:
+  assert "requires realized geometry" in str(error)
+  assert not bezier.hide_render
+ else:
+  raise AssertionError("A GeometrySet instance was accepted as a legacy self instance")
+bezier.location.x = 0
 tree.links.new(incoming.outputs[0], outgoing.inputs[0])
 clipped, = capture_region.clip_capture_scene(bpy.context, "BOX", volume, [bezier])
 assert bezier.hide_render and clipped.type == "MESH" and clipped.data.polygons
