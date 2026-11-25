@@ -173,8 +173,19 @@ def clip_capture_scene(context, shape, transform, sources):
         if not any(modifier.type == "NODES" and modifier.show_render for modifier in obj.modifiers):
             continue
         geometry = obj.evaluated_get(graph).evaluated_geometry()
-        if geometry is not None and geometry.instance_references():
+        if geometry is None:
+            continue
+        if geometry.instance_references():
             raise ValueError(f"Capture region requires realized geometry on {obj.name}.")
+        # Mesh conversion does not preserve these GeometrySet components.
+        unsupported = [label for field, label in (
+            ("curves", "curves"), ("pointcloud", "points"), ("volume", "volume"),
+            ("grease_pencil", "Grease Pencil"),
+        ) if getattr(geometry, field) is not None]
+        if unsupported:
+            components = ", ".join(unsupported)
+            raise ValueError(f"Capture region cannot preserve {components} generated on {obj.name}. "
+                             "Convert the evaluated output to a mesh before capture.")
     region_matrix = Matrix(transform.tolist())
 
     def crossing_bounds(evaluated, to_region):
