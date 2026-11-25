@@ -92,7 +92,12 @@ assert capture_region.animated_render_visibility(cube)
 cube.animation_data_clear()
 volume = capture_region.local_transform("BOX", [[2,0,0,0],[0,0.5,0,0],[0,0,0.5,0],[0,0,0,1]])
 asset = bpy.data.collections.new("ROI test asset")
-asset.objects.link(bpy.data.objects.new("ROI instance mesh", cube.data.copy()))
+asset_child = bpy.data.collections.new("ROI test asset child")
+asset.children.link(asset_child)
+instance_mesh = bpy.data.objects.new("ROI instance mesh", cube.data.copy())
+asset_child.objects.link(instance_mesh)
+light = bpy.data.objects.new("ROI instance light", bpy.data.lights.new("ROI instance light", "POINT"))
+asset.objects.link(light)
 instances = bpy.data.collections.new("ROI test instances")
 bpy.context.scene.collection.children.link(instances)
 inside = bpy.data.objects.new("ROI inside", None)
@@ -105,12 +110,23 @@ for instance in (inside, outside):
 outside.location.x = 10
 layer = bpy.context.view_layer.layer_collection.children[instances.name]
 layer.hide_viewport = True
+for member in (asset_child, instance_mesh):
+ member.hide_viewport = True
+ try:
+  capture_region.clip_capture_scene(bpy.context, "BOX", volume, [cube])
+ except ValueError as error:
+  assert "different viewport and render visibility" in str(error)
+ else:
+  raise AssertionError("Viewport-hidden render geometry was accepted")
+ member.hide_viewport = False
 clipped, = capture_region.clip_capture_scene(bpy.context, "BOX", volume, [cube])
 assert not inside.hide_render and outside.hide_render and layer.hide_viewport
 bpy.data.collections.remove(instances)
 bpy.data.objects.remove(inside)
 bpy.data.objects.remove(outside)
-bpy.data.objects.remove(asset.objects[0], do_unlink=True)
+bpy.data.objects.remove(instance_mesh, do_unlink=True)
+bpy.data.objects.remove(light, do_unlink=True)
+bpy.data.collections.remove(asset_child)
 bpy.data.collections.remove(asset)
 assert cube.hide_render and clipped != cube
 assert max(abs(vertex.co.x) for vertex in clipped.data.vertices) <= 0.50001

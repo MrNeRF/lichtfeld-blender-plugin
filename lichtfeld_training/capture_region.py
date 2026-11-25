@@ -73,6 +73,25 @@ def animated_render_visibility(obj):
     return False
 
 
+_NON_SURFACE_TYPES = {"CAMERA", "LIGHT", "EMPTY", "ARMATURE", "LATTICE", "LIGHT_PROBE", "SPEAKER"}
+_CONVERTIBLE_TYPES = {"MESH", "CURVE", "SURFACE", "FONT", "META"}
+
+
+def check_instance_asset(collection, parent):
+    """Require matching instance visibility before trusting viewport bounds."""
+    if collection.hide_viewport != collection.hide_render:
+        raise ValueError(f"Instance {parent.name} has different viewport and render visibility in {collection.name}.")
+    if collection.hide_render:
+        return
+    for obj in collection.objects:
+        if obj.hide_viewport != obj.hide_render:
+            raise ValueError(f"Instance {parent.name} has different viewport and render visibility on {obj.name}.")
+        if not obj.hide_render and obj.instance_type != "NONE":
+            raise ValueError(f"Instance {parent.name} contains nested instances. Realize it before capture.")
+    for child in collection.children:
+        check_instance_asset(child, parent)
+
+
 def clip_capture_scene(context, shape, transform, sources):
     """Clip evaluated surfaces in the disposable capture scene."""
     import bmesh
@@ -109,6 +128,8 @@ def clip_capture_scene(context, shape, transform, sources):
 
     # Check geometry with render-dependent bounds before using a viewport bbox.
     for obj in objects:
+        if obj.instance_type == "COLLECTION" and obj.instance_collection:
+            check_instance_asset(obj.instance_collection, obj)
         for modifier in obj.modifiers:
             if not modifier.show_render:
                 continue
@@ -170,13 +191,17 @@ def clip_capture_scene(context, shape, transform, sources):
         if not entry.is_instance or not entry.parent or entry.parent.original not in render_objects:
             continue
         parent = entry.parent.original
-        # Blender reports evaluated NURBS surfaces as a self instance.
-        if parent.type == "SURFACE" and entry.object.original == parent and not parent.modifiers:
+        instance = entry.object
+        if instance.type in _NON_SURFACE_TYPES or instance.hide_render:
+            continue
+        # Blender also reports evaluated legacy surfaces as self instances.
+        if (instance.original == parent and parent.type in {"CURVE", "SURFACE", "FONT", "META"}
+                and parent.instance_type == "NONE"
+                and not any(modifier.type == "NODES" and modifier.show_render for modifier in parent.modifiers)):
             continue
         if parent.type != "EMPTY" or parent.instance_type != "COLLECTION":
             raise ValueError(f"Capture region requires realized geometry on {parent.name}.")
-        instance = entry.object
-        if instance.type not in {"MESH", "CURVE", "SURFACE", "FONT"} or instance.modifiers:
+        if instance.type not in (_CONVERTIBLE_TYPES - {"META"}) or instance.modifiers:
             raise ValueError(f"Capture region requires realized geometry on {parent.name}.")
         bounds = crossing_bounds(instance, region_matrix @ entry.matrix_world)
         if bounds:
@@ -189,7 +214,7 @@ def clip_capture_scene(context, shape, transform, sources):
             replacements[parent] = None
 
     for obj in objects:
-        if obj.type in {"CAMERA", "LIGHT", "EMPTY", "ARMATURE", "LATTICE", "LIGHT_PROBE", "SPEAKER"}:
+        if obj.type in _NON_SURFACE_TYPES:
             continue
         evaluated = obj.evaluated_get(graph)
         world = evaluated.matrix_world.copy()
@@ -200,7 +225,7 @@ def clip_capture_scene(context, shape, transform, sources):
         if not crossing_planes:
             continue
 
-        if obj.type not in {"MESH", "CURVE", "SURFACE", "FONT", "META"}:
+        if obj.type not in _CONVERTIBLE_TYPES:
             raise ValueError(f"Capture region cannot clip {obj.name} ({obj.type}). Convert it to a mesh first.")
         mesh = bpy.data.meshes.new_from_object(evaluated, preserve_all_data_layers=True, depsgraph=graph)
         if hasattr(evaluated.data, "texspace_size"):
