@@ -112,6 +112,7 @@ def eevee_indirect_material(material):
             continue
         surface = output.inputs["Surface"]
         if not surface.is_linked:
+            links.new(transparent.outputs[0], surface)
             continue
         original = surface.links[0].from_socket
         mix = nodes.new("ShaderNodeMixShader")
@@ -282,6 +283,14 @@ def clip_capture_scene(context, shape, transform, sources):
         if True in outside:
             replacements[parent] = None
 
+    def keep_outside(obj):
+        replacements[obj] = None
+        if eevee and obj.type in _CONVERTIBLE_TYPES and obj.type != "META":
+            exterior = obj.copy()
+            exterior.name = f"{obj.name} · Indirect lighting"
+            if hide_eevee_exterior(exterior):
+                exteriors[obj] = exterior
+
     for obj in objects:
         if obj.type in _NON_SURFACE_TYPES:
             continue
@@ -290,12 +299,7 @@ def clip_capture_scene(context, shape, transform, sources):
         to_region = region_matrix @ world
         crossing_planes = crossing_bounds(evaluated, to_region)
         if crossing_planes is None:
-            replacements[obj] = None
-            if eevee and obj.type in _CONVERTIBLE_TYPES and obj.type != "META":
-                exterior = obj.copy()
-                exterior.name = f"{obj.name} · Indirect lighting"
-                if hide_eevee_exterior(exterior):
-                    exteriors[obj] = exterior
+            keep_outside(obj)
         if not crossing_planes:
             continue
 
@@ -316,36 +320,68 @@ def clip_capture_scene(context, shape, transform, sources):
         exterior_mesh = None
         try:
             surface.from_mesh(mesh)
+            marker = surface.faces.layers.int.new("LichtFeld capture interior") if preserve_lighting else None
+            inside = list(surface.faces) if preserve_lighting else None
             for normal, limit in crossing_planes:
-                if not surface.faces:
+                if not surface.faces or inside is not None and not inside:
                     break
                 local_normal = to_region.to_3x3().transposed() @ normal
                 if local_normal.length_squared == 0:
                     continue
                 local_limit = limit - normal.dot(to_region.translation)
-                bmesh.ops.bisect_plane(
-                    surface, geom=[*surface.verts, *surface.edges, *surface.faces],
+                if inside is None:
+                    geometry = [*surface.verts, *surface.edges, *surface.faces]
+                else:
+                    # Only faces straddling the plane need a split. Faces fully outside
+                    # stay intact and never participate in subsequent cuts.
+                    epsilon = local_normal.length * 0.000001
+                    vertices = {vertex for face in inside for vertex in face.verts}
+                    distances = {vertex: local_normal.dot(vertex.co) - local_limit for vertex in vertices}
+                    retained = []
+                    crossing = []
+                    for face in inside:
+                        sides = [distances[vertex] for vertex in face.verts]
+                        if max(sides) <= epsilon:
+                            retained.append(face)
+                        elif min(sides) < -epsilon:
+                            crossing.append(face)
+                    inside = retained
+                    if not crossing:
+                        continue
+                    geometry = list(dict.fromkeys(element for face in crossing
+                                                  for element in (*face.verts, *face.edges, face)))
+                result = bmesh.ops.bisect_plane(
+                    surface, geom=geometry,
                     dist=0.000001, plane_co=local_normal * (local_limit / local_normal.length_squared),
                     plane_no=local_normal.normalized(), clear_outer=not preserve_lighting,
                 )
-            if preserve_lighting:
-                # Separate the two pieces to avoid coincident surfaces casting shadows.
-                def outside(face):
-                    center = to_region @ face.calc_center_median()
-                    return any(normal.dot(center) > limit + 0.000001
-                               for normal, limit in crossing_planes)
-
+                if inside is not None:
+                    faces = (element for element in result["geom"] if isinstance(element, bmesh.types.BMFace))
+                    inside.extend(face for face in dict.fromkeys((*crossing, *faces)) if face.is_valid
+                                  and local_normal.dot(face.calc_center_median()) <= local_limit + epsilon)
+            if inside is not None:
+                inside = [face for face in inside if face.is_valid]
+                if not inside:
+                    bpy.data.meshes.remove(mesh)
+                    keep_outside(obj)
+                    continue
+                # Mark the interior for the copy, then remove the marker from both outputs.
+                for face in inside:
+                    face[marker] = 1
                 exterior = surface.copy()
                 try:
-                    bmesh.ops.delete(exterior, geom=[face for face in exterior.faces if not outside(face)],
+                    exterior_marker = exterior.faces.layers.int[marker.name]
+                    bmesh.ops.delete(exterior, geom=[face for face in exterior.faces if face[exterior_marker]],
                                      context="FACES")
+                    exterior.faces.layers.int.remove(exterior_marker)
                     if exterior.faces:
                         exterior_mesh = mesh.copy()
                         exterior.to_mesh(exterior_mesh)
                 finally:
                     exterior.free()
-                bmesh.ops.delete(surface, geom=[face for face in surface.faces if outside(face)],
+                bmesh.ops.delete(surface, geom=[face for face in surface.faces if not face[marker]],
                                  context="FACES")
+                surface.faces.layers.int.remove(marker)
             has_faces = bool(surface.faces)
             if has_faces:
                 surface.to_mesh(mesh)

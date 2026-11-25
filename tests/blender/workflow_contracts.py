@@ -324,6 +324,29 @@ def check_roi_lighting(out, engine):
             assert removed[center].mean() - kept[center].mean() > .2
         assert np.array_equal(kept[:, :, 3], removed[:, :, 3])
         assert 0 < (kept[:, :, 3] > .5).sum() < (full[:, :, 3] > .5).sum() / 2
+
+        if not cycles:
+            # Place the camera-invisible shadow caster in front of the center pixels.
+            # The geometry pass must still see the floor at camera Z=7.
+            donor.location.x -= 1.45
+            donor.location.z += 1.6
+            donor.hide_render = False
+            bpy.context.view_layer.update()
+            sys.path.insert(0, str(Path(ext.__file__).parent))
+            try:
+                from capture_passes import GeometryPasses
+
+                geometry = GeometryPasses(scene, bpy.context.view_layer, out, normals=False)
+                try:
+                    geometry.prepare(0)
+                    rgba = render('occluder')
+                    depth = geometry.read('Depth', 1)[:, :, 0]
+                    assert (rgba[45:51, 45:51, 3] > .99).all()
+                    assert np.allclose(depth[45:51, 45:51], 7, atol=.05)
+                finally:
+                    geometry.close()
+            finally:
+                sys.path.pop(0)
     finally:
         window.scene = original
         bpy.data.scenes.remove(scene)
