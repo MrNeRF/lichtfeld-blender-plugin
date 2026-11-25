@@ -234,7 +234,7 @@ cube.hide_render = False
 print("CAPTURE_REGION_RENDER_PROPERTIES_PASS")
 
 
-def check_cycles_roi_lighting(out):
+def check_roi_lighting(out, engine):
     import numpy as np
 
     window = bpy.context.window
@@ -242,7 +242,8 @@ def check_cycles_roi_lighting(out):
     scene = bpy.data.scenes.new('ROI lighting test')
     window.scene = scene
     try:
-        scene.render.engine = 'CYCLES'
+        cycles = engine == 'CYCLES'
+        scene.render.engine = engine
         scene.cycles.device = 'CPU'
         scene.cycles.samples = 96
         scene.cycles.use_adaptive_sampling = False
@@ -250,33 +251,42 @@ def check_cycles_roi_lighting(out):
         scene.render.film_transparent = True
         scene.render.image_settings.color_mode = 'RGBA'
         scene.view_settings.view_transform = 'Standard'
-        scene.render.resolution_x = scene.render.resolution_y = 64
+        scene.render.resolution_x = scene.render.resolution_y = 96
         scene.render.resolution_percentage = 100
         scene.world = bpy.data.worlds.new('ROI lighting world')
         scene.world.node_tree.nodes['Background'].inputs['Strength'].default_value = 0
         bpy.ops.mesh.primitive_plane_add(size=4)
         subject = bpy.context.object
-        bpy.ops.mesh.primitive_plane_add(size=.8, location=(1.7, 0, 1.5))
-        emitter = bpy.context.object
-        mat = bpy.data.materials.new('Colored emission')
-        nodes = mat.node_tree.nodes
-        light = nodes.new('ShaderNodeEmission')
-        light.inputs['Color'].default_value = (1, .05, .02, 1)
-        light.inputs['Strength'].default_value = 18
-        mat.node_tree.links.new(light.outputs[0], nodes.get('Material Output').inputs['Surface'])
-        emitter.data.materials.append(mat)
-        asset = bpy.data.collections.new('Emitter collection')
-        for collection in list(emitter.users_collection):
-            collection.objects.unlink(emitter)
-        asset.objects.link(emitter)
-        instance = bpy.data.objects.new('Emitter instance', None)
-        scene.collection.objects.link(instance)
-        instance.instance_type = 'COLLECTION'
-        instance.instance_collection = asset
+        if cycles:
+            bpy.ops.mesh.primitive_plane_add(size=.8, location=(1.7, 0, 1.5))
+            emitter = bpy.context.object
+            mat = bpy.data.materials.new('Colored emission')
+            nodes = mat.node_tree.nodes
+            light = nodes.new('ShaderNodeEmission')
+            light.inputs['Color'].default_value = (1, .05, .02, 1)
+            light.inputs['Strength'].default_value = 18
+            mat.node_tree.links.new(light.outputs[0], nodes.get('Material Output').inputs['Surface'])
+            emitter.data.materials.append(mat)
+            asset = bpy.data.collections.new('Emitter collection')
+            for collection in list(emitter.users_collection):
+                collection.objects.unlink(emitter)
+            asset.objects.link(emitter)
+            instance = bpy.data.objects.new('Emitter instance', None)
+            scene.collection.objects.link(instance)
+            instance.instance_type = 'COLLECTION'
+            instance.instance_collection = asset
+        else:
+            bpy.ops.mesh.primitive_cube_add(size=.95, location=(1.45, 0, 1.4))
+            blocker = bpy.context.object
+            blocker_name = blocker.name
+            light = bpy.data.objects.new('ROI shadow light', bpy.data.lights.new('ROI shadow light', 'POINT'))
+            scene.collection.objects.link(light)
+            light.location = (2.9, 0, 2.8)
+            light.data.energy = 900
         camera = bpy.data.objects.new('Camera', bpy.data.cameras.new('Camera'))
         scene.collection.objects.link(camera)
         camera.location = (0, 0, 7)
-        camera.data.lens = 45
+        camera.data.lens = 45 if cycles else 44
         scene.camera = camera
 
         def render(name):
@@ -284,24 +294,34 @@ def check_cycles_roi_lighting(out):
             bpy.ops.render.render(write_still=True)
             image = bpy.data.images.load(scene.render.filepath, check_existing=False)
             try:
-                pixels = np.empty(64 * 64 * 4, dtype=np.float32)
+                pixels = np.empty(96 * 96 * 4, dtype=np.float32)
                 image.pixels.foreach_get(pixels)
-                return pixels.reshape((64, 64, 4))
+                return pixels.reshape((96, 96, 4))
             finally:
                 bpy.data.images.remove(image)
 
         full = render('full')
-        clipped, = capture_region.clip_capture_scene(bpy.context, 'BOX', np.diag([1, 1, 2, 1]), [subject])
+        transform = np.diag([1, 1, 2 if cycles else .5, 1])
+        clipped, = capture_region.clip_capture_scene(bpy.context, 'BOX', transform, [subject])
         kept = render('kept')
         assert subject.hide_render and not clipped.hide_render
-        assert not instance.hide_render and not instance.visible_camera
-        instance.hide_render = True
+        if cycles:
+            donor = instance
+            assert not donor.visible_camera
+        else:
+            donor = scene.objects.get(f'{blocker_name} · Indirect lighting')
+            assert donor is not None and blocker.hide_render
+        assert not donor.hide_render
+        donor.hide_render = True
         removed = render('removed')
 
-        # The emitter contributes lighting but never appears in the clipped alpha.
-        center = (slice(28, 36), slice(28, 36), 0)
+        # Exterior illumination is retained while its surfaces are absent from alpha.
+        center = (slice(45, 51), slice(45, 51), 0)
         assert abs(kept[center].mean() - full[center].mean()) < .08
-        assert kept[center].mean() > .3 and removed[center].mean() < .04
+        if cycles:
+            assert kept[center].mean() > .3 and removed[center].mean() < .04
+        else:
+            assert removed[center].mean() - kept[center].mean() > .2
         assert np.array_equal(kept[:, :, 3], removed[:, :, 3])
         assert 0 < (kept[:, :, 3] > .5).sum() < (full[:, :, 3] > .5).sum() / 2
     finally:
@@ -311,8 +331,12 @@ def check_cycles_roi_lighting(out):
 
 from tempfile import TemporaryDirectory
 with TemporaryDirectory(prefix='lichtfeld-roi-lighting-') as directory:
-    check_cycles_roi_lighting(Path(directory))
+    check_roi_lighting(Path(directory), 'CYCLES')
 print('CYCLES_ROI_LIGHTING_PASS', flush=True)
+if '--eevee-roi' in sys.argv:
+    with TemporaryDirectory(prefix='lichtfeld-roi-eevee-') as directory:
+        check_roi_lighting(Path(directory), 'BLENDER_EEVEE')
+    print('EEVEE_ROI_LIGHTING_PASS', flush=True)
 
 s.job_directory='/previous/job'
 s.previous_job=s.job_directory;s.job_directory='';s.attached_session='/external/session'

@@ -92,6 +92,36 @@ def check_instance_asset(collection, parent):
         check_instance_asset(child, parent)
 
 
+def eevee_indirect_material(material):
+    """Keep the surface shader for shadow and probe passes."""
+    import bpy
+
+    if material is not None and material.node_tree is None:
+        material = None
+    if material and any(node.type == "OUTPUT_MATERIAL" and node.target != "CYCLES"
+                        and node.inputs["Volume"].is_linked for node in material.node_tree.nodes):
+        # EEVEE volume shading is performed for the camera, separately from the surface.
+        return None
+    exterior = material.copy() if material else bpy.data.materials.new("Capture region · Indirect")
+    nodes = exterior.node_tree.nodes
+    links = exterior.node_tree.links
+    camera = nodes.new("ShaderNodeLightPath")
+    transparent = nodes.new("ShaderNodeBsdfTransparent")
+    for output in tuple(nodes):
+        if output.type != "OUTPUT_MATERIAL" or output.target == "CYCLES":
+            continue
+        surface = output.inputs["Surface"]
+        if not surface.is_linked:
+            continue
+        original = surface.links[0].from_socket
+        mix = nodes.new("ShaderNodeMixShader")
+        links.new(camera.outputs["Is Camera Ray"], mix.inputs[0])
+        links.new(original, mix.inputs[1])
+        links.new(transparent.outputs[0], mix.inputs[2])
+        links.new(mix.outputs[0], surface)
+    return exterior
+
+
 def clip_capture_scene(context, shape, transform, sources):
     """Clip evaluated surfaces in the disposable capture scene."""
     import bmesh
@@ -99,7 +129,28 @@ def clip_capture_scene(context, shape, transform, sources):
     from idprop.types import IDPropertyArray
     from mathutils import Matrix, Vector
 
-    preserve_lighting = context.scene.render.engine == "CYCLES"
+    cycles = context.scene.render.engine == "CYCLES"
+    eevee = context.scene.render.engine == "BLENDER_EEVEE"
+    preserve_lighting = cycles or eevee
+    indirect_materials = {}
+
+    def hide_eevee_exterior(exterior):
+        materials = [slot.material for slot in exterior.material_slots] or [None]
+        for material in materials:
+            if material not in indirect_materials:
+                indirect_materials[material] = eevee_indirect_material(material)
+        if any(indirect_materials[material] is None for material in materials):
+            bpy.data.objects.remove(exterior)
+            return False
+        if not exterior.material_slots:
+            if exterior.data.users > 1:
+                exterior.data = exterior.data.copy()
+            exterior.data.materials.append(None)
+        for slot, material in zip(exterior.material_slots, materials, strict=True):
+            slot.link = "OBJECT"
+            slot.material = indirect_materials[material]
+        return True
+
     planes = [(Vector(axis), 1.0) for axis in
               ((1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, -1, 0), (0, 0, 1), (0, 0, -1))]
     if shape == "ELLIPSOID":
@@ -240,6 +291,11 @@ def clip_capture_scene(context, shape, transform, sources):
         crossing_planes = crossing_bounds(evaluated, to_region)
         if crossing_planes is None:
             replacements[obj] = None
+            if eevee and obj.type in _CONVERTIBLE_TYPES and obj.type != "META":
+                exterior = obj.copy()
+                exterior.name = f"{obj.name} · Indirect lighting"
+                if hide_eevee_exterior(exterior):
+                    exteriors[obj] = exterior
         if not crossing_planes:
             continue
 
@@ -330,8 +386,12 @@ def clip_capture_scene(context, shape, transform, sources):
             exterior = clipped.copy()
             exterior.data = exterior_mesh
             exterior.name = f"{obj.name} · Indirect lighting"
-            exterior.visible_camera = False
-            exteriors[obj] = exterior
+            if cycles:
+                exterior.visible_camera = False
+            if cycles or hide_eevee_exterior(exterior):
+                exteriors[obj] = exterior
+            else:
+                bpy.data.meshes.remove(exterior_mesh)
 
     # Restore viewport settings before rendering so the evaluated view layer
     # does not keep render-resolution modifiers and hidden meshes alive.
@@ -341,26 +401,27 @@ def clip_capture_scene(context, shape, transform, sources):
         setattr(owner, field, value)
 
     # Keep the source IDs linked for depsgraph dependencies (rigs and constraints).
-    visibility_fields = {"hide_render", "visible_camera"} if preserve_lighting else {"hide_render"}
+    visibility_fields = {"hide_render", "visible_camera"} if cycles else {"hide_render"}
     if blocked := next((obj for obj in replacements if animated_render_visibility(obj, visibility_fields)), None):
         raise ValueError(f"Capture region cannot override animated render visibility on {blocked.name}.")
     for obj, clipped in replacements.items():
-        field = "visible_camera" if preserve_lighting and clipped is None else "hide_render"
+        field = "visible_camera" if cycles and clipped is None else "hide_render"
         if not obj.is_editable or obj.is_property_readonly(field):
             raise ValueError(f"Capture region cannot cut or hide linked object {obj.name}. Make it local first.")
-        if clipped is not None and any(not collection.is_editable for collection in obj.users_collection):
+        if (clipped is not None or obj in exteriors) and any(not collection.is_editable for collection in obj.users_collection):
             raise ValueError(f"Capture region cannot replace {obj.name} in a linked collection. Make the collection local first.")
     for obj, clipped in replacements.items():
-        if clipped is None and preserve_lighting:
+        if clipped is None and cycles:
             obj.visible_camera = False
             continue
         obj.hide_render = True
-        if clipped is None:
+        if clipped is not None:
+            name = obj.name
+            obj.name = f"{name} · Capture source"
+            clipped.name = name
+        pieces = tuple(piece for piece in (clipped, exteriors.get(obj)) if piece is not None)
+        if not pieces:
             continue
-        name = obj.name
-        obj.name = f"{name} · Capture source"
-        clipped.name = name
-        pieces = (clipped, exteriors[obj]) if obj in exteriors else (clipped,)
         for piece in pieces:
             if obj.lightgroup:
                 piece.lightgroup = obj.lightgroup
