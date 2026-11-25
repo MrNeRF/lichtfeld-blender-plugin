@@ -357,6 +357,16 @@ def check_roi_lighting(out, engine):
             grid = bpy.context.object
             grid.name = 'Capture ellipsoid grid'
             grid.scale = (12, 12, 1)
+            import bmesh
+
+            wire_fixture = bmesh.new()
+            try:
+                wire_fixture.from_mesh(grid.data)
+                wire_fixture.verts.ensure_lookup_table()
+                wire_fixture.edges.new((wire_fixture.verts[0], wire_fixture.verts[-1]))
+                wire_fixture.to_mesh(grid.data)
+            finally:
+                wire_fixture.free()
             original_area = sum(face.area for face in grid.data.polygons)
             original_faces = len(grid.data.polygons)
             bpy.context.view_layer.update()
@@ -369,6 +379,7 @@ def check_roi_lighting(out, engine):
             assert abs(sum(face.area for piece in (interior, exterior) for face in piece.data.polygons)
                        - original_area) < .0001
             assert len(exterior.data.polygons) < original_faces * 1.25
+            assert not any(edge.is_loose for piece in (interior, exterior) for edge in piece.data.edges)
     finally:
         window.scene = original
         bpy.data.scenes.remove(scene)

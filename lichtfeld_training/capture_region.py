@@ -330,6 +330,8 @@ def clip_capture_scene(context, shape, transform, sources):
         try:
             surface.from_mesh(mesh)
             if preserve_lighting:
+                bmesh.ops.delete(surface, geom=[edge for edge in surface.edges if not edge.link_faces],
+                                 context="EDGES")
                 bmesh.ops.delete(surface, geom=[vertex for vertex in surface.verts if not vertex.link_faces],
                                  context="VERTS")
             marker = surface.faces.layers.int.new("LichtFeld capture interior") if preserve_lighting else None
