@@ -402,6 +402,11 @@ class LichtFeldSettings(bpy.types.PropertyGroup):
     rig_parameter_source: PointerProperty(type=bpy.types.Collection, options={'HIDDEN'},
         description="Generated rig whose parameters were explicitly loaded or last applied; choosing another collection does not replace the controls")
     optimizer_file: StringProperty(name="Additional native parameters (JSON)", subtype="FILE_PATH")
+    export_mask_sidecars: BoolProperty(
+        name="Export separate PNG masks",
+        description="Also save the captured alpha as separate grayscale PNG masks",
+        default=False,
+    )
     mask_mode: EnumProperty(name="Foreground mask",items=[
         ('AUTO','Automatic','Alpha-consistent for objects/collections; no mask for a whole-scene capture'),
         ('none','None','Train without the captured foreground mask'),
@@ -1388,6 +1393,7 @@ def capture_job(context, capture):
            "optimizer_file": bpy.path.abspath(settings.optimizer_file) if settings.optimizer_file else "",
            "optimizer": training_options.optimizer_values(settings),
            "optimizer_schedule": {name:getattr(settings,name) for name in ("refine_start","refine_end","growth_end")}}
+    job.update(capture_alpha=capture["capture_alpha"], export_mask_sidecars=settings.export_mask_sidecars)
     if region := capture.get("capture_region"):
         job["capture_region"] = region
     job.update(engine=render_settings['engine'], samples=render_settings['samples'],
@@ -2533,6 +2539,12 @@ def draw_capture_options(box, context, settings, capture_only, wrapped):
     if details is not None:
         details.label(text='View Layer: ' + context.view_layer.name)
         details.prop(settings, "seed_points")
+        if settings.scope == "SCENE" and not settings.capture_region_object:
+            details.prop(context.scene.render, "film_transparent", text="Transparent background")
+        row = details.row()
+        row.enabled = (settings.scope != "SCENE" or bool(settings.capture_region_object)
+                       or context.scene.render.film_transparent)
+        row.prop(settings, "export_mask_sidecars")
 
 
 def draw_capture_actions(setup, settings, ready, errors, capture_only, wrapped):

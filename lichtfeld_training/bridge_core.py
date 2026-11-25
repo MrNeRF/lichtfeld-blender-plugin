@@ -91,11 +91,21 @@ def preview_sh_limit(job):
     return degree
 
 
-def capture_mask_mode(scope, mode, *, volume_mask=False):
-    if scope == "SCENE" and not volume_mask and mode not in {"AUTO", "none"}:
-        raise ValueError("Whole-scene captures have no foreground mask. Choose Automatic or None.")
+def capture_has_alpha(scope, region, film_transparent):
+    return scope != "SCENE" or bool(region) or film_transparent
+
+
+def capture_mask_outputs(job):
+    # Older jobs baked sidecars for isolated content and capture regions.
+    alpha = job.get("capture_alpha", capture_has_alpha(job.get("scope", "SCENE"), job.get("capture_region"), False))
+    return alpha, alpha and job.get("export_mask_sidecars", "capture_alpha" not in job)
+
+
+def capture_mask_mode(mode, *, has_alpha):
+    if not has_alpha and mode not in {"AUTO", "none"}:
+        raise ValueError("This capture has no foreground mask. Enable a transparent background or choose Automatic or None.")
     if mode == "AUTO":
-        return "alpha_consistent" if volume_mask or scope != "SCENE" else "none"
+        return "alpha_consistent" if has_alpha else "none"
     return mode
 
 
@@ -119,8 +129,9 @@ def training_config(job):
             "eval_steps": steps if enable_eval else [], "save_steps": steps,
             "enable_eval": enable_eval, "eval_all": False,
             "enable_save_eval_images": False,
-            "mask_mode": capture_mask_mode(job.get("scope", "SCENE"), job.get("mask_mode", "AUTO"),
-                                           volume_mask=bool(job.get("capture_region"))),
+            "mask_mode": capture_mask_mode(job.get("mask_mode", "AUTO"),
+                                           has_alpha=capture_mask_outputs(job)[0]),
+            **({"use_alpha_as_mask": True} if job.get("capture_alpha") else {}),
         })
     if job.get("optimizer") is not None:
         schedule = job.get("optimizer_schedule", {})

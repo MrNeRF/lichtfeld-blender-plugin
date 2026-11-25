@@ -132,6 +132,7 @@ def signature(context):
  region=s.capture_region_object
  return (context.scene.as_pointer(),context.view_layer.as_pointer(),s.scope,s.source_collection.as_pointer() if s.source_collection else 0,
   s.camera_collection.as_pointer() if s.camera_collection else 0,
+  context.scene.render.film_transparent,s.export_mask_sidecars,
   (region.as_pointer(),region.empty_display_type,region.empty_display_size,
    tuple(tuple(row) for row in region.matrix_world)) if region else None,
   tuple(row.collection.session_uid if row.collection else None for row in getattr(s,'capture_collections',())),
@@ -264,16 +265,17 @@ def collect(context,capture_only=False,*,single_render=False):
   yield
  capture_errors=list(dict.fromkeys(errors))
  errors.extend(training_options.validate(s.strategy,training_options.optimizer_values(s)))
- from .bridge_core import capture_mask_mode
+ from .bridge_core import capture_has_alpha, capture_mask_mode
+ alpha = capture_has_alpha(s.scope, region, context.scene.render.film_transparent)
  try:
-  capture_mask_mode(s.scope,s.mask_mode,volume_mask=region is not None)
+  capture_mask_mode(s.mask_mode,has_alpha=alpha)
  except ValueError as error:
   errors.append(str(error))
  if s.refine_start>=s.refine_end:errors.append('Refinement start must be before its end.')
  if s.growth_end>s.refine_end:errors.append('Growth must end before refinement ends.')
  if s.use_normal_loss and s.normal_start_fraction>=s.normal_end_fraction:errors.append('Normal supervision start must be before its end.')
  return {'sources':sources,'cameras':cameras,'camera_count':camera_count,'framing_camera_count':checks['framing_camera_count'],'camera_selection_error':camera_error,'generated_cameras':generated_cameras,'camera_issues':camera_issues,'visibility':visibility,'visibility_sources':visibility_sources or sources,'capture_errors':capture_errors,'errors':capture_errors if capture_only else list(dict.fromkeys(errors)),
-         'signature':initial,'frame':context.scene.frame_current,'capture_region':region,'reference_changed':reference_changed,'format':capture_format,'render':render}
+         'signature':initial,'frame':context.scene.frame_current,'capture_region':region,'capture_alpha':alpha,'reference_changed':reference_changed,'format':capture_format,'render':render}
 
 def synchronous(context,prefs):
  work=collect(context)
