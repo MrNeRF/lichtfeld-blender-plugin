@@ -327,8 +327,10 @@ def render_dataset(job_path, reuse_images=False):
     scene.render.image_settings.file_format = "PNG"
     isolated = job["scope"] != "SCENE"
     masked, write_sidecars = capture_mask_outputs(job)
-    if single_render and "capture_alpha" not in job:
-        masked = isolated
+    if single_render:
+        write_sidecars = False
+        if "capture_alpha" not in job:
+            masked = isolated
     scene.render.image_settings.color_mode = "RGBA" if masked else "RGB"
     scene.render.image_settings.color_depth = "8"
     scene.render.film_transparent = masked
@@ -369,7 +371,7 @@ def render_dataset(job_path, reuse_images=False):
                 if not reuse_images:
                     render_test_image(root)
                 atomic_json(root / 'capture-progress.json', {'done': 1, 'total': 1})
-                return  # RGB only: never publish masks, seeds or a reusable dataset.
+                return  # Preview image only: never publish masks, seeds or a reusable dataset.
             if not reuse_images:
                 bpy.ops.render.render(write_still=True)
             rgba = read_capture_rgba(output / relative, width, height) if geometry or masked or reuse_images else None

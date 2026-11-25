@@ -7,7 +7,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "lichtfeld_training
 import jobs
 import supervisor
 import job_control
-from bridge_core import atomic_json, digest, training_command
+from bridge_core import atomic_json, digest, training_command, training_config
 
 def fixture(directory, views=4):
     root=Path(directory)/"original"
@@ -28,6 +28,24 @@ def fixture(directory, views=4):
     return root
 
 class DatasetReuse(unittest.TestCase):
+    def test_saved_mask_requirements_follow_the_original_capture(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = fixture(directory)
+            recipe_path = root / "job.json"
+            recipe = jobs.read_job(recipe_path)
+            # Old isolated captures remain reusable even without sidecar records.
+            jobs.captured_dataset(root)
+            recipe.update(scope="SCENE", capture_alpha=True)
+            atomic_json(recipe_path, recipe)
+            restart, _ = jobs.restart_data(root, {}, backend="TRUSTED", jobs_directory=directory)
+            optimization = training_config(restart)["optimization"]
+            self.assertEqual(optimization["mask_mode"], "alpha_consistent")
+            self.assertTrue(optimization["use_alpha_as_mask"])
+            recipe["export_mask_sidecars"] = True
+            atomic_json(recipe_path, recipe)
+            with self.assertRaisesRegex(ValueError, "saved foreground mask is missing"):
+                jobs.captured_dataset(root)
+
     def test_finalization_retries_only_complete_captures_and_honors_stop(self):
         for case in ('recover', 'partial', 'cancel', 'retry_failed', 'missing_capture', 'first_ok', 'cancel_recovery', 'depth_coverage', 'corrupt_report'):
             with self.subTest(case=case), tempfile.TemporaryDirectory() as directory:

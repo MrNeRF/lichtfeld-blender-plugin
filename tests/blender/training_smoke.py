@@ -204,7 +204,9 @@ while time.monotonic() < deadline:
         assert config["optimization"]["mask_mode"] == "alpha_consistent"
         assert config["optimization"]["use_alpha_as_mask"]
         restart, _ = extension.jobs.restart_data(job, {}, backend=backend, jobs_directory=prefs.jobs_directory)
-        assert importlib.import_module(extension.__package__ + ".bridge_core").training_config(restart)["optimization"]["mask_mode"] == "alpha_consistent"
+        restart_config = importlib.import_module(extension.__package__ + ".bridge_core").training_config(restart)
+        assert restart_config["optimization"]["mask_mode"] == "alpha_consistent"
+        assert restart_config["optimization"]["use_alpha_as_mask"]
         bpy.ops.wm.save_as_mainfile(filepath=str(Path(area) / "smoke-result.blend"))
         break
     time.sleep(0.02)

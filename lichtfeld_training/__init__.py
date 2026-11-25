@@ -20,7 +20,7 @@ from bpy.props import (BoolProperty, CollectionProperty, EnumProperty, FloatProp
                        PointerProperty, StringProperty, FloatVectorProperty)
 from mathutils import Matrix, Quaternion, Vector
 
-from .bridge_core import (SCHEMA, TERMINAL, atomic_json, read_json, verify_artifact, process_alive)
+from .bridge_core import (SCHEMA, TERMINAL, atomic_json, read_json, verify_artifact, process_alive, capture_has_alpha)
 from lichtfeld_sessions.transport import read_snapshot, discover, SessionClient
 from .visibility import set_hidden, source_steps
 from .ui_text import draw_disclosure, draw_paragraph
@@ -408,7 +408,7 @@ class LichtFeldSettings(bpy.types.PropertyGroup):
         default=False,
     )
     mask_mode: EnumProperty(name="Foreground mask",items=[
-        ('AUTO','Automatic','Alpha-consistent for objects/collections; no mask for a whole-scene capture'),
+        ('AUTO','Automatic','Match the captured alpha when present; otherwise train without a foreground mask'),
         ('none','None','Train without the captured foreground mask'),
         ('alpha_consistent','Match alpha','Enforce the captured foreground alpha'),
         ('ignore','Foreground only','Ignore pixels outside the captured foreground'),
@@ -2540,10 +2540,10 @@ def draw_capture_options(box, context, settings, capture_only, wrapped):
         details.label(text='View Layer: ' + context.view_layer.name)
         details.prop(settings, "seed_points")
         if settings.scope == "SCENE" and not settings.capture_region_object:
-            details.prop(context.scene.render, "film_transparent", text="Transparent background")
+            details.prop(context.scene.render, "film_transparent", text="Film Transparent (scene)")
         row = details.row()
-        row.enabled = (settings.scope != "SCENE" or bool(settings.capture_region_object)
-                       or context.scene.render.film_transparent)
+        row.enabled = capture_has_alpha(settings.scope, settings.capture_region_object,
+                                        context.scene.render.film_transparent)
         row.prop(settings, "export_mask_sidecars")
 
 
