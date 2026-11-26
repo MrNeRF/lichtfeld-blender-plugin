@@ -11,10 +11,10 @@ import shutil
 import subprocess
 import uuid
 if __package__:
-    from .bridge_core import atomic_json, read_json, read_job_json, read_dataset_json, verify_artifact, preview_sh_limit, capture_mask_mode, SCHEMA
+    from .bridge_core import atomic_json, read_json, read_job_json, read_dataset_json, verify_artifact, preview_sh_limit, capture_mask_mode, capture_mask_outputs, SCHEMA
     from .capture_settings import TEST_IMAGE, validate_view_count
 else:
-    from bridge_core import atomic_json, read_json, read_job_json, read_dataset_json, verify_artifact, preview_sh_limit, capture_mask_mode, SCHEMA
+    from bridge_core import atomic_json, read_json, read_job_json, read_dataset_json, verify_artifact, preview_sh_limit, capture_mask_mode, capture_mask_outputs, SCHEMA
     from capture_settings import TEST_IMAGE, validate_view_count
 
 
@@ -376,10 +376,11 @@ def captured_dataset(directory, options=None):
     frames = read_dataset_json(transforms_path, {}).get("frames", [])
     if not isinstance(frames, list) or len(frames) != views:
         raise ValueError("The saved view count does not match its camera poses")
-    volume_mask = bool(origin.get("capture_region"))
+    alpha, sidecars = capture_mask_outputs(origin)
+    require_sidecars = sidecars and ("capture_alpha" in origin or bool(origin.get("capture_region")))
     for frame in frames:
-        if volume_mask and not frame.get("mask_path"):
-            raise ValueError("A saved capture region mask is missing.")
+        if require_sidecars and not frame.get("mask_path"):
+            raise ValueError("A saved foreground mask is missing.")
         for field in ("file_path", "mask_path"):
             relative = frame.get(field)
             if (field == "file_path" or relative) and (not isinstance(relative, str) or
@@ -390,7 +391,7 @@ def captured_dataset(directory, options=None):
     options = options or {}
     if options.get("use_depth_loss") and options.get("depth_loss_weight", 2) > 0 and manifest.get("dataset_format") != "COLMAP":
         raise ValueError("This dataset has no training depth anchors. Capture with depth supervision enabled first.")
-    capture_mask_mode(origin.get("scope"), options.get("mask_mode", "AUTO"), volume_mask=volume_mask)
+    capture_mask_mode(options.get("mask_mode", "AUTO"), has_alpha=alpha)
     for enabled, folder, extension in (("use_depth_loss", "depths", ".tiff"),
                                         ("use_normal_loss", "normals", ".tiff")):
         if options.get(enabled):

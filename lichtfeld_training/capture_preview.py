@@ -739,8 +739,6 @@ def draw(layout, context, source, *, width=None):
             row.operator('lichtfeld.save_capture_source', text='Save scene…')
     if s.test_render_image:
         row.operator('lichtfeld.show_test_image', text='Last image')
-    if not s.test_render_active and s.scope == 'SCENE' and context.scene.render.film_transparent:
-        wrapped(layout, 'Entire scene keeps the background. Use Collection to hide it.')
 
 
 def draw_orphaned(layout, _context):

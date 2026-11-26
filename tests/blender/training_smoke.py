@@ -23,6 +23,8 @@ parser.add_argument("backend")
 parser.add_argument("--installed", action="store_true")
 parser.add_argument("--jobs", default="")
 parser.add_argument("--geometry", action="store_true")
+parser.add_argument("--transparent-scene", action="store_true")
+parser.add_argument("--mask-sidecars", action="store_true")
 parser.add_argument("--roi", action="store_true", help="Train a whole-scene capture with volumetric clipping and masks")
 parser.add_argument("--eval", action="store_true", help="Enable evaluation for this smoke test")
 parser.add_argument("--stop-capture", action="store_true")
@@ -64,6 +66,10 @@ bpy.ops.object.select_all(action="DESELECT")
 source.select_set(True)
 bpy.context.view_layer.objects.active = source
 settings = bpy.context.scene.lichtfeld_training
+settings.export_mask_sidecars = options.mask_sidecars
+if options.transparent_scene:
+    settings.scope = "SCENE"
+    bpy.context.scene.render.film_transparent = True
 settings.views = 8
 settings.resolution = options.resolution
 settings.samples = 1
@@ -77,7 +83,7 @@ settings.preview_points = 1000
 settings.preview_seconds = 1
 settings.sh_degree = 1
 settings.strategy = options.strategy
-if options.geometry or options.roi:
+if options.geometry or options.roi or options.transparent_scene:
     settings.engine = "CYCLES"
     settings.samples = 4
 if options.geometry:
@@ -161,13 +167,22 @@ while time.monotonic() < deadline:
                 np.testing.assert_allclose(camera[field], expected[field], atol=1e-4)
         assert all(frame["mask_foreground_fraction"] > 0 for frame in captured["frames"])
         for frame in captured["frames"]:
-            mask = bpy.data.images.load(str(job / "dataset" / frame["mask_path"]), check_existing=False)
-            try:
-                pixels = np.empty(len(mask.pixels), dtype=np.float32)
-                mask.pixels.foreach_get(pixels)
-                assert pixels.reshape(-1, 4)[:, :3].max() > 0.9, frame
-            finally:
-                bpy.data.images.remove(mask)
+            dataset = job / "dataset"
+            image_path = dataset / frame["file_path"]
+            with image_path.open("rb") as file:
+                header = file.read(26)
+            assert header[:8] == b"\x89PNG\r\n\x1a\n" and header[25] == 6, frame
+            assert 0 < frame["mask_foreground_fraction"] < 1, frame
+            assert ("mask_path" in frame) == options.mask_sidecars, frame
+            if options.mask_sidecars:
+                mask = bpy.data.images.load(str(dataset / frame["mask_path"]), check_existing=False)
+                image = bpy.data.images.load(str(image_path), check_existing=False)
+                try:
+                    mask.colorspace_settings.name = image.colorspace_settings.name = "Non-Color"
+                    np.testing.assert_allclose(np.asarray(mask.pixels)[::4], np.asarray(image.pixels)[3::4], atol=1 / 255)
+                finally:
+                    bpy.data.images.remove(mask)
+                    bpy.data.images.remove(image)
         result = next(obj for obj in bpy.context.scene.objects if obj.get("lichtfeld_job_id") == job.name)
         assert result.type == "POINTCLOUD"
         assert result.data.type == "GAUSSIAN_SPLAT"
@@ -185,14 +200,13 @@ while time.monotonic() < deadline:
             addon_utils._is_first_reset()
             warnings = addon_utils._extensions_warnings_get().get(extension.__package__, [])
             assert not warnings, warnings
-        if options.roi:
-            config = extension.read_json(job / "training.json", {})
-            assert config["optimization"]["mask_mode"] == "alpha_consistent"
-            dataset = job / "dataset"
-            manifest = extension.read_json(dataset / "manifest.json", {})
-            frames = extension.read_json(dataset / manifest["transforms_file"], {})["frames"]
-            assert len(frames) == 8
-            assert all((dataset / frame["mask_path"]).is_file() for frame in frames)
+        config = extension.read_json(job / "training.json", {})
+        assert config["optimization"]["mask_mode"] == "alpha_consistent"
+        assert config["optimization"]["use_alpha_as_mask"]
+        restart, _ = extension.jobs.restart_data(job, {}, backend=backend, jobs_directory=prefs.jobs_directory)
+        restart_config = importlib.import_module(extension.__package__ + ".bridge_core").training_config(restart)
+        assert restart_config["optimization"]["mask_mode"] == "alpha_consistent"
+        assert restart_config["optimization"]["use_alpha_as_mask"]
         bpy.ops.wm.save_as_mainfile(filepath=str(Path(area) / "smoke-result.blend"))
         break
     time.sleep(0.02)

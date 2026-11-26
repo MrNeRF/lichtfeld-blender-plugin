@@ -12,7 +12,7 @@ import numpy as np
 from mathutils import Vector
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from bridge_core import atomic_json, read_json, read_job_json, read_dataset_json, digest, artifact_path
+from bridge_core import atomic_json, read_json, read_job_json, read_dataset_json, digest, artifact_path, capture_mask_outputs
 from capture_observations import DepthCoverageError
 
 
@@ -326,7 +326,11 @@ def render_dataset(job_path, reuse_images=False):
     scene.render.use_motion_blur = False
     scene.render.image_settings.file_format = "PNG"
     isolated = job["scope"] != "SCENE"
-    masked = isolated or (bool(region) and not single_render)
+    masked, write_sidecars = capture_mask_outputs(job)
+    if single_render:
+        write_sidecars = False
+        if "capture_alpha" not in job:
+            masked = isolated
     scene.render.image_settings.color_mode = "RGBA" if masked else "RGB"
     scene.render.image_settings.color_depth = "8"
     scene.render.film_transparent = masked
@@ -340,6 +344,8 @@ def render_dataset(job_path, reuse_images=False):
         raise ValueError('Saved camera calibration is incomplete or belongs to another capture. Existing images are preserved.')
     if reuse_images and journal.get("capture_region") != region:
         raise ValueError("The capture region changed. Capture the frame again.")
+    if reuse_images and "capture_alpha" in job and journal.get("mask_outputs") != [masked, write_sidecars]:
+        raise ValueError("Saved alpha or mask outputs differ from the frozen capture. Capture the frame again.")
     frames = []
     geometry = None
     if not single_render and not reuse_images and (visible_seed or job.get('use_depth_loss') or job.get('use_normal_loss')):
@@ -365,7 +371,7 @@ def render_dataset(job_path, reuse_images=False):
                 if not reuse_images:
                     render_test_image(root)
                 atomic_json(root / 'capture-progress.json', {'done': 1, 'total': 1})
-                return  # RGB only: never publish masks, seeds or a reusable dataset.
+                return  # Preview image only: never publish masks, seeds or a reusable dataset.
             if not reuse_images:
                 bpy.ops.render.render(write_still=True)
             rgba = read_capture_rgba(output / relative, width, height) if geometry or masked or reuse_images else None
@@ -380,7 +386,7 @@ def render_dataset(job_path, reuse_images=False):
                 # Preserve the exact calibration that rendered these images, after
                 # checking it against the frozen scene. Do not introduce roundoff.
                 frame = dict(saved)
-                if masked and (not frame.get('mask_path') or not artifact_path(output, frame['mask_path']).is_file()):
+                if write_sidecars and (not frame.get('mask_path') or not artifact_path(output, frame['mask_path']).is_file()):
                     raise ValueError('A saved foreground mask is missing. Existing images are preserved.')
                 for kind, enabled in (('depths', job.get('use_depth_loss')), ('normals', job.get('use_normal_loss'))):
                     path = output / kind / f'view_{index:06d}.tiff'
@@ -389,11 +395,13 @@ def render_dataset(job_path, reuse_images=False):
             if geometry:
                 frame.update(geometry.export(np.array(matrix), job.get('use_depth_loss'), job.get('use_normal_loss'), frame, rgba))
             if masked and not reuse_images:
+                alpha = rgba[:, :, 3].reshape(-1)
+                frame["mask_foreground_fraction"] = float(np.mean(alpha > 127))
+            if write_sidecars and not reuse_images:
                 mask = bpy.data.images.new("LichtFeld alpha", width=width, height=height, alpha=False)
                 try:
                     pixels = np.empty(width * height * 4, dtype=np.float32)
-                    alpha = rgba[:, :, 3].reshape(-1).astype(np.float32) / 255
-                    pixels.reshape(-1, 4)[:, :3] = alpha[:, None]
+                    pixels.reshape(-1, 4)[:, :3] = alpha[:, None].astype(np.float32) / 255
                     pixels.reshape(-1, 4)[:, 3] = 1
                     # Changing a generated image's color space invalidates its pixel
                     # storage in Blender. Configure it before writing the mask.
@@ -406,14 +414,16 @@ def render_dataset(job_path, reuse_images=False):
                     mask.file_format = "PNG"
                     mask.save()
                     frame["mask_path"] = relative_mask
-                    frame["mask_foreground_fraction"] = float(np.mean(alpha > 0.5))
                 finally:
                     bpy.data.images.remove(mask)
             frames.append(frame)
             if not reuse_images and index + 1 == len(cameras):
                 # Recovery only consumes complete calibration. Publish it before
                 # the final progress marker makes this job eligible for recovery.
-                atomic_json(root / "capture-frames.json", {"job_id": job["id"], "frames": frames, "capture_region": region})
+                atomic_json(root / "capture-frames.json", {
+                    "job_id": job["id"], "frames": frames, "capture_region": region,
+                    "mask_outputs": [masked, write_sidecars],
+                })
             atomic_json(root / "capture-progress.json", {"done": index + 1, "total": len(cameras)})
         loop_finished = True
     finally:

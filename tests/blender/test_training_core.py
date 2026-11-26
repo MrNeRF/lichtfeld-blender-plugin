@@ -23,6 +23,29 @@ spec.loader.exec_module(core)
 
 
 class TrainingCoreTest(unittest.TestCase):
+    def test_capture_mask_output_policy_preserves_legacy_jobs(self):
+        cases = (
+            ({"scope": "SCENE"}, (False, False)),
+            ({"scope": "SELECTION"}, (True, True)),
+            ({"scope": "COLLECTION"}, (True, True)),
+            ({"scope": "SCENE", "capture_region": {"shape": "BOX"}}, (True, True)),
+            ({"scope": "SCENE", "capture_alpha": False, "export_mask_sidecars": True}, (False, False)),
+            ({"scope": "SCENE", "capture_alpha": True}, (True, False)),
+            ({"scope": "SELECTION", "capture_alpha": True, "export_mask_sidecars": True}, (True, True)),
+        )
+        for recipe, expected in cases:
+            with self.subTest(recipe=recipe):
+                self.assertEqual(core.capture_mask_outputs(recipe), expected)
+        with self.assertRaisesRegex(ValueError, "no foreground mask"):
+            core.capture_mask_mode("alpha_consistent", has_alpha=False)
+
+    def test_transparency_is_retained_when_foreground_mask_is_disabled(self):
+        job = {"scope": "SCENE", "capture_alpha": True, "mask_mode": "none",
+               "iterations": 16, "eval_interval": 4, "max_points": 2000, "sh_degree": 1, "test_every": 8}
+        optimization = core.training_config(job)["optimization"]
+        self.assertEqual(optimization["mask_mode"], "none")
+        self.assertTrue(optimization["use_alpha_as_mask"])
+
     def test_candidate_must_match_iteration(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "metrics.csv"

@@ -20,7 +20,7 @@ from bpy.props import (BoolProperty, CollectionProperty, EnumProperty, FloatProp
                        PointerProperty, StringProperty, FloatVectorProperty)
 from mathutils import Matrix, Quaternion, Vector
 
-from .bridge_core import (SCHEMA, TERMINAL, atomic_json, read_json, verify_artifact, process_alive)
+from .bridge_core import (SCHEMA, TERMINAL, atomic_json, read_json, verify_artifact, process_alive, capture_has_alpha)
 from lichtfeld_sessions.transport import read_snapshot, discover, SessionClient
 from .visibility import set_hidden, source_steps
 from .ui_text import draw_disclosure, draw_paragraph
@@ -402,8 +402,13 @@ class LichtFeldSettings(bpy.types.PropertyGroup):
     rig_parameter_source: PointerProperty(type=bpy.types.Collection, options={'HIDDEN'},
         description="Generated rig whose parameters were explicitly loaded or last applied; choosing another collection does not replace the controls")
     optimizer_file: StringProperty(name="Additional native parameters (JSON)", subtype="FILE_PATH")
+    export_mask_sidecars: BoolProperty(
+        name="Export separate PNG masks",
+        description="Also save the captured alpha as separate grayscale PNG masks",
+        default=False,
+    )
     mask_mode: EnumProperty(name="Foreground mask",items=[
-        ('AUTO','Automatic','Alpha-consistent for objects/collections; no mask for a whole-scene capture'),
+        ('AUTO','Automatic','Match the captured alpha when present; otherwise train without a foreground mask'),
         ('none','None','Train without the captured foreground mask'),
         ('alpha_consistent','Match alpha','Enforce the captured foreground alpha'),
         ('ignore','Foreground only','Ignore pixels outside the captured foreground'),
@@ -1388,6 +1393,7 @@ def capture_job(context, capture):
            "optimizer_file": bpy.path.abspath(settings.optimizer_file) if settings.optimizer_file else "",
            "optimizer": training_options.optimizer_values(settings),
            "optimizer_schedule": {name:getattr(settings,name) for name in ("refine_start","refine_end","growth_end")}}
+    job.update(capture_alpha=capture["capture_alpha"], export_mask_sidecars=settings.export_mask_sidecars)
     if region := capture.get("capture_region"):
         job["capture_region"] = region
     job.update(engine=render_settings['engine'], samples=render_settings['samples'],
@@ -2533,6 +2539,14 @@ def draw_capture_options(box, context, settings, capture_only, wrapped):
     if details is not None:
         details.label(text='View Layer: ' + context.view_layer.name)
         details.prop(settings, "seed_points")
+        mask_options = details.column(align=True)
+        mask_options.use_property_split = False
+        if settings.scope == "SCENE" and not settings.capture_region_object:
+            mask_options.prop(context.scene.render, "film_transparent", text="Film Transparent (scene)")
+        row = mask_options.row()
+        row.enabled = capture_has_alpha(settings.scope, settings.capture_region_object,
+                                        context.scene.render.film_transparent)
+        row.prop(settings, "export_mask_sidecars")
 
 
 def draw_capture_actions(setup, settings, ready, errors, capture_only, wrapped):
