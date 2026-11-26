@@ -614,7 +614,7 @@ def _live_members(settings, graph):
     if recipe.get('rig_radial_orientation') == 'PANORAMA':
         raise ValueError('Use Apply to edit panorama stations')
     radius = collection.get('lichtfeld_generated_radius')
-    if recipe.get('rig_mode') not in {'SPHERE', 'HEMISPHERE', 'RINGS'} or type(radius) not in (int, float) or not math.isfinite(radius) or not .01 <= radius <= 1000000:
+    if recipe.get('rig_mode') not in RADIAL_MODES or type(radius) not in (int, float) or not math.isfinite(radius) or not .01 <= radius <= 1000000:
         raise ValueError('Apply a sphere, hemisphere or rings rig before editing it live')
     cameras, target = yield from managed_members(collection)
     if target is None or target != settings.rig_aim:

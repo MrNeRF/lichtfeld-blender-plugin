@@ -30,7 +30,7 @@ PROPERTIES = {
     'rig_rings': 'Distribute the camera positions between this many orbits at different elevations',
     'rig_radius': 'Distance from the rig reference center to generated cameras when automatic framing is disabled',
     'rig_distance': 'Minimum distance relative to the rig reference bounding radius; automatic framing can increase it to fit the image',
-    'rig_phase': 'Azimuth for radial rigs; panorama start angle in Guide axes, or yaw offset from Along path / Toward target facing',
+    'rig_phase': 'Rotate radial positions around the center. On a curve, set the start azimuth with Guide axes or the yaw offset with path or target facing',
     'rig_lens': 'Focal length for generated cameras, in millimeters; capture overrides can replace it on capture copies',
     'rig_target': 'Object whose world origin is used as the generated cameras’ aiming target',
     'rig_aim': 'Generated Empty controlling camera aim; moving it updates tracking cameras in the viewport',

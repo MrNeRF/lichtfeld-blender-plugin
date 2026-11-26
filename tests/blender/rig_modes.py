@@ -835,11 +835,17 @@ for mode in ('SPHERE', 'HEMISPHERE', 'RINGS'):
     assert len(poses) == 16
     assert sorted(Counter(tuple(round(value, 5) for value in pose.translation) for pose in poses).values()) == [4] * 4
     aim = s.rig_aim.evaluated_get(graph).matrix_world.translation
+    tilted = False
     for index in range(0, 16, 4):
         axes = [pose.to_quaternion() @ Vector((0, 0, -1)) for pose in poses[index:index + 4]]
         assert axes[0].dot((aim - poses[index].translation).normalized()) > .999
         assert abs(axes[0].dot(axes[1])) < 1e-4
         assert axes[0].dot(axes[2]) < -.999
+        up = poses[index].to_quaternion() @ Vector((0, 1, 0))
+        assert all(abs(axis.dot(up)) < 1e-4 for axis in axes)
+        tilted |= abs(up.z) < .95
+    if mode in {'SPHERE', 'HEMISPHERE'}:
+        assert tilted
     assert not bpy.ops.lichtfeld.live_rig.poll()
     s.rig_radial_orientation = 'TARGET'
     assert bpy.ops.lichtfeld.read_rig() == {'FINISHED'}
@@ -850,8 +856,18 @@ assert bpy.ops.lichtfeld.create_rig() == {'FINISHED'}
 assert len(generated()) == 16
 s.rig_station_shape = 'GRID'
 s.rig_station_rows = 3
+s.rig_station_min, s.rig_station_max = -35, 35
 assert bpy.ops.lichtfeld.create_rig() == {'FINISHED'}
 assert len(generated()) == 4 * 4 * 3
+graph = bpy.context.evaluated_depsgraph_get()
+aim = s.rig_aim.evaluated_get(graph).matrix_world.translation
+first_station = [camera.evaluated_get(graph).matrix_world.copy() for camera in generated()[:12]]
+up = (aim - first_station[0].translation).to_track_quat('-Z', 'Y') @ Vector((0, 1, 0))
+assert abs(up.z) < .95  # This station is elevated, so its grid does not use world Z.
+for index, pose in enumerate(first_station):
+    axis = pose.to_quaternion() @ Vector((0, 0, -1))
+    elevation = (-35, 0, 35)[index // 4]
+    assert abs(axis.dot(up) - math.sin(math.radians(elevation))) < 1e-4
 print('RADIAL_PANORAMA_STATIONS_PASS', flush=True)
 
 
