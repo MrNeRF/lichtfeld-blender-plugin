@@ -168,11 +168,11 @@ def rig_recipe(settings, applied=None):
         'curve':settings.rig_curve.name_full if settings.rig_curve else '',
         'mesh':settings.rig_mesh.name_full if settings.rig_mesh else '',
         'capture_framing': capture_settings.framing_signature(settings.id_data, settings)}
-    if settings.rig_mode in {'SPHERE','HEMISPHERE','RINGS'} and settings.rig_position_variation:
+    if settings.rig_mode in rig_edit.RADIAL_MODES and settings.rig_position_variation:
         values.update(rig_position_variation=settings.rig_position_variation,
                       rig_variation_seed=settings.rig_variation_seed)
-    if settings.rig_mode in rig_edit.RADIAL_MODES and not rig_edit.radial_panorama(settings) and settings.rig_rotation_variation:
-        values.update(rig_rotation_variation=settings.rig_rotation_variation,
+    if settings.rig_mode in rig_edit.RADIAL_MODES and (jitter := rig_edit.rotation_variation(settings)):
+        values.update(rig_rotation_variation=jitter,
                       rig_variation_seed=settings.rig_variation_seed)
     # Default path controls must leave existing recipes byte-for-byte unchanged,
     # including radial rigs whose live editor compares their applied recipe.
@@ -878,6 +878,7 @@ class LF_OT_rig(_RigOperation, bpy.types.Operator):
                     station_rotations.append(rotation)
                     yield
         world_yaw = settings.rig_station_shape == 'BAND' and not radial_panorama
+        jitter = rig_edit.rotation_variation(settings) if settings.rig_mode in rig_edit.RADIAL_MODES else 0
         collection = bpy.data.collections.new("LichtFeld Capture Cameras")
         context.scene.collection.children.link(collection)
         self.collection = collection
@@ -945,9 +946,8 @@ class LF_OT_rig(_RigOperation, bpy.types.Operator):
                     rig_edit.rotate_after_aim(obj, target,
                         (0, 0, yaw) if world_yaw else station_offset.to_euler('XYZ'),
                         world=world_yaw)
-            if settings.rig_mode in rig_edit.RADIAL_MODES and not radial_panorama and settings.rig_rotation_variation:
-                vector = Vector(rig_geometry.seeded_offset(index, settings.rig_variation_seed,
-                    settings.rig_rotation_variation, stream=1))
+            if jitter:
+                vector = Vector(rig_geometry.seeded_offset(index, settings.rig_variation_seed, jitter, stream=1))
                 angles = Quaternion(vector.normalized(), vector.length).to_euler('XYZ') if vector.length else (0, 0, 0)
                 rig_edit.rotate_after_aim(obj, target, angles)
             yield
@@ -2528,11 +2528,11 @@ def draw_capture_cameras(box, context, settings, ready, rig_changed, wrapped):
         box.prop(settings, 'rig_lens')
         if uses_aim:
             box.prop(settings, 'rig_aim_offset')
-        if settings.rig_mode in {'SPHERE','HEMISPHERE','RINGS'}:
+        if settings.rig_mode in rig_edit.RADIAL_MODES:
             box.prop(settings, 'rig_position_variation')
             if not rig_edit.radial_panorama(settings):
                 box.prop(settings, 'rig_rotation_variation')
-            if settings.rig_position_variation or settings.rig_rotation_variation and not rig_edit.radial_panorama(settings):
+            if settings.rig_position_variation or rig_edit.rotation_variation(settings):
                 box.prop(settings, 'rig_variation_seed', text='Seed')
         box = outer
     if managed:
