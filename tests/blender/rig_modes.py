@@ -805,3 +805,136 @@ s.rig_station_shape = 'BAND'
 s.rig_orientation = 'TANGENT'
 assert not bpy.ops.lichtfeld.panorama_density.poll()
 print('PANORAMA_DENSITY_PROPOSES_COUNT_AND_PRESERVES_CAMERAS_UNTIL_APPLY_PASS', flush=True)
+
+
+# All radial shapes share panorama coverage while legacy radial rigs keep one view.
+from collections import Counter
+from mathutils import Vector
+
+s.rig_orientation = 'PANORAMA'  # Existing curve setting is independent of radial orientation.
+s.rig_station_frame = 'PATH'
+s.rig_aim_mode = 'SOURCE'
+s.rig_radial_orientation = 'TARGET'
+s.rig_mode = 'SPHERE'
+s.views = 4
+assert bpy.ops.lichtfeld.create_rig() == {'FINISHED'}
+assert len(generated()) == 4
+assert 'rig_radial_orientation' not in ext.rig_edit.decode_recipe(s.camera_collection['lichtfeld_rig_recipe'])
+s.rig_radial_orientation = 'PANORAMA'
+s.rig_station_shape = 'BAND'
+s.rig_station_views = 4
+s.rig_station_sweep = math.tau
+s.rig_rings = 1
+for mode in ('SPHERE', 'HEMISPHERE', 'RINGS'):
+    s.rig_mode = mode
+    assert bpy.ops.lichtfeld.create_rig() == {'FINISHED'}
+    bpy.context.view_layer.update()
+    graph = bpy.context.evaluated_depsgraph_get()
+    cameras = sorted(generated(), key=lambda camera: camera['lichtfeld_camera_index'])
+    poses = [camera.evaluated_get(graph).matrix_world.copy() for camera in cameras]
+    assert len(poses) == 16
+    assert sorted(Counter(tuple(round(value, 5) for value in pose.translation) for pose in poses).values()) == [4] * 4
+    aim = s.rig_aim.evaluated_get(graph).matrix_world.translation
+    tilted = False
+    for index in range(0, 16, 4):
+        axes = [pose.to_quaternion() @ Vector((0, 0, -1)) for pose in poses[index:index + 4]]
+        assert axes[0].dot((aim - poses[index].translation).normalized()) > .999
+        assert abs(axes[0].dot(axes[1])) < 1e-4
+        assert axes[0].dot(axes[2]) < -.999
+        up = poses[index].to_quaternion() @ Vector((0, 1, 0))
+        assert all(abs(axis.dot(up)) < 1e-4 for axis in axes)
+        tilted |= abs(up.z) < .95
+    if mode in {'SPHERE', 'HEMISPHERE'}:
+        assert tilted
+    assert not bpy.ops.lichtfeld.live_rig.poll()
+    s.rig_radial_orientation = 'TARGET'
+    assert bpy.ops.lichtfeld.read_rig() == {'FINISHED'}
+    assert s.rig_radial_orientation == 'PANORAMA'
+    assert s.rig_station_views == 4
+s.rig_station_shape = 'SPHERE'
+assert bpy.ops.lichtfeld.create_rig() == {'FINISHED'}
+assert len(generated()) == 16
+s.rig_station_shape = 'GRID'
+s.rig_station_rows = 3
+s.rig_station_min, s.rig_station_max = -35, 35
+assert bpy.ops.lichtfeld.create_rig() == {'FINISHED'}
+assert len(generated()) == 4 * 4 * 3
+graph = bpy.context.evaluated_depsgraph_get()
+aim = s.rig_aim.evaluated_get(graph).matrix_world.translation
+first_station = [camera.evaluated_get(graph).matrix_world.copy() for camera in generated()[:12]]
+up = (aim - first_station[0].translation).to_track_quat('-Z', 'Y') @ Vector((0, 1, 0))
+assert abs(up.z) < .95  # This station is elevated, so its grid does not use world Z.
+for index, pose in enumerate(first_station):
+    axis = pose.to_quaternion() @ Vector((0, 0, -1))
+    elevation = (-35, 0, 35)[index // 4]
+    assert abs(axis.dot(up) - math.sin(math.radians(elevation))) < 1e-4
+print('RADIAL_PANORAMA_STATIONS_PASS', flush=True)
+
+
+# Hidden rotation jitter must have no effect on automatic fitting or recipe reload.
+s.rig_mode = 'HEMISPHERE'
+s.rig_auto_fit = True
+s.rig_lens = 150
+s.rig_rotation_variation = math.radians(15)
+s.rig_station_shape = 'BAND'
+s.rig_station_views = 5
+s.rig_station_sweep = math.pi / 2
+assert bpy.ops.lichtfeld.create_rig() == {'FINISHED'}
+applied = s.camera_collection
+radius = applied['lichtfeld_generated_radius']
+recipe = applied['lichtfeld_rig_recipe']
+bpy.context.view_layer.update()
+graph = bpy.context.evaluated_depsgraph_get()
+poses = [camera.evaluated_get(graph).matrix_world.copy() for camera in generated()[:5]]
+aim = s.rig_aim.evaluated_get(graph).matrix_world.translation
+forward = (aim - poses[2].translation).normalized()
+for pose, degrees in zip(poses, (45, 22.5, 0, 22.5, 45)):
+    axis = pose.to_quaternion() @ Vector((0, 0, -1))
+    assert abs(axis.dot(forward) - math.cos(math.radians(degrees))) < 1e-4
+assert bpy.ops.lichtfeld.read_rig() == {'FINISHED'}
+assert s.rig_rotation_variation == 0
+assert bpy.ops.lichtfeld.create_rig() == {'FINISHED'}
+assert applied['lichtfeld_rig_recipe'] == recipe
+assert math.isclose(applied['lichtfeld_generated_radius'], radius, rel_tol=1e-6)
+
+# Test the common density operator and the other coverage shapes on radial positions.
+assert bpy.ops.lichtfeld.panorama_density(maximum_step=math.radians(20)) == {'FINISHED'}
+assert s.rig_station_views == 6 and len(generated()) == 20
+s.rig_position_variation = 5
+for coverage in ('ELEVATION', 'HEMISPHERE'):
+    s.rig_station_shape = coverage
+    assert bpy.ops.lichtfeld.create_rig() == {'FINISHED'}
+    assert len(generated()) == 24
+    assert sorted(Counter(tuple(camera.location) for camera in generated()).values()) == [6] * 4
+
+# Cancel an update after new cameras have been staged.
+bpy.context.view_layer.update()
+saved = [(camera, camera.data, camera.matrix_world.copy()) for camera in generated()]
+saved_recipe = applied['lichtfeld_rig_recipe']
+counts = (len(bpy.data.objects), len(bpy.data.cameras), len(bpy.data.collections))
+s.rig_station_views = 7
+owner = SimpleNamespace(collection=None, rig_backup=[], committed=False, report=lambda *args: None)
+work = ext.LF_OT_rig.generate(owner, bpy.context)
+while owner.collection is None or not any(obj.type == 'CAMERA' for obj in owner.collection.objects):
+    next(work)
+work.close()
+for _ in ext.LF_OT_rig.cleanup(owner):
+    pass
+assert applied['lichtfeld_rig_recipe'] == saved_recipe
+assert (len(bpy.data.objects), len(bpy.data.cameras), len(bpy.data.collections)) == counts
+assert [(camera, camera.data, camera.matrix_world) for camera in generated()] == saved
+print('RADIAL_PANORAMA_FIT_PARTIAL_DENSITY_AND_CANCEL_PASS', flush=True)
+
+
+# A saved panorama recipe must restore its orientation and camera count.
+from tempfile import TemporaryDirectory
+
+with TemporaryDirectory(prefix='lichtfeld-radial-') as directory:
+    saved_file = str(Path(directory) / 'panorama.blend')
+    bpy.ops.wm.save_as_mainfile(filepath=saved_file)
+    bpy.ops.wm.open_mainfile(filepath=saved_file, use_scripts=False)
+    s = bpy.context.scene.lichtfeld_training
+    assert bpy.ops.lichtfeld.read_rig() == {'FINISHED'}
+    assert s.rig_radial_orientation == 'PANORAMA' and s.rig_station_shape == 'HEMISPHERE'
+    assert s.rig_station_views == 6 and len(generated()) == 24
+print('RADIAL_PANORAMA_SAVED_SCENE_PASS', flush=True)

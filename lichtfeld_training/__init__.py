@@ -168,11 +168,11 @@ def rig_recipe(settings, applied=None):
         'curve':settings.rig_curve.name_full if settings.rig_curve else '',
         'mesh':settings.rig_mesh.name_full if settings.rig_mesh else '',
         'capture_framing': capture_settings.framing_signature(settings.id_data, settings)}
-    if settings.rig_mode in {'SPHERE','HEMISPHERE','RINGS'} and settings.rig_position_variation:
+    if settings.rig_mode in rig_edit.RADIAL_MODES and settings.rig_position_variation:
         values.update(rig_position_variation=settings.rig_position_variation,
                       rig_variation_seed=settings.rig_variation_seed)
-    if settings.rig_mode in {'SPHERE','HEMISPHERE','RINGS'} and settings.rig_rotation_variation:
-        values.update(rig_rotation_variation=settings.rig_rotation_variation,
+    if settings.rig_mode in rig_edit.RADIAL_MODES and (jitter := rig_edit.rotation_variation(settings)):
+        values.update(rig_rotation_variation=jitter,
                       rig_variation_seed=settings.rig_variation_seed)
     # Default path controls must leave existing recipes byte-for-byte unchanged,
     # including radial rigs whose live editor compares their applied recipe.
@@ -184,18 +184,20 @@ def rig_recipe(settings, applied=None):
             values['rig_path_reverse'] = True
         if settings.rig_path_link:
             values['rig_path_link'] = True
-        if settings.rig_orientation == 'PANORAMA':
-            values['rig_station_views'] = settings.rig_station_views
-            if settings.rig_station_shape in {'BAND', 'GRID', 'ELEVATION'}:
-                values['rig_station_sweep'] = settings.rig_station_sweep
-            if settings.rig_station_shape != 'BAND':
-                values['rig_station_shape'] = settings.rig_station_shape
-                if settings.rig_station_shape in {'GRID', 'ELEVATION'}:
-                    values.update(rig_station_min=settings.rig_station_min, rig_station_max=settings.rig_station_max)
-                if settings.rig_station_shape == 'GRID':
-                    values['rig_station_rows'] = settings.rig_station_rows
-            if settings.rig_station_frame != 'GUIDE':
-                values['rig_station_frame'] = settings.rig_station_frame
+    if rig_edit.radial_panorama(settings):
+        values['rig_radial_orientation'] = 'PANORAMA'
+    if rig_edit.panorama_stations(settings):
+        values['rig_station_views'] = settings.rig_station_views
+        if settings.rig_station_shape in {'BAND', 'GRID', 'ELEVATION'}:
+            values['rig_station_sweep'] = settings.rig_station_sweep
+        if settings.rig_station_shape != 'BAND':
+            values['rig_station_shape'] = settings.rig_station_shape
+            if settings.rig_station_shape in {'GRID', 'ELEVATION'}:
+                values.update(rig_station_min=settings.rig_station_min, rig_station_max=settings.rig_station_max)
+            if settings.rig_station_shape == 'GRID':
+                values['rig_station_rows'] = settings.rig_station_rows
+        if settings.rig_mode == 'PATH' and settings.rig_station_frame != 'GUIDE':
+            values['rig_station_frame'] = settings.rig_station_frame
     if applied is not None:
         values.update(applied)
     return json.dumps(values, sort_keys=True)
@@ -384,7 +386,7 @@ class LichtFeldSettings(bpy.types.PropertyGroup):
         ('PATH', 'Along path', 'Center each sector along the path with guide Z up; vertical tangents need another facing reference'),
         ('TARGET', 'Toward target', 'Center each sector on the existing aim target with world Z up; moving it updates directions immediately after Apply')])
     rig_station_views: IntProperty(name="Views per station", default=8, min=4, max=capture_settings.MAX_VIEWS,
-        description="Perspective directions at each sampled curve position; station count times this value must fit the capture view limit")
+        description="Perspective directions at each station; station count times this value must fit the capture view limit")
     rig_station_sweep: FloatProperty(name="Horizontal sweep", default=2*math.pi, min=math.radians(.1), max=2*math.pi,
         subtype='ANGLE', description="Angular range of camera axes, not image coverage. Guide axes uses a start angle; path/target facing centers partial sectors. 360 degrees omits the duplicate final direction")
     rig_path_reverse: BoolProperty(name="Reverse viewing direction", description="Look toward the previous sampled point without changing positions; applies to Follow path or Panorama stations facing Along path")
@@ -399,6 +401,9 @@ class LichtFeldSettings(bpy.types.PropertyGroup):
         ("TARGET", "Look at target", "Aim at the explicit target or source center"),
         ("TANGENT", "Follow path", "Aim along the sampled path"),
         ("PANORAMA", "Panorama stations", "Several perspective views per curve station, using guide, path or target facing; not an equirectangular panorama")])
+    rig_radial_orientation: EnumProperty(name="Orientation", items=[
+        ("TARGET", "Look at target", "One perspective camera at each position"),
+        ("PANORAMA", "Panorama stations", "Several perspective cameras at each position, oriented around the direction to the aim target")])
     rig_parameter_source: PointerProperty(type=bpy.types.Collection, options={'HIDDEN'},
         description="Generated rig whose parameters were explicitly loaded or last applied; choosing another collection does not replace the controls")
     optimizer_file: StringProperty(name="Additional native parameters (JSON)", subtype="FILE_PATH")
@@ -572,8 +577,8 @@ class LF_OT_panorama_density(bpy.types.Operator):
     def poll(cls, context):
         settings = context.scene.lichtfeld_training
         return (not settings.running and not settings.operation_busy and not rig_edit.live_root(settings)
-                and settings.rig_mode == 'PATH' and settings.rig_orientation == 'PANORAMA'
-                and settings.rig_path_sampling == 'COUNT' and settings.rig_station_shape in {'BAND', 'GRID'})
+                and rig_edit.panorama_stations(settings)
+                and (settings.rig_mode != 'PATH' or settings.rig_path_sampling == 'COUNT') and settings.rig_station_shape in {'BAND', 'GRID'})
 
     def invoke(self, context, event):
         return context.window_manager.invoke_props_dialog(self, width=300)
@@ -855,21 +860,25 @@ class LF_OT_rig(_RigOperation, bpy.types.Operator):
             raise ValueError("Camera positions must be finite")
         if len({tuple(point) for point in points}) != len(points):
             raise ValueError("The path produces repeated camera positions. Adjust the curve or sample count.")
+        radial_panorama = rig_edit.radial_panorama(settings)
+        station_frame = 'TARGET' if radial_panorama else settings.rig_station_frame
         station_directions = None
         station_rotations = []
         total = len(points)
-        if settings.rig_mode == 'PATH' and settings.rig_orientation == 'PANORAMA':
+        if rig_edit.panorama_stations(settings):
             total *= rig_geometry.station_view_count(settings.rig_station_views, settings.rig_station_shape, settings.rig_station_rows)
             capture_settings.validate_view_count(total)
             station_directions = list(rig_geometry.station_directions(settings.rig_station_views, settings.rig_station_shape,
-                settings.rig_phase, settings.rig_station_sweep, settings.rig_station_min, settings.rig_station_max,
-                centered=settings.rig_station_frame != 'GUIDE', rows=settings.rig_station_rows))
+                0 if radial_panorama else settings.rig_phase, settings.rig_station_sweep, settings.rig_station_min, settings.rig_station_max,
+                centered=station_frame != 'GUIDE', rows=settings.rig_station_rows))
             station_basis = Matrix(((0,-1,0), (0,0,1), (-1,0,0))).to_quaternion()
-            if settings.rig_station_frame == 'PATH':
+            if station_frame == 'PATH':
                 for rotation in rig_path.station_frames(points, path_rotation,
                         path_curve.data.splines[0].use_cyclic_u, settings.rig_path_reverse):
                     station_rotations.append(rotation)
                     yield
+        world_yaw = settings.rig_station_shape == 'BAND' and not radial_panorama
+        jitter = rig_edit.rotation_variation(settings) if settings.rig_mode in rig_edit.RADIAL_MODES else 0
         collection = bpy.data.collections.new("LichtFeld Capture Cameras")
         context.scene.collection.children.link(collection)
         self.collection = collection
@@ -914,8 +923,8 @@ class LF_OT_rig(_RigOperation, bpy.types.Operator):
             if direction.length < 1e-8:
                 raise ValueError("A camera coincides with its target or a duplicate path sample; adjust the rig")
             rotation = direction.to_track_quat("-Z", "Y")
-            if station_directions and settings.rig_station_frame != 'GUIDE':
-                if settings.rig_station_shape == 'BAND':
+            if station_directions and station_frame != 'GUIDE':
+                if world_yaw:
                     yaw = math.atan2(station_direction.y, station_direction.x)
                     if station_rotations:
                         up = path_rotation @ Vector((0,0,1))
@@ -935,11 +944,10 @@ class LF_OT_rig(_RigOperation, bpy.types.Operator):
                 rig_edit.track(obj, target)
                 if station_directions:
                     rig_edit.rotate_after_aim(obj, target,
-                        (0, 0, yaw) if settings.rig_station_shape == 'BAND' else station_offset.to_euler('XYZ'),
-                        world=settings.rig_station_shape == 'BAND')
-            if settings.rig_mode in {'SPHERE','HEMISPHERE','RINGS'} and settings.rig_rotation_variation:
-                vector = Vector(rig_geometry.seeded_offset(index, settings.rig_variation_seed,
-                    settings.rig_rotation_variation, stream=1))
+                        (0, 0, yaw) if world_yaw else station_offset.to_euler('XYZ'),
+                        world=world_yaw)
+            if jitter:
+                vector = Vector(rig_geometry.seeded_offset(index, settings.rig_variation_seed, jitter, stream=1))
                 angles = Quaternion(vector.normalized(), vector.length).to_euler('XYZ') if vector.length else (0, 0, 0)
                 rig_edit.rotate_after_aim(obj, target, angles)
             yield
@@ -1007,6 +1015,9 @@ class LF_OT_live_rig(_RigOperation, bpy.types.Operator):
             return False
         if not rig_edit.live_root(s) and s.rig_parameter_source != s.camera_collection:
             cls.poll_message_set('Load the selected rig first')
+            return False
+        if not rig_edit.live_root(s) and rig_edit.radial_panorama(s):
+            cls.poll_message_set('Use Apply to edit panorama stations')
             return False
         return True
 
@@ -1265,6 +1276,7 @@ class LF_OT_read_rig(bpy.types.Operator):
             s.rig_radius = values.get("rig_radius", 3)
             s.rig_path_sampling = values.get('rig_path_sampling', 'COUNT')
             s.rig_path_spacing = values.get('rig_path_spacing', 1)
+            s.rig_radial_orientation = values.get('rig_radial_orientation', 'TARGET')
             s.rig_station_shape = values.get('rig_station_shape', 'BAND')
             s.rig_station_rows = values.get('rig_station_rows', 2)
             s.rig_station_min = values.get('rig_station_min', -45)
@@ -2346,7 +2358,7 @@ def draw_rig_actions(layout, settings, pending, *, edit=False):
         row.operator('lichtfeld.create_rig', text='Apply to current rig' if managed and edit else 'Apply rig changes' if managed else 'Create camera rig')
         if managed and pending:
             row.operator('lichtfeld.read_rig', text='Revert', icon='LOOP_BACK')
-    if managed and not pending and settings.rig_parameter_source == rig and settings.rig_mode in {'SPHERE', 'HEMISPHERE', 'RINGS'}:
+    if managed and not pending and settings.rig_parameter_source == rig and settings.rig_mode in rig_edit.RADIAL_MODES and not rig_edit.radial_panorama(settings):
         row.operator('lichtfeld.live_rig', text='Edit live')
     if managed and edit:
         layout.operator('lichtfeld.create_rig', text='Create new rig').new_rig = True
@@ -2436,13 +2448,15 @@ def draw_capture_cameras(box, context, settings, ready, rig_changed, wrapped):
     elif reference.mode == 'UNSET' and managed and settings.rig_parameter_source == rig:
         wrapped(box, 'Capture content applies only to new rigs. Choose an explicit center for this older rig.')
     box.prop(settings, 'rig_mode', text='Shape')
+    if settings.rig_mode in rig_edit.RADIAL_MODES:
+        box.prop(settings, 'rig_radial_orientation')
     if settings.rig_mode == 'PATH':
         box.prop(settings, 'rig_curve', text='Curve')
         box.operator('lichtfeld.create_path_guide', text='Create path guide…')
         box.prop(settings, 'rig_path_sampling')
     if (settings.rig_mode != 'MESH' or settings.rig_mesh_distribution != 'FACES') and not (
             settings.rig_mode == 'PATH' and settings.rig_path_sampling == 'SPACING'):
-        box.prop(settings, 'views', text='Stations' if settings.rig_mode == 'PATH' and settings.rig_orientation == 'PANORAMA' else 'Camera count')
+        box.prop(settings, 'views', text='Stations' if rig_edit.panorama_stations(settings) else 'Camera count')
     elif settings.rig_mode == 'PATH':
         box.prop(settings, 'rig_path_spacing', text='Spacing')
     if settings.rig_mode not in {'PATH', 'MESH'}:
@@ -2460,24 +2474,6 @@ def draw_capture_cameras(box, context, settings, ready, rig_changed, wrapped):
                     wrapped(box, 'Last distance was increased by automatic fitting.')
     elif settings.rig_mode == 'PATH':
         box.prop(settings, 'rig_orientation')
-        if settings.rig_orientation == 'PANORAMA':
-            box.prop(settings, 'rig_station_frame')
-            box.prop(settings, 'rig_station_shape')
-            box.prop(settings, 'rig_station_views', text='Views/row' if settings.rig_station_shape == 'GRID' else 'Views/station')
-            if settings.rig_station_shape in {'BAND', 'GRID', 'ELEVATION'}:
-                box.prop(settings, 'rig_station_sweep', text='Sweep')
-            if settings.rig_station_shape == 'GRID':
-                box.prop(settings, 'rig_station_rows')
-            if settings.rig_station_shape in {'GRID', 'ELEVATION'}:
-                box.prop(settings, 'rig_station_min', text='Min elevation')
-                box.prop(settings, 'rig_station_max', text='Max elevation')
-            station_views = rig_geometry.station_view_count(settings.rig_station_views, settings.rig_station_shape, settings.rig_station_rows)
-            if settings.rig_path_sampling == 'COUNT':
-                box.label(text=f'{settings.views:,} stations × {station_views:,} = {settings.views*station_views:,} cameras')
-                if settings.rig_station_shape in {'BAND', 'GRID'}:
-                    box.operator('lichtfeld.panorama_density')
-            else:
-                box.label(text='Station total updates on Apply')
         if settings.rig_orientation == 'TANGENT' or settings.rig_orientation == 'PANORAMA' and settings.rig_station_frame == 'PATH':
             box.prop(settings, 'rig_path_reverse', text='Look backward')
         box.prop(settings, 'rig_path_link', text='Follow guide')
@@ -2488,6 +2484,25 @@ def draw_capture_cameras(box, context, settings, ready, rig_changed, wrapped):
         box.prop(settings, 'rig_mesh_distribution')
         box.prop(settings, 'rig_mesh_orientation')
         box.prop(settings, 'rig_mesh_offset')
+    if rig_edit.panorama_stations(settings):
+        if settings.rig_mode == 'PATH':
+            box.prop(settings, 'rig_station_frame')
+        box.prop(settings, 'rig_station_shape')
+        box.prop(settings, 'rig_station_views', text='Views/row' if settings.rig_station_shape == 'GRID' else 'Views/station')
+        if settings.rig_station_shape in {'BAND', 'GRID', 'ELEVATION'}:
+            box.prop(settings, 'rig_station_sweep', text='Sweep')
+        if settings.rig_station_shape == 'GRID':
+            box.prop(settings, 'rig_station_rows')
+        if settings.rig_station_shape in {'GRID', 'ELEVATION'}:
+            box.prop(settings, 'rig_station_min', text='Min elevation')
+            box.prop(settings, 'rig_station_max', text='Max elevation')
+        station_views = rig_geometry.station_view_count(settings.rig_station_views, settings.rig_station_shape, settings.rig_station_rows)
+        if settings.rig_mode != 'PATH' or settings.rig_path_sampling == 'COUNT':
+            box.label(text=f'{settings.views:,} stations × {station_views:,} = {settings.views*station_views:,} cameras')
+            if settings.rig_station_shape in {'BAND', 'GRID'}:
+                box.operator('lichtfeld.panorama_density')
+        else:
+            box.label(text='Station total updates on Apply')
     uses_aim = rig_edit.uses_aim(settings)
     if uses_aim:
         box.prop(settings, 'rig_aim_mode', text='Look at')
@@ -2513,10 +2528,11 @@ def draw_capture_cameras(box, context, settings, ready, rig_changed, wrapped):
         box.prop(settings, 'rig_lens')
         if uses_aim:
             box.prop(settings, 'rig_aim_offset')
-        if settings.rig_mode in {'SPHERE','HEMISPHERE','RINGS'}:
+        if settings.rig_mode in rig_edit.RADIAL_MODES:
             box.prop(settings, 'rig_position_variation')
-            box.prop(settings, 'rig_rotation_variation')
-            if settings.rig_position_variation or settings.rig_rotation_variation:
+            if not rig_edit.radial_panorama(settings):
+                box.prop(settings, 'rig_rotation_variation')
+            if settings.rig_position_variation or rig_edit.rotation_variation(settings):
                 box.prop(settings, 'rig_variation_seed', text='Seed')
         box = outer
     if managed:

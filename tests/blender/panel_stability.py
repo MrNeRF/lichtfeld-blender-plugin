@@ -172,6 +172,24 @@ for loaded in (False, True):
     assert sum(name=='lichtfeld.read_rig' for name,row in layout.operations)==1
 print('CAPTURE_PLAN_APPLIED_REFERENCE_TASK_ACTIONS_AND_COLLAPSED_SECTIONS_PASS')
 
+# Panorama controls remain readable in the narrow sidebar.
+s.rig_mode = 'SPHERE'
+s.rig_radial_orientation = 'PANORAMA'
+s.rig_station_shape = 'BAND'
+s.views, s.rig_station_views = 12, 8
+s.rig_parameter_source = s.camera_collection
+panels = bpy.context.window_manager.lichtfeld_panels
+panels.rig_details = True
+layout = Layout()
+ext.draw_capture_cameras(layout, context, s, ready, False, lambda box, text: box.label(text=text))
+fields = dict(layout.fields)
+assert 'rig_radial_orientation' in fields and 'rig_station_views' in fields
+assert 'rig_station_frame' not in fields and 'rig_rotation_variation' not in fields
+assert '12 stations × 8 = 96 cameras' in layout.labels
+assert 'lichtfeld.live_rig' not in dict(layout.operations)
+s.rig_radial_orientation = 'TARGET'
+panels.rig_details = False
+
 # Record each action's local enabled state while the Capture sets disclosure is closed.
 class CameraActionLayout(Layout):
     enabled = True

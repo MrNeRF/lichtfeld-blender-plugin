@@ -166,6 +166,8 @@ def camera_projection(camera, graph, output):
 def fitting_factor(scene, settings, graph):
     """Smallest actual half-FOV, including portrait format and optical overrides."""
     import bpy
+    from .rig_edit import rotation_variation
+
     value = format_for(scene, settings)
     data = bpy.data.cameras.new('LichtFeld framing calculation')
     camera = None
@@ -177,7 +179,7 @@ def fitting_factor(scene, settings, graph):
         limits = ((1 - abs(p[0][2])) / p[0][0], (1 - abs(p[1][2])) / p[1][1])
         if min(limits) <= 0:
             raise ValueError('Automatic framing needs the optical axis inside the capture frame; reduce camera shift')
-        half_angle = math.atan(min(limits)) - settings.rig_rotation_variation
+        half_angle = math.atan(min(limits)) - rotation_variation(settings)
         if half_angle <= 0:
             raise ValueError('Rotation jitter exceeds the capture half field of view; reduce jitter or use a wider lens')
         return 1.05 / math.sin(half_angle)

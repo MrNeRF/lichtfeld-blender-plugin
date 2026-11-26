@@ -116,6 +116,21 @@ def remember_objects(collection, settings):
             del collection[key]
 
 
+RADIAL_MODES = {"SPHERE", "HEMISPHERE", "RINGS"}
+
+
+def radial_panorama(settings):
+    return settings.rig_mode in RADIAL_MODES and settings.rig_radial_orientation == "PANORAMA"
+
+
+def rotation_variation(settings):
+    return 0 if radial_panorama(settings) else settings.rig_rotation_variation
+
+
+def panorama_stations(settings):
+    return radial_panorama(settings) or settings.rig_mode == "PATH" and settings.rig_orientation == "PANORAMA"
+
+
 def uses_aim(settings):
     if settings.rig_mode == 'PATH':
         return settings.rig_orientation == 'TARGET' or (
@@ -436,6 +451,7 @@ def decode_recipe(encoded):
             raise ValueError("Rig parameter outside its range: "+name)
     for name, valid in (("rig_mode",{"SPHERE","HEMISPHERE","RINGS","PATH","MESH"}),
                         ("rig_orientation",{"TARGET","TANGENT","PANORAMA"}),
+                        ("rig_radial_orientation",{"TARGET","PANORAMA"}),
                         ('rig_path_sampling', {'COUNT', 'SPACING'}),
                         ('rig_station_frame', {'GUIDE', 'PATH', 'TARGET'}),
                         ('rig_station_shape', {'BAND', 'GRID', 'ELEVATION', 'HEMISPHERE', 'SPHERE'}),
@@ -595,8 +611,10 @@ def _live_members(settings, graph):
     if collection.library or collection.override_library:
         raise ValueError('Make the rig local before editing it live')
     recipe = decode_recipe(collection.get('lichtfeld_rig_recipe'))
+    if recipe.get('rig_radial_orientation') == 'PANORAMA':
+        raise ValueError('Use Apply to edit panorama stations')
     radius = collection.get('lichtfeld_generated_radius')
-    if recipe.get('rig_mode') not in {'SPHERE', 'HEMISPHERE', 'RINGS'} or type(radius) not in (int, float) or not math.isfinite(radius) or not .01 <= radius <= 1000000:
+    if recipe.get('rig_mode') not in RADIAL_MODES or type(radius) not in (int, float) or not math.isfinite(radius) or not .01 <= radius <= 1000000:
         raise ValueError('Apply a sphere, hemisphere or rings rig before editing it live')
     cameras, target = yield from managed_members(collection)
     if target is None or target != settings.rig_aim:
