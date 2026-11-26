@@ -116,6 +116,17 @@ def remember_objects(collection, settings):
             del collection[key]
 
 
+RADIAL_MODES = {"SPHERE", "HEMISPHERE", "RINGS"}
+
+
+def radial_panorama(settings):
+    return settings.rig_mode in RADIAL_MODES and settings.rig_radial_orientation == "PANORAMA"
+
+
+def panorama_stations(settings):
+    return radial_panorama(settings) or settings.rig_mode == "PATH" and settings.rig_orientation == "PANORAMA"
+
+
 def uses_aim(settings):
     if settings.rig_mode == 'PATH':
         return settings.rig_orientation == 'TARGET' or (
@@ -436,6 +447,7 @@ def decode_recipe(encoded):
             raise ValueError("Rig parameter outside its range: "+name)
     for name, valid in (("rig_mode",{"SPHERE","HEMISPHERE","RINGS","PATH","MESH"}),
                         ("rig_orientation",{"TARGET","TANGENT","PANORAMA"}),
+                        ("rig_radial_orientation",{"TARGET","PANORAMA"}),
                         ('rig_path_sampling', {'COUNT', 'SPACING'}),
                         ('rig_station_frame', {'GUIDE', 'PATH', 'TARGET'}),
                         ('rig_station_shape', {'BAND', 'GRID', 'ELEVATION', 'HEMISPHERE', 'SPHERE'}),

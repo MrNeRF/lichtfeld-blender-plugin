@@ -805,3 +805,51 @@ s.rig_station_shape = 'BAND'
 s.rig_orientation = 'TANGENT'
 assert not bpy.ops.lichtfeld.panorama_density.poll()
 print('PANORAMA_DENSITY_PROPOSES_COUNT_AND_PRESERVES_CAMERAS_UNTIL_APPLY_PASS', flush=True)
+
+
+# All radial shapes share panorama coverage while legacy radial rigs keep one view.
+from collections import Counter
+from mathutils import Vector
+
+s.rig_orientation = 'PANORAMA'  # Existing curve setting is independent of radial orientation.
+s.rig_station_frame = 'PATH'
+s.rig_aim_mode = 'SOURCE'
+s.rig_radial_orientation = 'TARGET'
+s.rig_mode = 'SPHERE'
+s.views = 4
+assert bpy.ops.lichtfeld.create_rig() == {'FINISHED'}
+assert len(generated()) == 4
+assert 'rig_radial_orientation' not in ext.rig_edit.decode_recipe(s.camera_collection['lichtfeld_rig_recipe'])
+s.rig_radial_orientation = 'PANORAMA'
+s.rig_station_shape = 'BAND'
+s.rig_station_views = 4
+s.rig_station_sweep = math.tau
+s.rig_rings = 1
+for mode in ('SPHERE', 'HEMISPHERE', 'RINGS'):
+    s.rig_mode = mode
+    assert bpy.ops.lichtfeld.create_rig() == {'FINISHED'}
+    bpy.context.view_layer.update()
+    graph = bpy.context.evaluated_depsgraph_get()
+    cameras = sorted(generated(), key=lambda camera: camera['lichtfeld_camera_index'])
+    poses = [camera.evaluated_get(graph).matrix_world.copy() for camera in cameras]
+    assert len(poses) == 16
+    assert sorted(Counter(tuple(round(value, 5) for value in pose.translation) for pose in poses).values()) == [4] * 4
+    aim = s.rig_aim.evaluated_get(graph).matrix_world.translation
+    for index in range(0, 16, 4):
+        axes = [pose.to_quaternion() @ Vector((0, 0, -1)) for pose in poses[index:index + 4]]
+        assert axes[0].dot((aim - poses[index].translation).normalized()) > .999
+        assert abs(axes[0].dot(axes[1])) < 1e-4
+        assert axes[0].dot(axes[2]) < -.999
+    assert not bpy.ops.lichtfeld.live_rig.poll()
+    s.rig_radial_orientation = 'TARGET'
+    assert bpy.ops.lichtfeld.read_rig() == {'FINISHED'}
+    assert s.rig_radial_orientation == 'PANORAMA'
+    assert s.rig_station_views == 4
+s.rig_station_shape = 'SPHERE'
+assert bpy.ops.lichtfeld.create_rig() == {'FINISHED'}
+assert len(generated()) == 16
+s.rig_station_shape = 'GRID'
+s.rig_station_rows = 3
+assert bpy.ops.lichtfeld.create_rig() == {'FINISHED'}
+assert len(generated()) == 4 * 4 * 3
+print('RADIAL_PANORAMA_STATIONS_PASS', flush=True)
