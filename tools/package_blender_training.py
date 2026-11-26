@@ -19,7 +19,7 @@ PROTOCOL_WHEEL = tomllib.loads((Path(__file__).resolve().parents[1] /
 
 RUNTIME_FILES = frozenset("""
 __init__.py backend_hook.py blender_manifest.toml bridge_core.py
-capture_observations.py capture_passes.py capture_preview.py capture_seed.py
+capture_observations.py capture_passes.py capture_preview.py capture_region.py capture_seed.py
 capture_settings.py geometry_maps.py job_control.py job_panel.py jobs.py
 mrnf_defaults.json preflight.py preview_scene.py render_devices.py render_worker.py
 rig_analysis.py rig_edit.py rig_geometry.py rig_mesh.py rig_path.py scene_render.py

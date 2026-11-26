@@ -305,6 +305,10 @@ class LichtFeldSettings(bpy.types.PropertyGroup):
         ("SCENE", "Entire scene", "Capture the scene; place cameras for the areas you need")])
     source_objects: CollectionProperty(type=LichtFeldSourceRef)
     source_selection: StringProperty(default="", maxlen=262144, options={"HIDDEN"})
+    capture_region_object: PointerProperty(
+        name="Capture region", type=bpy.types.Object,
+        description="Optional Cube or Sphere Empty that clips captured geometry to its volume",
+        poll=lambda _settings, obj: obj.type == 'EMPTY' and obj.empty_display_type in {'CUBE', 'SPHERE'})
     source_collection: PointerProperty(name="Source collection", type=bpy.types.Collection)
     camera_collection: PointerProperty(name="Capture cameras", type=bpy.types.Collection)
     capture_collections: CollectionProperty(type=LichtFeldCaptureCollection,
@@ -1109,6 +1113,71 @@ def allowed(context, action):
     return flags.get(key, False)
 
 
+class LF_OT_create_capture_region(bpy.types.Operator):
+    bl_idname = "lichtfeld.create_capture_region"
+    bl_label = "Create capture region"
+    bl_description = "Create an editable volume around selected surfaces, or at the 3D cursor"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    shape: EnumProperty(name="Shape", items=[
+        ('CUBE', 'Box', 'Use a box volume'),
+        ('SPHERE', 'Sphere', 'Scale individual axes to make an ellipsoid'),
+    ])
+
+    @classmethod
+    def poll(cls, context):
+        settings = context.scene.lichtfeld_training
+        if context.mode != 'OBJECT':
+            cls.poll_message_set("Return to Object Mode to create a capture region")
+            return False
+        if settings.running or settings.operation_busy or rig_edit.live_root(settings) or rig_edit.render_busy(context):
+            cls.poll_message_set("Finish the current operation before creating a capture region")
+            return False
+        return not settings.capture_region_object
+
+    def invoke(self, context, event):
+        return context.window_manager.invoke_props_dialog(self)
+
+    def execute(self, context):
+        settings = context.scene.lichtfeld_training
+        helpers = preflight.capture_helpers(settings)
+        selected = tuple(context.selected_objects)
+        surfaces = [obj for obj in selected if preflight.is_surface(obj, helpers)]
+        center = context.scene.cursor.location.copy()
+        scale = (1.0, 1.0, 1.0)
+        if surfaces:
+            bounds = rig_edit.reference_bounds_steps(surfaces, context.evaluated_depsgraph_get())
+            while True:
+                try:
+                    next(bounds)
+                except StopIteration as done:
+                    low, high = done.value
+                    break
+                except ValueError as error:
+                    self.report({'ERROR'}, str(error))
+                    return {'CANCELLED'}
+            center = (low + high) * .5
+            # An ellipsoid with these radii encloses the entire source box.
+            margin = 1.05 * (math.sqrt(3) if self.shape == 'SPHERE' else 1.0)
+            minimum = max(max(high - low) * .005, .001)
+            scale = tuple(max(length * .5 * margin, minimum) for length in high - low)
+
+        region = bpy.data.objects.new("LichtFeld Capture Region", None)
+        region.empty_display_type = self.shape
+        region.empty_display_size = 1.0
+        region.show_in_front = True
+        region.location = center
+        region.scale = scale
+        context.scene.collection.objects.link(region)
+        settings.capture_region_object = region
+        if settings.scope != 'SELECTION' or not surfaces:
+            for obj in selected:
+                obj.select_set(False)
+            region.select_set(True)
+            context.view_layer.objects.active = region
+        return {'FINISHED'}
+
+
 class LF_OT_pick_sources(bpy.types.Operator):
     bl_idname = "lichtfeld.pick_sources"
     bl_label = "Use selected objects"
@@ -1319,6 +1388,8 @@ def capture_job(context, capture):
            "optimizer_file": bpy.path.abspath(settings.optimizer_file) if settings.optimizer_file else "",
            "optimizer": training_options.optimizer_values(settings),
            "optimizer_schedule": {name:getattr(settings,name) for name in ("refine_start","refine_end","growth_end")}}
+    if region := capture.get("capture_region"):
+        job["capture_region"] = region
     job.update(engine=render_settings['engine'], samples=render_settings['samples'],
                cycles_device=render_settings['device'],
                resolution=max(job['capture_format']['width'], job['capture_format']['height']))
@@ -2249,6 +2320,9 @@ def draw_capture_sources(box, context, settings):
         box.prop(settings, "source_collection", text="")
     elif settings.scope == "SELECTION":
         box.operator("lichtfeld.pick_sources", icon="RESTRICT_SELECT_OFF").for_rig = False
+    box.prop(settings, "capture_region_object")
+    if not settings.capture_region_object:
+        box.operator("lichtfeld.create_capture_region")
     box.label(text=f"Capture frame: {context.scene.frame_current}", icon='BLANK1')
 
 
@@ -2779,7 +2853,7 @@ def loaded(_):
 
 
 _CLASSES = (LichtFeldPanelState, LichtFeldPreferences, LichtFeldSourceRef, LichtFeldCaptureCollection, LichtFeldRigReference, LichtFeldSettings, LF_OT_notice, LF_OT_verify, LF_OT_setup, LF_OT_panorama_density, LF_OT_capture_collection, LF_OT_rig, LF_OT_live_rig, rig_edit.LF_GGT_live_rig,
-            LF_OT_start, LF_OT_export_dataset, LF_OT_pick_sources, LF_OT_select_aim, LF_OT_inspect_camera, LF_OT_read_rig, LF_OT_command, LF_OT_import, LF_OT_resume, LF_OT_dataset, LF_OT_new_capture, LF_OT_inspect_dataset, LF_OT_restart, LF_OT_folder, LF_OT_reconnect, LF_OT_load_job, LF_OT_compare,
+            LF_OT_start, LF_OT_export_dataset, LF_OT_create_capture_region, LF_OT_pick_sources, LF_OT_select_aim, LF_OT_inspect_camera, LF_OT_read_rig, LF_OT_command, LF_OT_import, LF_OT_resume, LF_OT_dataset, LF_OT_new_capture, LF_OT_inspect_dataset, LF_OT_restart, LF_OT_folder, LF_OT_reconnect, LF_OT_load_job, LF_OT_compare,
             LF_OT_setup_view, LF_OT_scan_sessions, LF_OT_attach_session, LF_OT_detach_session, LF_OT_previous_job, LF_OT_color_look, LF_OT_color_command, LF_OT_model_view, LF_OT_color_view, LF_OT_capture_lighting,
             *rig_path.CLASSES, *rig_analysis.CLASSES, *capture_preview.CLASSES, *scene_render.CLASSES, *portal_ui.CLASSES)
 

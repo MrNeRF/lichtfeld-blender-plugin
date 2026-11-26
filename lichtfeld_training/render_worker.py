@@ -313,6 +313,12 @@ def render_dataset(job_path, reuse_images=False):
         scene.cycles.use_denoising = True
     elif not requested_render:
         scene.eevee.taa_render_samples = job["samples"]
+    if region := job.get("capture_region"):
+        from capture_region import clip_capture_scene, local_transform
+        shape = region["shape"]
+        sources = clip_capture_scene(bpy.context, shape, local_transform(shape, region["world_to_unit"]), sources)
+        if not sources and not single_render:
+            raise ValueError("No selected surface remains inside the capture region.")
     apply_format(scene, capture_format)
     # Calibrated images and RGB test renders use the full camera frame.
     scene.render.use_border = False
@@ -320,9 +326,10 @@ def render_dataset(job_path, reuse_images=False):
     scene.render.use_motion_blur = False
     scene.render.image_settings.file_format = "PNG"
     isolated = job["scope"] != "SCENE"
-    scene.render.image_settings.color_mode = "RGBA" if isolated else "RGB"
+    masked = isolated or (bool(region) and not single_render)
+    scene.render.image_settings.color_mode = "RGBA" if masked else "RGB"
     scene.render.image_settings.color_depth = "8"
-    scene.render.film_transparent = isolated
+    scene.render.film_transparent = masked
     scene.render.use_compositing = False
     scene.render.use_sequencer = False
     source_display = capture_color_profile(scene)
@@ -331,6 +338,8 @@ def render_dataset(job_path, reuse_images=False):
     saved_frames = journal.get('frames', [])
     if reuse_images and (journal.get('job_id') != job['id'] or len(saved_frames) != len(cameras)):
         raise ValueError('Saved camera calibration is incomplete or belongs to another capture. Existing images are preserved.')
+    if reuse_images and journal.get("capture_region") != region:
+        raise ValueError("The capture region changed. Capture the frame again.")
     frames = []
     geometry = None
     if not single_render and not reuse_images and (visible_seed or job.get('use_depth_loss') or job.get('use_normal_loss')):
@@ -359,7 +368,7 @@ def render_dataset(job_path, reuse_images=False):
                 return  # RGB only: never publish masks, seeds or a reusable dataset.
             if not reuse_images:
                 bpy.ops.render.render(write_still=True)
-            rgba = read_capture_rgba(output / relative, width, height) if geometry or isolated or reuse_images else None
+            rgba = read_capture_rgba(output / relative, width, height) if geometry or masked or reuse_images else None
             frame = {"file_path": relative, "transform_matrix": [list(row) for row in matrix],
                      "w": width, "h": height, **intrinsics(scene, evaluated, width, height)}
             if reuse_images and len(saved_frames) == len(cameras):
@@ -371,7 +380,7 @@ def render_dataset(job_path, reuse_images=False):
                 # Preserve the exact calibration that rendered these images, after
                 # checking it against the frozen scene. Do not introduce roundoff.
                 frame = dict(saved)
-                if isolated and (not frame.get('mask_path') or not artifact_path(output, frame['mask_path']).is_file()):
+                if masked and (not frame.get('mask_path') or not artifact_path(output, frame['mask_path']).is_file()):
                     raise ValueError('A saved foreground mask is missing. Existing images are preserved.')
                 for kind, enabled in (('depths', job.get('use_depth_loss')), ('normals', job.get('use_normal_loss'))):
                     path = output / kind / f'view_{index:06d}.tiff'
@@ -379,7 +388,7 @@ def render_dataset(job_path, reuse_images=False):
                         raise ValueError(f'Saved {kind} for view {index+1} are missing. Existing images are preserved.')
             if geometry:
                 frame.update(geometry.export(np.array(matrix), job.get('use_depth_loss'), job.get('use_normal_loss'), frame, rgba))
-            if isolated and not reuse_images:
+            if masked and not reuse_images:
                 mask = bpy.data.images.new("LichtFeld alpha", width=width, height=height, alpha=False)
                 try:
                     pixels = np.empty(width * height * 4, dtype=np.float32)
@@ -404,7 +413,7 @@ def render_dataset(job_path, reuse_images=False):
             if not reuse_images and index + 1 == len(cameras):
                 # Recovery only consumes complete calibration. Publish it before
                 # the final progress marker makes this job eligible for recovery.
-                atomic_json(root / "capture-frames.json", {"job_id": job["id"], "frames": frames})
+                atomic_json(root / "capture-frames.json", {"job_id": job["id"], "frames": frames, "capture_region": region})
             atomic_json(root / "capture-progress.json", {"done": index + 1, "total": len(cameras)})
         loop_finished = True
     finally:
@@ -422,7 +431,7 @@ def render_dataset(job_path, reuse_images=False):
         initialization = {'method': 'surface_geometry', 'budget': job['seed_points']}
     from session_geometry import from_capture
     atomic_json(output / "view_geometry.json", from_capture(frames))
-    if isolated and not any(frame.get("mask_foreground_fraction", 0) > 0 for frame in frames):
+    if masked and not any(frame.get("mask_foreground_fraction", 0) > 0 for frame in frames):
         raise ValueError("None of the capture cameras sees the source. Review rig coverage.")
     transforms = {"camera_model": "PINHOLE", "w": width, "h": height, "frames": frames}
     transforms_file = "capture_transforms.json" if depth_supervision else "transforms.json"

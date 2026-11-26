@@ -56,6 +56,344 @@ assert bpy.ops.lichtfeld.create_rig()=={'FINISHED'}
 assert sum(o.type == "CAMERA" for o in s.camera_collection.objects)==9
 assert len([c for c in bpy.data.collections if c.get('lichtfeld_generated')])==1
 assert len([o for o in bpy.data.objects if o.get('lichtfeld_generated')])==9
+# The volume belongs to capture setup, independently of the content source.
+assert bpy.ops.lichtfeld.create_capture_region(shape="SPHERE") == {"FINISHED"}
+region = s.capture_region_object
+assert region.empty_display_type == "SPHERE"
+for scope in ("SCENE", "SELECTION", "COLLECTION"):
+ s.scope = scope
+ assert s.capture_region_object == region
+signature = ext.preflight.signature(bpy.context)
+region.empty_display_size *= 2
+assert ext.preflight.signature(bpy.context) != signature
+bpy.data.objects.remove(region, do_unlink=True)
+s.scope = "SCENE"
+capture_region = importlib.import_module(f'{module}.capture_region')
+cube = bpy.data.objects["Cube"]
+cube["test_roi_attribute"] = 0.75
+cube["test_roi_vector"] = [0.25, 0.5, 0.75]
+original_name = cube.name
+original_texspace = tuple(cube.data.texspace_size)
+collection = cube.users_collection[0]
+original_link = collection.collection_objects[collection.objects.find(cube.name)]
+original_link.light_linking.link_state = "EXCLUDE"
+default_material = bpy.data.materials.new("ROI source material")
+override = bpy.data.materials.new("ROI object override")
+cube.data.materials.append(default_material)
+cube.material_slots[-1].link = "OBJECT"
+cube.material_slots[-1].material = override
+modifier = cube.modifiers.new("ROI render subdivision", "SUBSURF")
+modifier.subdivision_type = "SIMPLE"
+modifier.levels = 0
+modifier.render_levels = 2
+cube.visible_camera = False
+cube.keyframe_insert(data_path="hide_render", frame=1)
+assert capture_region.animated_render_visibility(cube, {"hide_render"})
+cube.animation_data_clear()
+volume = capture_region.local_transform("BOX", [[2,0,0,0],[0,0.5,0,0],[0,0,0.5,0],[0,0,0,1]])
+asset = bpy.data.collections.new("ROI test asset")
+asset_child = bpy.data.collections.new("ROI test asset child")
+asset.children.link(asset_child)
+instance_mesh = bpy.data.objects.new("ROI instance mesh", cube.data.copy())
+asset_child.objects.link(instance_mesh)
+light = bpy.data.objects.new("ROI instance light", bpy.data.lights.new("ROI instance light", "POINT"))
+asset.objects.link(light)
+instances = bpy.data.collections.new("ROI test instances")
+bpy.context.scene.collection.children.link(instances)
+inside = bpy.data.objects.new("ROI inside", None)
+outside = bpy.data.objects.new("ROI outside", None)
+for instance in (inside, outside):
+ instances.objects.link(instance)
+ instance.instance_type = "COLLECTION"
+ instance.instance_collection = asset
+ instance.scale = (0.1, 0.1, 0.1)
+outside.location.x = 10
+layer = bpy.context.view_layer.layer_collection.children[instances.name]
+layer.hide_viewport = True
+for member in (asset_child, instance_mesh):
+ member.hide_viewport = True
+ try:
+  capture_region.clip_capture_scene(bpy.context, "BOX", volume, [cube])
+ except ValueError as error:
+  assert "different viewport and render visibility" in str(error)
+ else:
+  raise AssertionError("Viewport-hidden render geometry was accepted")
+ member.hide_viewport = False
+clipped, = capture_region.clip_capture_scene(bpy.context, "BOX", volume, [cube])
+assert not inside.hide_render and outside.hide_render and layer.hide_viewport
+bpy.data.collections.remove(instances)
+bpy.data.objects.remove(inside)
+bpy.data.objects.remove(outside)
+bpy.data.objects.remove(instance_mesh, do_unlink=True)
+bpy.data.objects.remove(light, do_unlink=True)
+bpy.data.collections.remove(asset_child)
+bpy.data.collections.remove(asset)
+assert cube.hide_render and clipped != cube
+assert max(abs(vertex.co.x) for vertex in clipped.data.vertices) <= 0.50001
+assert len(clipped.data.polygons) > len(cube.data.polygons)
+assert not clipped.visible_camera and clipped["test_roi_attribute"] == 0.75
+assert clipped.material_slots[-1].material == override
+assert clipped.name == original_name
+assert tuple(clipped["test_roi_vector"]) == (0.25, 0.5, 0.75)
+assert tuple(clipped.data.texspace_size) == original_texspace
+assert modifier.levels == 0
+clipped_link = collection.collection_objects[collection.objects.find(clipped.name)]
+assert clipped_link.light_linking.link_state == "EXCLUDE"
+original_link.light_linking.link_state = "INCLUDE"
+bpy.data.objects.remove(clipped, do_unlink=True)
+bpy.data.objects.remove(bpy.data.objects[f"{original_name} · Indirect lighting"], do_unlink=True)
+cube.name = original_name
+cube.hide_render = False
+cube.visible_camera = True
+cube.modifiers.remove(modifier)
+cube.data.materials.pop(index=len(cube.data.materials)-1)
+del cube["test_roi_attribute"]
+del cube["test_roi_vector"]
+cube.hide_render = True
+curve = bpy.data.curves.new("ROI Bezier", "CURVE")
+curve.dimensions = "3D"
+curve.bevel_depth = 0.12
+spline = curve.splines.new("BEZIER")
+spline.bezier_points.add(1)
+for point, x in zip(spline.bezier_points, (-2, 2)):
+ point.co = (x, 0, 0)
+ point.handle_left_type = point.handle_right_type = "AUTO"
+bezier = bpy.data.objects.new("ROI Bezier", curve)
+bpy.context.scene.collection.objects.link(bezier)
+tree = bpy.data.node_groups.new("ROI passthrough", "GeometryNodeTree")
+for direction in ("INPUT", "OUTPUT"):
+ tree.interface.new_socket(name="Geometry", in_out=direction, socket_type="NodeSocketGeometry")
+incoming = tree.nodes.new("NodeGroupInput")
+outgoing = tree.nodes.new("NodeGroupOutput")
+tree.links.new(incoming.outputs[0], outgoing.inputs[0])
+bezier.modifiers.new("Passthrough", "NODES").node_group = tree
+# A real instance emitted by the modifier must still be rejected.
+object_info = tree.nodes.new("GeometryNodeObjectInfo")
+object_info.inputs["Object"].default_value = cube
+object_info.inputs["As Instance"].default_value = True
+tree.links.new(object_info.outputs["Geometry"], outgoing.inputs[0])
+try:
+ capture_region.clip_capture_scene(bpy.context, "BOX", volume, [bezier])
+except ValueError as error:
+ assert "requires realized geometry" in str(error)
+else:
+ raise AssertionError("An instance emitted by Geometry Nodes was accepted")
+# GeometrySet instances can refer back to the curve itself in the depsgraph.
+box = tree.nodes.new("GeometryNodeMeshCube")
+geometry_instance = tree.nodes.new("GeometryNodeGeometryToInstance")
+tree.links.new(box.outputs["Mesh"], geometry_instance.inputs["Geometry"])
+tree.links.new(geometry_instance.outputs[0], outgoing.inputs[0])
+for offset in (0, 10):
+ bezier.location.x = offset
+ try:
+  capture_region.clip_capture_scene(bpy.context, "BOX", volume, [bezier])
+ except ValueError as error:
+  assert "requires realized geometry" in str(error)
+  assert not bezier.hide_render
+ else:
+  raise AssertionError("A GeometrySet instance was accepted as a legacy self instance")
+bezier.location.x = 0
+# A mixed GeometrySet must not lose its points during mesh conversion.
+points = tree.nodes.new("GeometryNodeMeshToPoints")
+join = tree.nodes.new("GeometryNodeJoinGeometry")
+tree.links.new(box.outputs["Mesh"], points.inputs["Mesh"])
+tree.links.new(incoming.outputs[0], join.inputs[0])
+tree.links.new(points.outputs["Points"], join.inputs[0])
+tree.links.new(join.outputs[0], outgoing.inputs[0])
+mesh_object = bpy.data.objects.new("ROI Mesh", cube.data.copy())
+bpy.context.scene.collection.objects.link(mesh_object)
+mesh_object.modifiers.new("Mixed output", "NODES").node_group = tree
+for subject, inactive in ((bezier, mesh_object), (mesh_object, bezier)):
+ inactive.hide_render = True
+ original_name, original_data = subject.name, subject.data
+ subject.scale = (0.1, 0.1, 0.1)
+ assert capture_region.clip_capture_scene(bpy.context, "BOX", volume, [subject]) == [subject]
+ assert not subject.hide_render and subject.data == original_data
+ assert subject.modifiers[0].node_group == tree
+ subject.location.x = 10
+ assert capture_region.clip_capture_scene(bpy.context, "BOX", volume, [subject]) == []
+ assert subject.hide_render
+ assert f"{subject.name} · Indirect lighting" not in bpy.data.objects
+ subject.hide_render = False
+ subject.location.x = 0
+ subject.scale = (1, 1, 1)
+ try:
+  capture_region.clip_capture_scene(bpy.context, "BOX", volume, [subject])
+ except ValueError as error:
+  assert "cannot preserve points" in str(error)
+  assert not subject.hide_render and subject.name == original_name and subject.data == original_data
+ else:
+  raise AssertionError(f"A mixed {subject.type} and points output was accepted")
+ inactive.hide_render = False
+bpy.data.objects.remove(mesh_object, do_unlink=True)
+tree.links.new(incoming.outputs[0], outgoing.inputs[0])
+clipped, = capture_region.clip_capture_scene(bpy.context, "BOX", volume, [bezier])
+assert bezier.hide_render and clipped.type == "MESH" and clipped.data.polygons
+assert all(abs(vertex.co.x) <= 0.50001 for vertex in clipped.data.vertices)
+bpy.data.objects.remove(clipped, do_unlink=True)
+bpy.data.objects.remove(bpy.data.objects["ROI Bezier · Indirect lighting"], do_unlink=True)
+bpy.data.objects.remove(bezier, do_unlink=True)
+cube.hide_render = False
+print("CAPTURE_REGION_RENDER_PROPERTIES_PASS")
+
+
+def check_roi_lighting(out, engine):
+    import numpy as np
+
+    window = bpy.context.window
+    original = window.scene
+    scene = bpy.data.scenes.new('ROI lighting test')
+    window.scene = scene
+    try:
+        cycles = engine == 'CYCLES'
+        scene.render.engine = engine
+        scene.cycles.device = 'CPU'
+        scene.cycles.samples = 96
+        scene.cycles.use_adaptive_sampling = False
+        scene.cycles.use_denoising = False
+        scene.render.film_transparent = True
+        scene.render.image_settings.color_mode = 'RGBA'
+        scene.view_settings.view_transform = 'Standard'
+        scene.render.resolution_x = scene.render.resolution_y = 96
+        scene.render.resolution_percentage = 100
+        scene.world = bpy.data.worlds.new('ROI lighting world')
+        scene.world.node_tree.nodes['Background'].inputs['Strength'].default_value = 0
+        bpy.ops.mesh.primitive_plane_add(size=4)
+        subject = bpy.context.object
+        if cycles:
+            bpy.ops.mesh.primitive_plane_add(size=.8, location=(1.7, 0, 1.5))
+            emitter = bpy.context.object
+            mat = bpy.data.materials.new('Colored emission')
+            nodes = mat.node_tree.nodes
+            light = nodes.new('ShaderNodeEmission')
+            light.inputs['Color'].default_value = (1, .05, .02, 1)
+            light.inputs['Strength'].default_value = 18
+            mat.node_tree.links.new(light.outputs[0], nodes.get('Material Output').inputs['Surface'])
+            emitter.data.materials.append(mat)
+            asset = bpy.data.collections.new('Emitter collection')
+            for collection in list(emitter.users_collection):
+                collection.objects.unlink(emitter)
+            asset.objects.link(emitter)
+            instance = bpy.data.objects.new('Emitter instance', None)
+            scene.collection.objects.link(instance)
+            instance.instance_type = 'COLLECTION'
+            instance.instance_collection = asset
+        else:
+            bpy.ops.mesh.primitive_cube_add(size=.95, location=(1.45, 0, 1.4))
+            blocker = bpy.context.object
+            blocker_name = blocker.name
+            light = bpy.data.objects.new('ROI shadow light', bpy.data.lights.new('ROI shadow light', 'POINT'))
+            scene.collection.objects.link(light)
+            light.location = (2.9, 0, 2.8)
+            light.data.energy = 900
+        camera = bpy.data.objects.new('Camera', bpy.data.cameras.new('Camera'))
+        scene.collection.objects.link(camera)
+        camera.location = (0, 0, 7)
+        camera.data.lens = 45 if cycles else 44
+        scene.camera = camera
+
+        def render(name):
+            scene.render.filepath = str(out / f'{name}.png')
+            bpy.ops.render.render(write_still=True)
+            image = bpy.data.images.load(scene.render.filepath, check_existing=False)
+            try:
+                pixels = np.empty(96 * 96 * 4, dtype=np.float32)
+                image.pixels.foreach_get(pixels)
+                return pixels.reshape((96, 96, 4))
+            finally:
+                bpy.data.images.remove(image)
+
+        full = render('full')
+        transform = np.diag([1, 1, 2 if cycles else .5, 1])
+        clipped, = capture_region.clip_capture_scene(bpy.context, 'BOX', transform, [subject])
+        kept = render('kept')
+        assert subject.hide_render and not clipped.hide_render
+        if cycles:
+            donor = instance
+            assert not donor.visible_camera
+        else:
+            donor = scene.objects.get(f'{blocker_name} · Indirect lighting')
+            assert donor is not None and blocker.hide_render
+        assert not donor.hide_render
+        donor.hide_render = True
+        removed = render('removed')
+
+        # Exterior illumination is retained while its surfaces are absent from alpha.
+        center = (slice(45, 51), slice(45, 51), 0)
+        assert abs(kept[center].mean() - full[center].mean()) < .08
+        if cycles:
+            assert kept[center].mean() > .3 and removed[center].mean() < .04
+        else:
+            assert removed[center].mean() - kept[center].mean() > .2
+        assert np.array_equal(kept[:, :, 3], removed[:, :, 3])
+        assert 0 < (kept[:, :, 3] > .5).sum() < (full[:, :, 3] > .5).sum() / 2
+
+        if not cycles:
+            # Place the camera-invisible shadow caster in front of the center pixels.
+            # The geometry pass must still see the floor at camera Z=7.
+            donor.location.x -= 1.45
+            donor.location.z += 1.6
+            donor.hide_render = False
+            bpy.context.view_layer.update()
+            sys.path.insert(0, str(Path(ext.__file__).parent))
+            try:
+                from capture_passes import GeometryPasses
+
+                geometry = GeometryPasses(scene, bpy.context.view_layer, out, normals=False)
+                try:
+                    geometry.prepare(0)
+                    rgba = render('occluder')
+                    depth = geometry.read('Depth', 1)[:, :, 0]
+                    assert (rgba[45:51, 45:51, 3] > .99).all()
+                    assert np.allclose(depth[45:51, 45:51], 7, atol=.05)
+                finally:
+                    geometry.close()
+            finally:
+                sys.path.pop(0)
+        if cycles:
+            for obj in list(scene.objects):
+                bpy.data.objects.remove(obj, do_unlink=True)
+            bpy.ops.mesh.primitive_grid_add(x_subdivisions=65, y_subdivisions=65, size=2, location=(0, 0, 10))
+            grid = bpy.context.object
+            grid.name = 'Capture ellipsoid grid'
+            grid.scale = (12, 12, 1)
+            import bmesh
+
+            wire_fixture = bmesh.new()
+            try:
+                wire_fixture.from_mesh(grid.data)
+                wire_fixture.verts.ensure_lookup_table()
+                wire_fixture.edges.new((wire_fixture.verts[0], wire_fixture.verts[-1]))
+                wire_fixture.to_mesh(grid.data)
+            finally:
+                wire_fixture.free()
+            original_area = sum(face.area for face in grid.data.polygons)
+            original_faces = len(grid.data.polygons)
+            bpy.context.view_layer.update()
+            volume = np.diag([1., 1., 1., 1.])
+            volume[2, 3] = -10
+            interior, = capture_region.clip_capture_scene(bpy.context, 'ELLIPSOID', volume, [grid])
+            exterior = scene.objects['Capture ellipsoid grid · Indirect lighting']
+            assert all((interior.matrix_world @ vertex.co).xy.length <= 1.00001
+                       for vertex in interior.data.vertices)
+            assert abs(sum(face.area for piece in (interior, exterior) for face in piece.data.polygons)
+                       - original_area) < .0001
+            assert len(exterior.data.polygons) < original_faces * 1.25
+            assert not any(edge.is_loose for piece in (interior, exterior) for edge in piece.data.edges)
+    finally:
+        window.scene = original
+        bpy.data.scenes.remove(scene)
+
+
+from tempfile import TemporaryDirectory
+with TemporaryDirectory(prefix='lichtfeld-roi-lighting-') as directory:
+    check_roi_lighting(Path(directory), 'CYCLES')
+print('CYCLES_ROI_LIGHTING_PASS', flush=True)
+if '--eevee-roi' in sys.argv:
+    with TemporaryDirectory(prefix='lichtfeld-roi-eevee-') as directory:
+        check_roi_lighting(Path(directory), 'BLENDER_EEVEE')
+    print('EEVEE_ROI_LIGHTING_PASS', flush=True)
+
 s.job_directory='/previous/job'
 s.previous_job=s.job_directory;s.job_directory='';s.attached_session='/external/session'
 bpy.ops.lichtfeld.detach_session()
@@ -157,6 +495,7 @@ with tempfile.TemporaryDirectory() as directory:
  settle_recovery()
  assert bpy.context.scene.lichtfeld_training.job_directory==str(job_root)
  print('REPLACED_BLEND_SKIPS_AUTOMATIC_JOB_RECOVERY_PASS',flush=True)
+
 bpy.ops.preferences.addon_disable(module=module)
 assert not bpy.app.timers.is_registered(ext.poll_jobs)
 print('WORKFLOW_CONTRACTS_PASS')

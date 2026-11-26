@@ -23,6 +23,7 @@ parser.add_argument("backend")
 parser.add_argument("--installed", action="store_true")
 parser.add_argument("--jobs", default="")
 parser.add_argument("--geometry", action="store_true")
+parser.add_argument("--roi", action="store_true", help="Train a whole-scene capture with volumetric clipping and masks")
 parser.add_argument("--eval", action="store_true", help="Enable evaluation for this smoke test")
 parser.add_argument("--stop-capture", action="store_true")
 parser.add_argument("--resolution", type=int, default=64)
@@ -76,14 +77,21 @@ settings.preview_points = 1000
 settings.preview_seconds = 1
 settings.sh_degree = 1
 settings.strategy = options.strategy
-if options.geometry:
+if options.geometry or options.roi:
     settings.engine = "CYCLES"
     settings.samples = 4
+if options.geometry:
     settings.use_depth_loss = True
     settings.use_normal_loss = True
 extension.capture_settings.apply_format(bpy.context.scene, extension.capture_settings.preset_format(settings))
 assert bpy.ops.lichtfeld.create_rig() == {"FINISHED"}
 assert sum(o.type == "CAMERA" for o in settings.camera_collection.objects) == 8
+if options.roi:
+    settings.scope = "SCENE"
+    source.select_set(True)
+    bpy.context.view_layer.objects.active = source
+    assert bpy.ops.lichtfeld.create_capture_region(shape="CUBE") == {"FINISHED"}
+    settings.capture_region_object.scale.x *= 0.7
 bpy.ops.wm.save_as_mainfile(filepath=str(Path(area) / "smoke-source.blend"))
 assert bpy.ops.lichtfeld.start_training() == {"FINISHED"}
 job = Path(settings.job_directory)
@@ -177,6 +185,14 @@ while time.monotonic() < deadline:
             addon_utils._is_first_reset()
             warnings = addon_utils._extensions_warnings_get().get(extension.__package__, [])
             assert not warnings, warnings
+        if options.roi:
+            config = extension.read_json(job / "training.json", {})
+            assert config["optimization"]["mask_mode"] == "alpha_consistent"
+            dataset = job / "dataset"
+            manifest = extension.read_json(dataset / "manifest.json", {})
+            frames = extension.read_json(dataset / manifest["transforms_file"], {})["frames"]
+            assert len(frames) == 8
+            assert all((dataset / frame["mask_path"]).is_file() for frame in frames)
         bpy.ops.wm.save_as_mainfile(filepath=str(Path(area) / "smoke-result.blend"))
         break
     time.sleep(0.02)
