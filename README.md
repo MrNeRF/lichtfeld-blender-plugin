@@ -30,6 +30,10 @@ Train a Gaussian splat from your Blender scene, or bring your LichtFeld Portal s
 
 **Version 0.1.0-beta.2 · Blender 5.3.x · GPL-3.0-or-later**
 
+<a href="https://youtu.be/dkKiWb-cRwc"><img src="https://img.youtube.com/vi/dkKiWb-cRwc/maxresdefault.jpg" alt="LichtFeld Blender Plugin - Create splats from within Blender 5.3" width="720"></a>
+
+**▶ [Watch the video: Create splats from within Blender 5.3](https://youtu.be/dkKiWb-cRwc)**
+
 </div>
 
 ## What you can do
@@ -47,19 +51,19 @@ This repository contains the Blender extension. The LichtFeld backend is install
 
 ## Requirements
 
-| Component | Requirement |
+**A LichtFeld Portal account is only needed for Portal browsing and import. You can capture datasets and train splats locally without signing in.**
+
+All workflows use Blender 5.3.x with native Gaussian point-cloud support. Local training and Portal require [LichtFeld Studio 0.5.4.3](https://github.com/MrNeRF/LichtFeld-Studio/releases/tag/v0.5.4.3) or later.
+
+| Workflow | What you need |
 | --- | --- |
-| Blender | 5.3.x, with native Gaussian point-cloud support |
-| Portal browsing | Online access enabled in Blender, a Portal account and a compatible LichtFeld Studio installation |
-| Portal import | LichtFeld Studio whose `convert` exports visible project splats with transforms, enabled crops and full-detail RAD sources, and the GPU required by that build |
-| Capture renderer | Cycles or EEVEE; a working device configuration for that engine |
-| Training backend | A LichtFeld Studio build that passes **Verify installation**. See the [technical compatibility requirements](docs/technical-reference.md#compatibility-and-packaging). |
-| Training hardware | The CUDA/GPU requirements of the selected LichtFeld build |
-| Storage | A writable jobs directory with room for the captured project, images, maps, checkpoints, and splats |
+| Generate a dataset only | Cycles or EEVEE with a working render device, and a writable jobs folder with room for the capture. Runs in Blender without LichtFeld Studio or a training GPU. |
+| Train locally | A Studio build that passes **Verify installation**, the CUDA-capable GPU required by your Studio build, and a writable jobs folder for checkpoints and splats. To capture new images as part of training, you also need the dataset capture requirements above. |
+| Browse and import from the Portal | The configured **LichtFeld executable**, a Portal account, and **Allow Online Access** enabled in Blender. Import uses the CUDA-capable GPU required by your Studio build. |
 
-Dataset-only capture does not require LichtFeld or a training GPU. Training and external viewing need a compatible backend; an older executable may not provide the required APIs. **Verify installation** checks that the selected executable starts, verifies its native training APIs before any capture, and checks the jobs directory. An executable without dataset-free `--headless --python-script` support cannot be verified and is reported as needing an update. The adapter repeats that API check when a job starts and validates its hook payload before optimization proceeds. First use may need network access to prepare the backend's isolated NumPy runtime. The ZIP bundles LichtFeld's pure Python training-protocol wheel. Portal uses the account and gallery client in the configured LichtFeld Studio installation. NumPy, native libraries and backend executables are supplied separately.
+For training, **Verify installation** checks the executable, its native training APIs and the jobs folder before capture. An older build without dataset-free `--headless --python-script` support needs an update. First use may need network access to prepare the backend's isolated NumPy runtime. See the [technical compatibility requirements](docs/technical-reference.md#compatibility-and-packaging). The ZIP includes the pure Python training-protocol wheel. NumPy, native libraries and backend executables are supplied separately.
 
-The extension publishes its own training sessions. Other compatible extension instances can observe them without a LichtFeld Studio observer UI. Ordinary trainers enable publication with an explicit `--python-script` calling `from lichtfeld_sessions.publisher import install; install(dataset="/path/to/dataset")`.
+Viewing an external trainer requires a compatible backend. The extension publishes its own training sessions. Other compatible extension instances can observe them without a LichtFeld Studio observer UI. Ordinary trainers enable publication with an explicit `--python-script` calling `from lichtfeld_sessions.publisher import install; install(dataset="/path/to/dataset")`.
 
 Viewing extension-owned training inside LichtFeld Studio additionally requires a build with its **External training** integration. In such a build, open an empty or model scene, refresh the trainer list and select **View training**. The preview and capture cameras are read-only; disconnecting or closing the observer leaves the headless trainer running. These features are not implied by the minimal training-adapter APIs.
 
@@ -71,8 +75,11 @@ Windows is the current native integration test platform. CPU contracts also run 
 
 1. Download `lichtfeld_training-<version>.zip` from the [releases page](https://github.com/MrNeRF/lichtfeld-blender-plugin/releases). To build the extension from source, run `python tools/package_blender_training.py` with Python 3.11 or newer. The installable archive is written to `dist/`.
 2. In Blender, open **Edit → Preferences → Get Extensions**, then choose **Install from Disk…** from the menu and select the ZIP. Enable **LichtFeld**.
-3. Open its preferences, select the actual LichtFeld **executable file**, and choose a permanent jobs directory. Select **Verify installation**.
-4. In the 3D Viewport, press **N** and open the **LichtFeld** sidebar tab. Choose **Portal** or **Capture / Train**. The gear opens extension preferences; the question mark opens the user guide.
+3. In the 3D Viewport, press **N** and open the **LichtFeld** sidebar tab. The gear opens extension preferences and the question mark opens the user guide.
+
+   - **Dataset only**. Set **Training jobs** to a permanent folder for capture files, then choose **Generate dataset only** under **Capture / Train**.
+   - **Local training**. In extension preferences, set **Training jobs** and select the **LichtFeld executable** file, then select **Verify installation**. Open **Capture / Train** to start.
+   - **Portal**. Select the **LichtFeld executable** file in extension preferences. Enable **Allow Online Access** in Blender, then open **Portal** and connect your account. **Verify installation** is the training check.
 
 Installing from source means building the ZIP above; this is a regular Blender extension, not a startup script. Updating the ZIP does not require changing its version number during development. After updating an enabled extension, save your work and fully restart Blender before using it. Python can retain older extension modules until the process exits, even when the ZIP was installed successfully. If activation reports a missing attribute after an update, restart Blender and enable the extension again if necessary. Reinstalling repeatedly in the same process does not clear those modules. Installed extensions use Blender's managed wheel environment; there is no need to install the protocol manually.
 

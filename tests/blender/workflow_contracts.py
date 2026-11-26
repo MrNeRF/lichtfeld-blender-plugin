@@ -88,7 +88,7 @@ modifier.levels = 0
 modifier.render_levels = 2
 cube.visible_camera = False
 cube.keyframe_insert(data_path="hide_render", frame=1)
-assert capture_region.animated_render_visibility(cube)
+assert capture_region.animated_render_visibility(cube, {"hide_render"})
 cube.animation_data_clear()
 volume = capture_region.local_transform("BOX", [[2,0,0,0],[0,0.5,0,0],[0,0,0.5,0],[0,0,0,1]])
 asset = bpy.data.collections.new("ROI test asset")
@@ -141,6 +141,7 @@ clipped_link = collection.collection_objects[collection.objects.find(clipped.nam
 assert clipped_link.light_linking.link_state == "EXCLUDE"
 original_link.light_linking.link_state = "INCLUDE"
 bpy.data.objects.remove(clipped, do_unlink=True)
+bpy.data.objects.remove(bpy.data.objects[f"{original_name} · Indirect lighting"], do_unlink=True)
 cube.name = original_name
 cube.hide_render = False
 cube.visible_camera = True
@@ -212,6 +213,7 @@ for subject, inactive in ((bezier, mesh_object), (mesh_object, bezier)):
  subject.location.x = 10
  assert capture_region.clip_capture_scene(bpy.context, "BOX", volume, [subject]) == []
  assert subject.hide_render
+ assert f"{subject.name} · Indirect lighting" not in bpy.data.objects
  subject.hide_render = False
  subject.location.x = 0
  subject.scale = (1, 1, 1)
@@ -229,9 +231,169 @@ clipped, = capture_region.clip_capture_scene(bpy.context, "BOX", volume, [bezier
 assert bezier.hide_render and clipped.type == "MESH" and clipped.data.polygons
 assert all(abs(vertex.co.x) <= 0.50001 for vertex in clipped.data.vertices)
 bpy.data.objects.remove(clipped, do_unlink=True)
+bpy.data.objects.remove(bpy.data.objects["ROI Bezier · Indirect lighting"], do_unlink=True)
 bpy.data.objects.remove(bezier, do_unlink=True)
 cube.hide_render = False
 print("CAPTURE_REGION_RENDER_PROPERTIES_PASS")
+
+
+def check_roi_lighting(out, engine):
+    import numpy as np
+
+    window = bpy.context.window
+    original = window.scene
+    scene = bpy.data.scenes.new('ROI lighting test')
+    window.scene = scene
+    try:
+        cycles = engine == 'CYCLES'
+        scene.render.engine = engine
+        scene.cycles.device = 'CPU'
+        scene.cycles.samples = 96
+        scene.cycles.use_adaptive_sampling = False
+        scene.cycles.use_denoising = False
+        scene.render.film_transparent = True
+        scene.render.image_settings.color_mode = 'RGBA'
+        scene.view_settings.view_transform = 'Standard'
+        scene.render.resolution_x = scene.render.resolution_y = 96
+        scene.render.resolution_percentage = 100
+        scene.world = bpy.data.worlds.new('ROI lighting world')
+        scene.world.node_tree.nodes['Background'].inputs['Strength'].default_value = 0
+        bpy.ops.mesh.primitive_plane_add(size=4)
+        subject = bpy.context.object
+        if cycles:
+            bpy.ops.mesh.primitive_plane_add(size=.8, location=(1.7, 0, 1.5))
+            emitter = bpy.context.object
+            mat = bpy.data.materials.new('Colored emission')
+            nodes = mat.node_tree.nodes
+            light = nodes.new('ShaderNodeEmission')
+            light.inputs['Color'].default_value = (1, .05, .02, 1)
+            light.inputs['Strength'].default_value = 18
+            mat.node_tree.links.new(light.outputs[0], nodes.get('Material Output').inputs['Surface'])
+            emitter.data.materials.append(mat)
+            asset = bpy.data.collections.new('Emitter collection')
+            for collection in list(emitter.users_collection):
+                collection.objects.unlink(emitter)
+            asset.objects.link(emitter)
+            instance = bpy.data.objects.new('Emitter instance', None)
+            scene.collection.objects.link(instance)
+            instance.instance_type = 'COLLECTION'
+            instance.instance_collection = asset
+        else:
+            bpy.ops.mesh.primitive_cube_add(size=.95, location=(1.45, 0, 1.4))
+            blocker = bpy.context.object
+            blocker_name = blocker.name
+            light = bpy.data.objects.new('ROI shadow light', bpy.data.lights.new('ROI shadow light', 'POINT'))
+            scene.collection.objects.link(light)
+            light.location = (2.9, 0, 2.8)
+            light.data.energy = 900
+        camera = bpy.data.objects.new('Camera', bpy.data.cameras.new('Camera'))
+        scene.collection.objects.link(camera)
+        camera.location = (0, 0, 7)
+        camera.data.lens = 45 if cycles else 44
+        scene.camera = camera
+
+        def render(name):
+            scene.render.filepath = str(out / f'{name}.png')
+            bpy.ops.render.render(write_still=True)
+            image = bpy.data.images.load(scene.render.filepath, check_existing=False)
+            try:
+                pixels = np.empty(96 * 96 * 4, dtype=np.float32)
+                image.pixels.foreach_get(pixels)
+                return pixels.reshape((96, 96, 4))
+            finally:
+                bpy.data.images.remove(image)
+
+        full = render('full')
+        transform = np.diag([1, 1, 2 if cycles else .5, 1])
+        clipped, = capture_region.clip_capture_scene(bpy.context, 'BOX', transform, [subject])
+        kept = render('kept')
+        assert subject.hide_render and not clipped.hide_render
+        if cycles:
+            donor = instance
+            assert not donor.visible_camera
+        else:
+            donor = scene.objects.get(f'{blocker_name} · Indirect lighting')
+            assert donor is not None and blocker.hide_render
+        assert not donor.hide_render
+        donor.hide_render = True
+        removed = render('removed')
+
+        # Exterior illumination is retained while its surfaces are absent from alpha.
+        center = (slice(45, 51), slice(45, 51), 0)
+        assert abs(kept[center].mean() - full[center].mean()) < .08
+        if cycles:
+            assert kept[center].mean() > .3 and removed[center].mean() < .04
+        else:
+            assert removed[center].mean() - kept[center].mean() > .2
+        assert np.array_equal(kept[:, :, 3], removed[:, :, 3])
+        assert 0 < (kept[:, :, 3] > .5).sum() < (full[:, :, 3] > .5).sum() / 2
+
+        if not cycles:
+            # Place the camera-invisible shadow caster in front of the center pixels.
+            # The geometry pass must still see the floor at camera Z=7.
+            donor.location.x -= 1.45
+            donor.location.z += 1.6
+            donor.hide_render = False
+            bpy.context.view_layer.update()
+            sys.path.insert(0, str(Path(ext.__file__).parent))
+            try:
+                from capture_passes import GeometryPasses
+
+                geometry = GeometryPasses(scene, bpy.context.view_layer, out, normals=False)
+                try:
+                    geometry.prepare(0)
+                    rgba = render('occluder')
+                    depth = geometry.read('Depth', 1)[:, :, 0]
+                    assert (rgba[45:51, 45:51, 3] > .99).all()
+                    assert np.allclose(depth[45:51, 45:51], 7, atol=.05)
+                finally:
+                    geometry.close()
+            finally:
+                sys.path.pop(0)
+        if cycles:
+            for obj in list(scene.objects):
+                bpy.data.objects.remove(obj, do_unlink=True)
+            bpy.ops.mesh.primitive_grid_add(x_subdivisions=65, y_subdivisions=65, size=2, location=(0, 0, 10))
+            grid = bpy.context.object
+            grid.name = 'Capture ellipsoid grid'
+            grid.scale = (12, 12, 1)
+            import bmesh
+
+            wire_fixture = bmesh.new()
+            try:
+                wire_fixture.from_mesh(grid.data)
+                wire_fixture.verts.ensure_lookup_table()
+                wire_fixture.edges.new((wire_fixture.verts[0], wire_fixture.verts[-1]))
+                wire_fixture.to_mesh(grid.data)
+            finally:
+                wire_fixture.free()
+            original_area = sum(face.area for face in grid.data.polygons)
+            original_faces = len(grid.data.polygons)
+            bpy.context.view_layer.update()
+            volume = np.diag([1., 1., 1., 1.])
+            volume[2, 3] = -10
+            interior, = capture_region.clip_capture_scene(bpy.context, 'ELLIPSOID', volume, [grid])
+            exterior = scene.objects['Capture ellipsoid grid · Indirect lighting']
+            assert all((interior.matrix_world @ vertex.co).xy.length <= 1.00001
+                       for vertex in interior.data.vertices)
+            assert abs(sum(face.area for piece in (interior, exterior) for face in piece.data.polygons)
+                       - original_area) < .0001
+            assert len(exterior.data.polygons) < original_faces * 1.25
+            assert not any(edge.is_loose for piece in (interior, exterior) for edge in piece.data.edges)
+    finally:
+        window.scene = original
+        bpy.data.scenes.remove(scene)
+
+
+from tempfile import TemporaryDirectory
+with TemporaryDirectory(prefix='lichtfeld-roi-lighting-') as directory:
+    check_roi_lighting(Path(directory), 'CYCLES')
+print('CYCLES_ROI_LIGHTING_PASS', flush=True)
+if '--eevee-roi' in sys.argv:
+    with TemporaryDirectory(prefix='lichtfeld-roi-eevee-') as directory:
+        check_roi_lighting(Path(directory), 'BLENDER_EEVEE')
+    print('EEVEE_ROI_LIGHTING_PASS', flush=True)
+
 s.job_directory='/previous/job'
 s.previous_job=s.job_directory;s.job_directory='';s.attached_session='/external/session'
 bpy.ops.lichtfeld.detach_session()
@@ -333,6 +495,7 @@ with tempfile.TemporaryDirectory() as directory:
  settle_recovery()
  assert bpy.context.scene.lichtfeld_training.job_directory==str(job_root)
  print('REPLACED_BLEND_SKIPS_AUTOMATIC_JOB_RECOVERY_PASS',flush=True)
+
 bpy.ops.preferences.addon_disable(module=module)
 assert not bpy.app.timers.is_registered(ext.poll_jobs)
 print('WORKFLOW_CONTRACTS_PASS')
