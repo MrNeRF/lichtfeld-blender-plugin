@@ -353,7 +353,7 @@ class LichtFeldSettings(bpy.types.PropertyGroup):
     live_aim: FloatVectorProperty(name="Aim", subtype='TRANSLATION', options=set(),
         get=rig_edit.live_aim_get, set=rig_edit.live_aim_set,
         description="Move the aiming point now, or its offset when following an object; Escape cancels the gesture")
-    rig_lens: FloatProperty(name="Focal length (mm)", default=35, min=1, max=500)
+    rig_lens: FloatProperty(name="Focal length (mm)", default=24, min=1, max=500)
     rig_target: PointerProperty(name="Target object", type=bpy.types.Object)
     rig_aim: PointerProperty(name="Viewport aim target", type=bpy.types.Object)
     rig_aim_mode: EnumProperty(name="Aim at", items=[
