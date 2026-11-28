@@ -137,7 +137,17 @@ Automatic framing uses the effective horizontal and vertical field of view, incl
 
 **Last distance** is the radius recorded at the last successful rig generation, in the scene's units. If automatic fitting increased the minimum distance, the panel explains why; disable **Auto fit** and set **Distance** for an exact radius. Apply updates camera positions. Manual camera moves do not change this historical value, and older rigs show it after their next generation. **Look at** and **Move aim target in viewport** are directly accessible; the aim offset is inside **Geometry and lens**.
 
+New generated rigs default to a **24 mm** focal length. Edit **Focal length** under **Geometry and lens**. Loading an applied rig restores its saved focal length. In older scenes with no explicit setting, the control shows 24 mm while existing cameras retain their saved focal lengths.
+
+In Object Mode, Blender's **Overlays → Extras** shows orange crosses at the positions in the rig or capture sets, including proposed floor stations before Apply. Cameras that share a position use one cross.
+
 **Auto fit** calculates a distance that fits the reference in the frame. Leave **Min. factor** at 1 for automatic framing, or increase it to set a minimum radius in multiples of the reference bounding radius. For a closer or exact distance, turn off **Auto fit** and set **Distance**. Create or apply the rig to update the cameras.
+
+### Indoor stations from a floor
+
+Select the floor mesh in Object Mode. Under **Cameras → Rig settings**, choose **Curve path**, then **Propose stations from floor…**. Choose **Spacing** or **Station count**, set the height above the floor and confirm. In count mode, manually edited positions count toward the total. The proposal reports when there are fewer valid positions than requested. The proposal creates a guide named **LichtFeld Indoor Stations**. To move individual stations, select that guide in the Outliner and edit its points in Edit Mode. Return to Object Mode and use the regular rig creation or apply action to generate the cameras, then open **Check framing**. Use a mesh containing only the walkable floor in the intended area. For a combined room mesh, separate the floor surface from ceilings, walls and furnishings before proposing stations.
+
+**Update floor stations…** recalculates the automatic positions using the original floor. Moved or added points stay in place. Deleted positions stay excluded when the same positions are proposed again. Changing the spacing or station count, or moving the floor, can propose new points nearby. Count mode can replace deleted automatic positions elsewhere to reach the requested total. Use Apply to update the cameras. A camera excluded in **Check framing** stays excluded when Apply finds a unique matching pose.
 
 ### Inspect framing and render one view
 
@@ -195,7 +205,7 @@ The default initialization samples colored points from rendered views using thei
 
 ## Training and previews
 
-New scenes use LichtFeld Studio's MRNF defaults: 30,000 steps, a 5,000,000-Gaussian budget, SH degree 3, 100,000 initial points and exposure correction enabled. Changing Method loads that strategy’s learning rates and refinement schedule. Training steps and Gaussian budget stay at their current values. Choosing a preset explicitly replaces its listed budgets; stored scene settings are not reset on load. The plugin evaluates every 7,000 steps and at the final step to select the best evaluated result. For a new capture, evaluation reserves every eighth image, or every fourth image when there are fewer than 16 views, starting with the first image. For example, a 48-view capture reserves six images and trains on 42. Retraining on saved images keeps that dataset split.
+New scenes use LichtFeld Studio's MRNF defaults: 30,000 steps, a 5,000,000-Gaussian budget, SH degree 3, 100,000 initial points and exposure correction enabled. Changing Method loads that strategy’s learning rates and refinement schedule. Training steps and Gaussian budget stay at their current values. Choosing a preset explicitly replaces its listed budgets; stored scene settings are not reset on load. When **Evaluate model** is enabled, **Save every** also sets the evaluation interval. LichtFeld evaluates again at the final step. For a new capture with evaluation enabled, the dataset reserves every eighth image, or every fourth image when there are fewer than 16 views, starting with the first image. For example, a 48-view capture reserves six images and trains on 42. Retraining on saved images keeps that dataset split.
 
 Training setup keeps the step budget, maximum point count and SH degree directly accessible. The current method and enabled depth/normal supervision remain visible as a summary. Expand **Advanced** for the training method, supervision and the remaining expert parameters.
 
@@ -223,7 +233,7 @@ The trainer color view improves comparison but uses Blender's renderer. Gaussian
 
 Dataset-only export asks for a destination and creates a new uniquely named dataset folder. It publishes the completed dataset after validation. Cancelling removes the incomplete export owned by that operation, without replacing an existing dataset. Reusing saved images does not launch another render process.
 
-Each training job has its own folder. **Open job folder** opens it in the system file manager. Reopening a project restores the job saved in its scene. If the saved scene has no job, LichtFeld can reconnect automatically when you reopen the same saved capture file. If the file was replaced, or an older job lacks the capture file information needed for automatic recovery, use **Open job** to select the job explicitly. Save the scene to keep that selection on reopening.
+Each training job has its own folder. **Open job folder** opens it in the system file manager. **Open job…** starts in the configured **Training jobs** directory when that directory exists. Reopening a project restores the job saved in its scene. If the saved scene has no job, LichtFeld can reconnect automatically when you reopen the same saved capture file. If the file was replaced, or an older job lacks the capture file information needed for automatic recovery, use **Open job** to select the job explicitly. Save the scene to keep that selection on reopening.
 
 Closing Blender leaves an extension-owned headless trainer running. One controller owns its commands; another process can observe it read-only. **View trainer** searches once when opened; **Refresh trainers** requests another search. Loading a project or leaving a scene in this view does not start periodic discovery. Monitoring an already connected trainer continues automatically. **Connect to trainer** observes compatible independently launched trainers and their capture cameras. Disconnecting that view leaves the trainer running. A trainer owned by the LichtFeld Studio GUI still stops when its owning LichtFeld Studio window closes.
 
@@ -235,7 +245,7 @@ If a run fails, retain its job folder and read the reported error and process lo
 
 ## Portal Gallery
 
-Choose **Portal → Browse gallery…** in the LichtFeld sidebar, or use **File → Import → LichtFeld Portal Gallery…**. The gallery is independent of the training panel and does not change the selected training job.
+Choose **Portal → Browse gallery…** in the LichtFeld sidebar, or use **File → Import → LichtFeld Portal Gallery…**. The gallery is independent of the training panel and does not change the selected training job. Use the **×** in the gallery header to close it.
 
 1. Select the **LichtFeld executable** file in extension preferences and enable **Allow Online Access** in Blender. See the [Portal requirements](../README.md#requirements).
 2. The gallery reuses your LichtFeld Studio account. If it is not connected, choose **Connect account** and approve the connection in your browser. If the browser does not open, use **Open browser** and **Copy code**. No password is entered or stored in the Blender scene.

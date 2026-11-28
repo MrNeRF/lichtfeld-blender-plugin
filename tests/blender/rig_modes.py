@@ -931,10 +931,104 @@ from tempfile import TemporaryDirectory
 
 with TemporaryDirectory(prefix='lichtfeld-radial-') as directory:
     saved_file = str(Path(directory) / 'panorama.blend')
+    s['rig_path_sampling'] = 1  # RNA value used by pre-station .blend files.
+    assert s.rig_path_sampling == 'SPACING'
     bpy.ops.wm.save_as_mainfile(filepath=saved_file)
     bpy.ops.wm.open_mainfile(filepath=saved_file, use_scripts=False)
     s = bpy.context.scene.lichtfeld_training
+    assert s.rig_path_sampling == 'SPACING'
     assert bpy.ops.lichtfeld.read_rig() == {'FINISHED'}
     assert s.rig_radial_orientation == 'PANORAMA' and s.rig_station_shape == 'HEMISPHERE'
     assert s.rig_station_views == 6 and len(generated()) == 24
 print('RADIAL_PANORAMA_SAVED_SCENE_PASS', flush=True)
+
+# A floor proposal must produce exact, independently editable centers and leave the current rig intact until Apply.
+bpy.ops.mesh.primitive_plane_add(size=4, location=(20, 20, 0))
+floor=bpy.context.object
+collection=s.camera_collection
+assert bpy.ops.lichtfeld.propose_floor_stations(spacing=2, height=1.5, clearance=0)=={'FINISHED'}
+assert s.camera_collection == collection and bpy.context.active_object == floor
+assert s.rig_path_sampling == 'POINTS'
+guide=s.rig_curve
+assert len(guide.data.splines)==4 and not ext.preflight.is_surface(guide)
+guide.data.splines[0].points[0].co.x += .25
+ordered = [tuple(spline.points[0].co.to_3d()) for spline in guide.data.splines]
+expected=set(ordered)
+assert bpy.ops.lichtfeld.propose_floor_stations(refresh=True, spacing=2, height=1.5, clearance=0)=={'FINISHED'}
+assert [tuple(spline.points[0].co.to_3d()) for spline in guide.data.splines] == ordered
+assert bpy.ops.lichtfeld.create_rig()=={'FINISHED'}
+actual={tuple(o.location) for o in s.camera_collection.objects if o.type=='CAMERA' and o.name.startswith('Capture ')}
+assert actual == expected, (actual,expected)
+print('INDOOR_STATION_RIG_PASS',flush=True)
+
+# Updating the proposal keeps moved points and remembers removals even through a spacing change.
+moved = tuple(guide.data.splines[0].points[0].co.to_3d())
+removed = tuple(guide.data.splines[1].points[0].co.to_3d())
+guide.data.splines.remove(guide.data.splines[1])
+expected.remove(removed)
+applied_collection = s.camera_collection
+cameras = sorted(generated(), key=lambda camera: camera['lichtfeld_camera_index'])
+flag = ext.preflight.CAMERA_EXCLUDED
+deleted_view, surviving_view = cameras[6], cameras[12]
+deleted_view[flag] = surviving_view[flag] = True
+surviving_pose = ext.rig_geometry.pose_key(surviving_view.matrix_world)
+s.rig_station_frame = 'TARGET'
+assert bpy.ops.lichtfeld.propose_floor_stations(refresh=True, spacing=2, height=1.5, clearance=0)=={'FINISHED'}
+assert s.rig_station_frame == 'TARGET'
+s.rig_station_frame = 'GUIDE'
+applied = {tuple(o.location) for o in applied_collection.objects if o.type == 'CAMERA'}
+for spacing in (2, 1, 2):
+    assert bpy.ops.lichtfeld.propose_floor_stations(refresh=True, spacing=spacing, height=1.5, clearance=0)=={'FINISHED'}
+    assert s.rig_curve == guide and s.camera_collection == applied_collection
+    points = {tuple(spline.points[0].co.to_3d()) for spline in guide.data.splines}
+    assert removed not in points and moved in points, points
+    assert {tuple(o.location) for o in applied_collection.objects if o.type == 'CAMERA'} == applied
+assert points == expected, (points, expected)
+assert bpy.ops.lichtfeld.create_rig()=={'FINISHED'}
+assert {tuple(o.location) for o in s.camera_collection.objects
+        if o.type == 'CAMERA' and o.name.startswith('Capture ')} == expected
+excluded_poses = [ext.rig_geometry.pose_key(camera.matrix_world) for camera in generated() if camera.get(flag)]
+assert len(excluded_poses) == 1, excluded_poses
+assert max(abs(actual - expected) for actual, expected in zip(excluded_poses[0], surviving_pose)) < 1e-5
+print('INDOOR_STATION_REFRESH_EDITS_EXCLUSIONS_PASS',flush=True)
+
+# Imported floors may have reversed normals, while their upper surface still supports stations.
+floor.scale.z = -1
+bpy.context.view_layer.update()
+assert len(list(ext.rig_path.floor_stations(bpy.context, floor, 2, 1.5, 0))) == 4
+assert all(camera.data.display_size < .5 and camera.data.lens == s.rig_lens for camera in generated())
+print('INDOOR_INVERTED_FLOOR_AND_CAMERA_DISPLAY_PASS', flush=True)
+
+# Count mode includes fixed positions and changes the applied cameras only on Apply.
+applied = {tuple(camera.location) for camera in generated()}
+for count in (8, 5):
+    assert bpy.ops.lichtfeld.propose_floor_stations(
+        refresh=True, sampling='COUNT', count=count, height=1.5, clearance=0)=={'FINISHED'}
+    points = {tuple(spline.points[0].co.to_3d()) for spline in guide.data.splines}
+    assert len(points) == count and moved in points and removed not in points
+    assert guide['lichtfeld_floor_station_count'] == count
+    assert {tuple(camera.location) for camera in generated()} == applied
+assert bpy.ops.lichtfeld.create_rig()=={'FINISHED'}
+assert len(generated()) == count * s.rig_station_views
+print('INDOOR_STATION_COUNT_PRESERVES_MANUAL_EDITS_PASS', flush=True)
+
+# A solid crossing floor level encloses cameras without a floor-to-camera hit.
+bpy.ops.mesh.primitive_cube_add(size=2, location=(19, 20, .6))
+obstacle = bpy.context.object
+obstacle.scale.y = 2.1
+bpy.context.view_layer.objects.active = floor
+assert bpy.ops.lichtfeld.propose_floor_stations(
+    sampling='COUNT', count=900, height=1.45, clearance=.1)=={'FINISHED'}
+partial = [spline.points[0].co.to_3d() for spline in s.rig_curve.data.splines]
+assert 0 < len(partial) < 900 and all(point.x > 20 for point in partial)
+assert s.rig_curve['lichtfeld_floor_station_count'] == 900
+print('INDOOR_PARTIAL_COUNT_EXCLUDES_EMBEDDED_POSITIONS_PASS', flush=True)
+
+# The initial bounding-box grid undersamples a thin, rotated floor.
+bpy.ops.mesh.primitive_plane_add(size=1, location=(40, 40, 0), rotation=(0, 0, math.pi/4))
+strip = bpy.context.object
+strip.scale = (10, .5, 1)
+assert bpy.ops.lichtfeld.propose_floor_stations(
+    sampling='COUNT', count=20, height=1.45, clearance=0)=={'FINISHED'}
+assert len(s.rig_curve.data.splines) == 20
+print('INDOOR_DIAGONAL_FLOOR_COUNT_RETRY_PASS', flush=True)
