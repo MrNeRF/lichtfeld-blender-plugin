@@ -1032,3 +1032,25 @@ assert bpy.ops.lichtfeld.propose_floor_stations(
     sampling='COUNT', count=20, height=1.45, clearance=0)=={'FINISHED'}
 assert len(s.rig_curve.data.splines) == 20
 print('INDOOR_DIAGONAL_FLOOR_COUNT_RETRY_PASS', flush=True)
+
+# A second floor feeds the existing capture-set workflow without replacing the first room.
+floor.name = 'Room A'
+bpy.context.view_layer.objects.active = floor
+assert bpy.ops.lichtfeld.propose_floor_stations(sampling='COUNT', count=6, clearance=0)=={'FINISHED'}
+s.capture_collections.clear()
+s.camera_collection = None
+assert bpy.ops.lichtfeld.create_rig()=={'FINISHED'}
+room_a = s.camera_collection
+assert room_a.name == 'Capture · Room A'
+room_a_poses = {camera.name: tuple(camera.location) for camera in generated()}
+bpy.ops.mesh.primitive_plane_add(size=4, location=(26, 20, 0))
+bpy.context.object.name = 'Room B'
+assert bpy.ops.lichtfeld.propose_floor_stations(sampling='COUNT', count=6, clearance=0)=={'FINISHED'}
+assert bpy.ops.lichtfeld.create_rig(new_rig=True)=={'FINISHED'}
+room_b = s.camera_collection
+assert room_b.name == 'Capture · Room B'
+assert bpy.ops.lichtfeld.capture_collection_entry(use_edited=True)=={'FINISHED'}
+assert ext.preflight.camera_collections(s) == (room_a, room_b)
+assert {camera.name: tuple(camera.location) for camera in room_a.objects if camera.type=='CAMERA'} == room_a_poses
+assert len(ext.cameras_for(s)) == 2 * 6 * s.rig_station_views
+print('INDOOR_TWO_FLOORS_ONE_CAPTURE_PASS', flush=True)

@@ -888,7 +888,9 @@ class LF_OT_rig(_RigOperation, bpy.types.Operator):
                     yield
         world_yaw = settings.rig_station_shape == 'BAND' and not radial_panorama
         jitter = rig_edit.rotation_variation(settings) if settings.rig_mode in rig_edit.RADIAL_MODES else 0
-        collection = bpy.data.collections.new("LichtFeld Capture Cameras")
+        floor = (settings.rig_curve.get('lichtfeld_station_floor')
+                 if settings.rig_mode == 'PATH' and settings.rig_path_sampling == 'POINTS' else None)
+        collection = bpy.data.collections.new(f"Capture · {floor.name}" if floor else "LichtFeld Capture Cameras")
         context.scene.collection.children.link(collection)
         self.collection = collection
         if settings.rig_mode not in {'PATH', 'MESH'}:
