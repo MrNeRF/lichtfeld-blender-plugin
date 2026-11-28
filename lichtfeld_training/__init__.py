@@ -369,7 +369,8 @@ class LichtFeldSettings(bpy.types.PropertyGroup):
         poll=lambda self,obj: obj.type == 'CURVE')
     rig_path_sampling: EnumProperty(name="Sampling", description="Sample the curve by count or maximum world-space distance", items=[
         ('COUNT', 'Count', 'Choose evenly spaced camera positions; Panorama stations adds several views at each position'),
-        ('SPACING', 'Maximum spacing', 'Choose the largest interval along the evaluated curve in world units; endpoints are included on open paths')])
+        ('SPACING', 'Maximum spacing', 'Choose the largest interval along the evaluated curve in world units; endpoints are included on open paths'),
+        ('POINTS', 'Station points', 'Use each Poly control point as a station')])
     rig_path_spacing: FloatProperty(name="Maximum spacing", default=1, min=.0001,
         subtype='DISTANCE', unit='LENGTH', description="Even intervals no larger than this distance along the curve; requires 4–1,000 positions")
     rig_station_shape: EnumProperty(name="Coverage", description="Distribution of viewing directions; lens and view count determine image overlap", items=[
@@ -783,6 +784,9 @@ class LF_OT_rig(_RigOperation, bpy.types.Operator):
     @classmethod
     def poll(cls, context):
         s = context.scene.lichtfeld_training
+        if s.rig_mode == 'PATH' and s.rig_path_sampling == 'POINTS' and context.mode != 'OBJECT':
+            cls.poll_message_set('Return to Object Mode to apply station edits')
+            return False
         if s.running or s.operation_busy or rig_edit.live_root(s):
             return False
         if rig_edit.render_busy(context):
@@ -840,10 +844,15 @@ class LF_OT_rig(_RigOperation, bpy.types.Operator):
                 frame = capture_settings.rigid_frame(path_curve.evaluated_get(depsgraph).matrix_world.copy(),
                     f'Panorama guide {path_curve.name}', shear_hint='apply scale on the guide and inspect rotated parents')
                 path_rotation = frame.to_quaternion().normalized()
+            explicit = settings.rig_path_sampling == 'POINTS'
+            if explicit and (settings.rig_path_link or settings.rig_orientation == 'TANGENT' or
+                             settings.rig_orientation == 'PANORAMA' and settings.rig_station_frame == 'PATH'):
+                raise ValueError('Station points need Guide axes or a target and cannot follow a path')
             if settings.rig_path_link:
                 path_inverse = rig_edit.validate_path_link(path_curve, previous, depsgraph)
             for point in rig_path.positions(context, path_curve, settings.views,
-                    spacing=settings.rig_path_spacing if settings.rig_path_sampling == 'SPACING' else None):
+                    spacing=settings.rig_path_spacing if settings.rig_path_sampling == 'SPACING' else None,
+                    control_points=explicit):
                 if point is not None:
                     points.append(Vector(point))
                 yield
@@ -898,7 +907,21 @@ class LF_OT_rig(_RigOperation, bpy.types.Operator):
         target = bpy.data.objects.new("LichtFeld Aim Target", None)
         target.empty_display_type = "SPHERE"
         target.show_in_front = True
-        target.empty_display_size = max((high-low).length * .05, .05)
+        floor_sampling = (settings.rig_curve.get('lichtfeld_floor_sampling')
+                          if settings.rig_mode == 'PATH' and settings.rig_path_sampling == 'POINTS' else None)
+        display_size = None
+        if floor_sampling:
+            spacing, height, _ = floor_sampling
+            if settings.rig_curve.get('lichtfeld_floor_station_count') and len(points) > 1:
+                from mathutils.kdtree import KDTree
+                tree = KDTree(len(points))
+                for index, point in enumerate(points):
+                    tree.insert(point, index)
+                tree.balance()
+                distances = sorted(tree.find_n(point, 2)[1][2] for point in points)
+                spacing = distances[len(distances) // 2]
+            display_size = min(spacing * .25, height * .18)
+        target.empty_display_size = display_size or max((high-low).length * .05, .05)
         target["lichtfeld_aim"] = True
         target['lichtfeld_aim_used'] = uses_aim
         collection.objects.link(target)
@@ -907,6 +930,8 @@ class LF_OT_rig(_RigOperation, bpy.types.Operator):
             position = points[index // len(station_directions)] if station_directions else points[index]
             data = bpy.data.cameras.new(f"Capture {index + 1:03d}")
             data.lens = settings.rig_lens
+            if display_size is not None:
+                data.display_size = display_size
             data.clip_start = max(radius / 10000, 0.001)
             data.clip_end = max(radius * 10, (position-center).length*10, 100)
             obj = bpy.data.objects.new(f"Capture {index + 1:03d}", data)
@@ -2453,11 +2478,20 @@ def draw_capture_cameras(box, context, settings, ready, rig_changed, wrapped):
     if settings.rig_mode == 'PATH':
         box.prop(settings, 'rig_curve', text='Curve')
         box.operator('lichtfeld.create_path_guide', text='Create path guide…')
+        if settings.rig_path_sampling == 'POINTS' and settings.rig_curve and settings.rig_curve.get('lichtfeld_station_floor'):
+            box.operator('lichtfeld.propose_floor_stations', text='Update floor stations…').refresh = True
+        if (settings.rig_path_sampling != 'POINTS' or not settings.rig_curve or
+                not settings.rig_curve.get('lichtfeld_station_floor') or
+                context.active_object and context.active_object.type == 'MESH' and
+                context.active_object != settings.rig_curve.get('lichtfeld_station_floor')):
+            row = box.row()
+            row.enabled = context.active_object is not None and context.active_object.type == 'MESH'
+            row.operator('lichtfeld.propose_floor_stations', text='Propose stations from floor…')
         box.prop(settings, 'rig_path_sampling')
     if (settings.rig_mode != 'MESH' or settings.rig_mesh_distribution != 'FACES') and not (
-            settings.rig_mode == 'PATH' and settings.rig_path_sampling == 'SPACING'):
+            settings.rig_mode == 'PATH' and settings.rig_path_sampling != 'COUNT'):
         box.prop(settings, 'views', text='Stations' if rig_edit.panorama_stations(settings) else 'Camera count')
-    elif settings.rig_mode == 'PATH':
+    elif settings.rig_mode == 'PATH' and settings.rig_path_sampling == 'SPACING':
         box.prop(settings, 'rig_path_spacing', text='Spacing')
     if settings.rig_mode not in {'PATH', 'MESH'}:
         box.prop(settings, 'rig_auto_fit', text='Auto fit')
@@ -2476,10 +2510,11 @@ def draw_capture_cameras(box, context, settings, ready, rig_changed, wrapped):
         box.prop(settings, 'rig_orientation')
         if settings.rig_orientation == 'TANGENT' or settings.rig_orientation == 'PANORAMA' and settings.rig_station_frame == 'PATH':
             box.prop(settings, 'rig_path_reverse', text='Look backward')
-        box.prop(settings, 'rig_path_link', text='Follow guide')
+        if settings.rig_path_sampling != 'POINTS' or settings.rig_path_link:
+            box.prop(settings, 'rig_path_link', text='Follow guide')
         if settings.rig_path_link:
             box.label(text='Reshape curve: Apply')
-    else:
+    elif settings.rig_mode == 'MESH':
         box.prop(settings, 'rig_mesh')
         box.prop(settings, 'rig_mesh_distribution')
         box.prop(settings, 'rig_mesh_orientation')
@@ -2501,6 +2536,15 @@ def draw_capture_cameras(box, context, settings, ready, rig_changed, wrapped):
             box.label(text=f'{settings.views:,} stations × {station_views:,} = {settings.views*station_views:,} cameras')
             if settings.rig_station_shape in {'BAND', 'GRID'}:
                 box.operator('lichtfeld.panorama_density')
+        elif settings.rig_path_sampling == 'POINTS' and settings.rig_curve:
+            count = sum(len(spline.points) for spline in settings.rig_curve.data.splines)
+            station_label = 'station' if count == 1 else 'stations'
+            box.label(text=f'{count:,} {station_label} × {station_views:,} = {count*station_views:,} cameras')
+            requested = settings.rig_curve.get('lichtfeld_floor_station_count', 0)
+            if requested and count < requested:
+                box.label(text=f'{count:,} of {requested:,} requested stations')
+            elif count == 1:
+                wrapped(box, 'All views share one position. Update floor stations to add viewpoints.')
         else:
             box.label(text='Station total updates on Apply')
     uses_aim = rig_edit.uses_aim(settings)
@@ -2903,6 +2947,7 @@ def register():
     bpy.types.Collection.lichtfeld_rig_reference = PointerProperty(type=LichtFeldRigReference)
     bpy.app.timers.register(restore_legacy_rigs)
     portal_ui.register()
+    rig_path.register_station_overlay()
     bpy.types.IMAGE_HT_header.prepend(capture_preview.draw_test_viewer_header)
     bpy.app.handlers.undo_pre.append(history_changing)
     bpy.app.handlers.redo_pre.append(history_changing)
@@ -2919,6 +2964,7 @@ def unregister():
         bpy.app.timers.unregister(restore_legacy_rigs)
     capture_preview.clear_test_viewers()
     bpy.types.IMAGE_HT_header.remove(capture_preview.draw_test_viewer_header)
+    rig_path.unregister_station_overlay()
     portal_ui.unregister()
     # Blender unregisters native modal handlers. Release their owned datablocks
     # first, while the RNA settings and operator types still exist.

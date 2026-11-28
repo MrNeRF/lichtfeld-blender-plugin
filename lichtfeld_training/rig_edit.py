@@ -314,6 +314,40 @@ def remove_camera_objects(objects, unused):
         bpy.data.batch_remove(ids=valid)
 
 
+def station_exclusions(settings, previous, old, new):
+    from .preflight import CAMERA_EXCLUDED
+    from .rig_geometry import pose_key
+
+    if not any(camera.get(CAMERA_EXCLUDED) for camera in old):
+        return None
+    current_points = settings.rig_mode == 'PATH' and settings.rig_path_sampling == 'POINTS'
+    if not current_points:
+        try:
+            applied = decode_recipe(previous.get('lichtfeld_rig_recipe'))
+        except ValueError:
+            return None
+        if applied.get('rig_mode') != 'PATH' or applied.get('rig_path_sampling') != 'POINTS':
+            return None
+    depsgraph = bpy.context.evaluated_depsgraph_get()
+    def evaluated_pose(camera):
+        # Blender can decompose and reconstruct the same pose during Apply.
+        return tuple(round(value, 5) for value in pose_key(camera.evaluated_get(depsgraph).matrix_world))
+
+    old_poses = {}
+    for camera in old:
+        key = evaluated_pose(camera)
+        old_poses[key] = key not in old_poses and bool(camera.get(CAMERA_EXCLUDED))
+        yield
+    new_poses, duplicates = {}, set()
+    for index, camera in enumerate(new):
+        key = evaluated_pose(camera)
+        if key in new_poses:
+            duplicates.add(key)
+        new_poses[key] = index
+        yield
+    return {index for key, index in new_poses.items() if key not in duplicates and old_poses.get(key)}
+
+
 def commit(owner, settings, previous, staging, target, recipe):
     """Preserve generated camera/target IDs, custom objects and collection links."""
     uses_aim = target.get('lichtfeld_aim_used', True)
@@ -336,6 +370,8 @@ def commit(owner, settings, previous, staging, target, recipe):
                  key=lambda obj: obj["lichtfeld_camera_index"])
     if uses_aim and settings.rig_target and (settings.rig_target in old or settings.rig_target == old_target):
         raise ValueError("The aim object must be outside its own capture rig")
+    exclusions = yield from station_exclusions(settings, previous, old, new)
+    from .preflight import CAMERA_EXCLUDED
     retired = {obj.get(LIVE) for obj in old if isinstance(obj.get(LIVE), bpy.types.Object)}
     owner.rig_backup = []
     for index, (original, prepared) in enumerate(zip(old, new)):
@@ -366,6 +402,11 @@ def commit(owner, settings, previous, staging, target, recipe):
         if index < len(old):
             original = old[index]
             original["lichtfeld_camera_index"] = index
+            if exclusions is not None:
+                if index in exclusions:
+                    original[CAMERA_EXCLUDED] = True
+                elif CAMERA_EXCLUDED in original:
+                    del original[CAMERA_EXCLUDED]
             if LIVE in original:
                 _bake_live_camera(original, prepared.matrix_basis,
                                   original.data.clip_start, original.data.clip_end)
@@ -387,6 +428,8 @@ def commit(owner, settings, previous, staging, target, recipe):
             rotation = prepared.constraints.get(ROTATION)
             if rotation:
                 rotation.target = final_target
+            if exclusions is not None and index in exclusions:
+                prepared[CAMERA_EXCLUDED] = True
             previous.objects.link(prepared)
             staging.objects.unlink(prepared)
         yield
@@ -452,7 +495,7 @@ def decode_recipe(encoded):
     for name, valid in (("rig_mode",{"SPHERE","HEMISPHERE","RINGS","PATH","MESH"}),
                         ("rig_orientation",{"TARGET","TANGENT","PANORAMA"}),
                         ("rig_radial_orientation",{"TARGET","PANORAMA"}),
-                        ('rig_path_sampling', {'COUNT', 'SPACING'}),
+                        ('rig_path_sampling', {'COUNT', 'SPACING', 'POINTS'}),
                         ('rig_station_frame', {'GUIDE', 'PATH', 'TARGET'}),
                         ('rig_station_shape', {'BAND', 'GRID', 'ELEVATION', 'HEMISPHERE', 'SPHERE'}),
                         ("rig_mesh_distribution",{"SURFACE","FACES"}),
