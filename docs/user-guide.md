@@ -149,7 +149,7 @@ Select the floor mesh in Object Mode. Under **Cameras → Rig settings**, choose
 
 **Update floor stations…** recalculates the automatic positions using the original floor. Moved or added points stay in place. Deleted positions stay excluded when the same positions are proposed again. Changing the spacing or station count, or moving the floor, can propose new points nearby. Count mode can replace deleted automatic positions elsewhere to reach the requested total. Use Apply to update the cameras. A camera excluded in **Check framing** stays excluded when Apply finds a unique matching pose.
 
-For multiple rooms, give each floor mesh a recognizable name and prepare the first rig as usual. Select the next floor and choose **Propose stations from floor…**, then **Create new rig**. Each new collection uses its floor's name. Use **Include edited rig** in **Capture sets** to capture both rigs in one job. In **Check framing**, inspect views from both sides of doors and corridor turns. Add a station manually where a transition needs a better view.
+For multiple rooms, give each floor mesh a recognizable name and prepare the first rig as usual. Select the next floor and choose **Propose stations from floor…**, then **Create new rig**. Each new collection uses its floor's name. Use **Include edited rig** in **Capture sets** to capture both rigs in one job. In **Check framing**, the active camera’s capture set is shown when you combine multiple sets. Inspect views from both sides of doors and corridor turns. Add a station manually where a transition needs a better view.
 
 ### Inspect framing and render one view
 
