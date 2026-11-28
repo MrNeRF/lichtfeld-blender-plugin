@@ -710,7 +710,7 @@ def draw(layout, context, source, *, width=None):
     if camera and len(collections) > 1:
         names = [group.name for group in collections if group.all_objects.get(camera.name) == camera]
         if names:
-            wrapped(box, ' · '.join(names))
+            wrapped(box, ', '.join(names))
     total = context.scene.get('capture_camera_count', 0)
     excluded = context.scene.get('capture_excluded_count', 0)
     if camera_pending(context.scene):
